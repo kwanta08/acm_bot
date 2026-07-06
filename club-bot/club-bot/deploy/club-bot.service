@@ -1,0 +1,25 @@
+# /etc/systemd/system/club-bot.service
+# 鳥人間サークル運営 Discord Bot の常駐サービス定義（さくらのVPS / Ubuntu）
+#
+# このファイル内のパス・ユーザー名は「作業用ユーザーを ubuntu、
+# 配置先を /home/ubuntu/club-bot」とした場合の例です。
+# 別のユーザー名・パスにした場合は User / WorkingDirectory /
+# ExecStart / EnvironmentFile / Standard* をすべて書き換えてください。
+[Unit]
+Description=Club Discord Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/club-bot/app
+ExecStart=/home/ubuntu/club-bot/venv/bin/python bot.py
+Restart=always
+RestartSec=10
+EnvironmentFile=/home/ubuntu/club-bot/.env
+StandardOutput=append:/home/ubuntu/club-bot/logs/bot.log
+StandardError=append:/home/ubuntu/club-bot/logs/bot.err
+
+[Install]
+WantedBy=multi-user.target
