@@ -22,6 +22,6 @@ jobs:
           script: |
             cd /home/ubuntu/club-bot
             git pull origin main
-            ./venv/bin/pip install -r requirements.txt
+            ./venv/bin/python -m pip install -r requirements.txt
             sudo systemctl restart club-bot
             sudo systemctl status club-bot --no-pager
