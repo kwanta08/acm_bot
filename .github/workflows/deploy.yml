@@ -20,7 +20,7 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           script_stop: true
           script: |
-            cd /home/ubuntu/club-bot/club-bot/club-bot
+            cd /home/ubuntu/club-bot/club-bot
             git pull origin main
             source venv/bin/activate
             pip install -r requirements.txt
