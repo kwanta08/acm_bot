@@ -26,22 +26,3 @@ jobs:
             pip install -r requirements.txt
             sudo systemctl restart club-bot
             sudo systemctl status club-bot --no-pagername: Test SSH
-
-on:
-  workflow_dispatch:
-
-jobs:
-  test-ssh:
-    runs-on: ubuntu-latest
-    steps:
-      - name: SSH connection test
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          username: ${{ secrets.SSH_USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT }}
-          script: |
-            whoami
-            hostname
-            pwd
