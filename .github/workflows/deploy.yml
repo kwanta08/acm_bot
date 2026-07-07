@@ -4,13 +4,14 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch: 
+  workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: SSH and deploy
+      - name: Deploy to Sakura VPS
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -19,8 +20,9 @@ jobs:
           port: ${{ secrets.SSH_PORT }}
           script_stop: true
           script: |
-            cd /path/to/bot
+            cd /home/ubuntu/club-bot
             git pull origin main
             source venv/bin/activate
             pip install -r requirements.txt
-            sudo systemctl restart your-bot-service
+            sudo systemctl restart club-bot
+            sudo systemctl status club-bot --no-pager
