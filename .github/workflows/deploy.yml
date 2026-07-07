@@ -22,7 +22,6 @@ jobs:
           script: |
             cd /home/ubuntu/club-bot
             git pull origin main
-            source venv/bin/activate
-            pip install -r requirements.txt
+            ./venv/bin/pip install -r requirements.txt
             sudo systemctl restart club-bot
-            sudo systemctl status club-bot --no-pagername: Test SSH
+            sudo systemctl status club-bot --no-pager
