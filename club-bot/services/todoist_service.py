@@ -43,13 +43,19 @@ class TodoistService:
     # ---------- タスク CRUD ----------
     async def add_task(self, content: str, due_string: str | None = None,
                        priority: int | None = None,
-                       description: str | None = None) -> str | None:
-        """タスクを作成し Todoist タスク ID を返す。無効時は None。"""
+                       description: str | None = None,
+                       section_id: str | None = None) -> str | None:
+        """タスクを作成し Todoist タスク ID を返す。無効時は None。
+
+        section_id を渡すと、その班セクションにタスクを配置する。
+        """
         if not self.enabled:
             return None
         kwargs: dict[str, Any] = {"content": content}
         if self.project_id:
             kwargs["project_id"] = self.project_id
+        if section_id:
+            kwargs["section_id"] = str(section_id)
         if due_string:
             kwargs["due_string"] = due_string
         if priority:  # Todoist は 1(低)〜4(高)。仕様も 1〜4
@@ -74,6 +80,21 @@ class TodoistService:
             return []
         kwargs = {"project_id": self.project_id} if self.project_id else {}
         return await self._run(self._api.get_tasks, **kwargs)
+
+    # ---------- セクション ----------
+    async def get_sections(self) -> list[Any]:
+        """プロジェクトのセクション一覧を取得（無効時は空）。"""
+        if not self.enabled:
+            return []
+        kwargs = {"project_id": self.project_id} if self.project_id else {}
+        return await self._run(self._api.get_sections, **kwargs)
+
+    async def get_tasks_by_section(self, section_id: str) -> list[Any]:
+        """指定セクション内の未完了タスクを取得する。"""
+        if not self.enabled:
+            return []
+        tasks = await self.get_tasks()
+        return [t for t in tasks if str(getattr(t, "section_id", "") or "") == str(section_id)]
 
     # ---------- ラベル ----------
     async def ensure_label(self) -> None:

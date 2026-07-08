@@ -21,10 +21,11 @@ from discord.ext import commands, tasks
 from config import config
 from repositories.member_repository import MemberRepository
 from repositories.schedule_repository import ScheduleRepository
+from repositories.section_repository import SectionRepository
 from repositories.task_repository import TaskRepository
 from utils.embeds import task_embed
 from utils.logger import get_logger
-from utils.parser import TZ, fmt_jp, from_iso, now, to_iso
+from utils.parser import TZ, fmt_jp, from_iso, now, parse_datetime, to_iso
 
 log = get_logger("reminders")
 
@@ -37,6 +38,7 @@ class Reminders(commands.Cog):
         self.schedule_repo = ScheduleRepository(bot.db)
         self.task_repo = TaskRepository(bot.db)
         self.member_repo = MemberRepository(bot.db)
+        self.section_repo = SectionRepository(bot.db)
 
     async def cog_load(self):
         # 起動時にループを開始
@@ -108,6 +110,11 @@ class Reminders(commands.Cog):
     async def daily_morning(self):
         await self._notify_due_within_7days()
         await self._notify_today_label()
+        # Todoist セクション別の期限7日以内/超過タスクを各班チャンネルへ
+        try:
+            await self.push_section_tasks()
+        except Exception as e:  # noqa: BLE001
+            log.warning("セクション別通知失敗: %s", e)
 
     @daily_morning.before_loop
     async def _before_morning(self):
@@ -148,7 +155,96 @@ class Reminders(commands.Cog):
         await self._log_reminder("task_today_label", "batch", None,
                                  str(channel.id), "success")
 
-    # ---------- 毎晩 21:00: 超過通知 ----------
+    # ---------- Todoist セクション別通知 ----------
+    async def push_section_tasks(self) -> int:
+        """Todoist セクションごとに、期限7日以内または超過のタスクを
+        対応する班チャンネルへ通知する。送信したセクション数を返す。
+
+        班チャンネル未設定の場合は共通チャンネルにフォールバックする。
+        """
+        if not self.bot.todoist.enabled:
+            return 0
+        links = await self.section_repo.list_links()
+        if not links:
+            return 0
+
+        team_map = await self._team_map()
+        default_channel = self._task_channel()
+
+        today = now().date()
+        until = today + timedelta(days=7)
+        sent = 0
+
+        for link in links:
+            section_id = link["section_id"]
+            team_key = link["team_key"]
+            section_name = link.get("section_name") or section_id
+
+            try:
+                sec_tasks = await self.bot.todoist.get_tasks_by_section(section_id)
+            except Exception as e:  # noqa: BLE001
+                log.warning("セクション %s のタスク取得失敗: %s", section_id, e)
+                continue
+
+            # 期限7日以内 or 超過のものに絞る（期限なしは除外）。
+            filtered = []
+            for t in sec_tasks:
+                due_date = self._todoist_due_date(t)
+                if due_date is None:
+                    continue
+                if due_date <= until:  # 超過（today未満）も today〜until も含む
+                    filtered.append((t, due_date))
+            if not filtered:
+                continue
+
+            # 送信先チャンネルを決定（班チャンネル → なければ共通）。
+            info = team_map.get(team_key, {})
+            channel = None
+            if info.get("channel_id"):
+                channel = self.bot.get_channel(int(info["channel_id"]))
+            if channel is None:
+                channel = default_channel
+            if channel is None:
+                await self.bot.log_to_channel(
+                    f"[Reminder] セクション通知の送信先がありません（{section_name}）")
+                continue
+
+            team_disp = info.get("name", team_key)
+            embed = task_embed(
+                f"【Todoist・{team_disp}班】{section_name} の期限タスク",
+                "期限が7日以内または超過しているタスクです。")
+            for t, due_date in sorted(filtered, key=lambda x: x[1])[:25]:
+                overdue = "（超過）" if due_date < today else ""
+                embed.add_field(
+                    name=t.content,
+                    value=f"期限: {due_date.isoformat()}{overdue}",
+                    inline=False)
+            await self._safe_send(channel, embed=embed)
+            await self._log_reminder(
+                "todoist_section", f"section:{section_id}", None,
+                str(channel.id), "success")
+            sent += 1
+
+        return sent
+
+    @staticmethod
+    def _todoist_due_date(task):
+        """Todoist タスクの due から date を取り出す。期限なしは None。"""
+        due = getattr(task, "due", None)
+        if not due:
+            return None
+        date_str = getattr(due, "date", None)
+        if not date_str:
+            return None
+        try:
+            return parse_datetime(str(date_str)[:10]).date()
+        except Exception:  # noqa: BLE001
+            try:
+                return from_iso(str(date_str)).date()
+            except Exception:  # noqa: BLE001
+                return None
+
+    # ---------- 毎晚 21:00: 超過通知 ----------
     @tasks.loop(time=time(hour=21, minute=0, tzinfo=TZ))
     async def daily_night(self):
         today = now().date().isoformat()

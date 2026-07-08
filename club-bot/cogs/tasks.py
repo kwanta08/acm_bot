@@ -12,6 +12,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import INITIAL_TEAMS, config
+from repositories.section_repository import SectionRepository
 from repositories.task_repository import TaskRepository
 from services.todoist_service import TodoistError
 from utils.embeds import error_embed, info_embed, success_embed, task_embed
@@ -29,8 +30,12 @@ class Tasks(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.repo = TaskRepository(bot.db)
+        self.section_repo = SectionRepository(bot.db)
 
     group = app_commands.Group(name="task", description="タスク管理（Todoist 連携）")
+
+    # 班キー → 班名の変換用
+    _TEAM_NAMES = {key: name for key, name in INITIAL_TEAMS}
 
     # ---------- add ----------
     @group.command(name="add", description="新規タスクを作成します。")
@@ -55,6 +60,13 @@ class Tasks(commands.Cog):
 
         team_key = team.value if team else None
 
+        # 班に紐付いた Todoist セクションがあれば、そのセクションに配置する。
+        section_id = None
+        if team_key:
+            links = await self.section_repo.list_links()
+            section_id = next(
+                (l["section_id"] for l in links if l["team_key"] == team_key), None)
+
         # Todoist 反映（仕様 11.3.3）
         todoist_id = None
         if self.bot.todoist.enabled:
@@ -63,7 +75,8 @@ class Tasks(commands.Cog):
                 if team_key:
                     content = f"[{team.name}] {title}"
                 todoist_id = await self.bot.todoist.add_task(
-                    content=content, due_string=due_string, priority=priority, description=note)
+                    content=content, due_string=due_string, priority=priority,
+                    description=note, section_id=section_id)
             except TodoistError:
                 await interaction.followup.send(
                     embed=error_embed("Todoist への登録に失敗しました。時間をおいて再試行してください。",
@@ -228,6 +241,125 @@ class Tasks(commands.Cog):
             return
         await interaction.followup.send(
             embed=success_embed("同期を実行しました", executor=interaction.user.display_name),
+            ephemeral=True)
+
+    # ====================================================================
+    # Todoist セクション ↔ 班 の連携
+    # ====================================================================
+    @group.command(name="sections",
+                   description="Todoist のセクション一覧と、班との紐付け状況を表示します。")
+    @require(Level.L2)
+    async def sections(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        if not self.bot.todoist.enabled:
+            await interaction.followup.send(
+                embed=info_embed("Todoist 無効", "この機能には Todoist 連携が必要です。"),
+                ephemeral=True)
+            return
+        try:
+            sections = await self.bot.todoist.get_sections()
+        except TodoistError:
+            await interaction.followup.send(
+                embed=error_embed("セクション取得に失敗しました。", code="TODOIST_API_FAILED"),
+                ephemeral=True)
+            return
+
+        links = await self.section_repo.list_links()
+        link_map = {l["section_id"]: l["team_key"] for l in links}
+
+        embed = task_embed("Todoist セクション一覧",
+                           "`/task link-section` で班と紐付けてください。")
+        if not sections:
+            embed.add_field(name="（セクションなし）",
+                            value="Todoist プロジェクトにセクションがありません。", inline=False)
+        for s in sections[:25]:
+            sid = str(s.id)
+            team_key = link_map.get(sid)
+            team_disp = self._TEAM_NAMES.get(team_key, team_key) if team_key else "未紐付け"
+            embed.add_field(
+                name=f"{s.name}",
+                value=f"section_id: `{sid}`\n紐付け: {team_disp}",
+                inline=False)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    @group.command(name="link-section",
+                   description="Todoist のセクションIDと班を紐付けます。")
+    @app_commands.describe(team="対象の班", section_id="Todoist の section_id（/task sections で確認）")
+    @app_commands.choices(team=TEAM_CHOICES)
+    @require(Level.L3)
+    async def link_section(self, interaction: discord.Interaction,
+                           team: app_commands.Choice[str], section_id: str):
+        await interaction.response.defer(ephemeral=True)
+        section_name = None
+        if self.bot.todoist.enabled:
+            try:
+                sections = await self.bot.todoist.get_sections()
+                match = next((s for s in sections if str(s.id) == str(section_id)), None)
+                if match is None:
+                    await interaction.followup.send(
+                        embed=error_embed(
+                            f"section_id `{section_id}` が Todoist に見つかりません。"
+                            "`/task sections` で正しいIDを確認してください。"),
+                        ephemeral=True)
+                    return
+                section_name = match.name
+            except TodoistError:
+                pass
+        await self.section_repo.link(str(section_id), team.value, section_name)
+        await interaction.followup.send(
+            embed=success_embed(
+                "セクションと班を紐付けました",
+                f"{team.name}班 ↔ セクション「{section_name or section_id}」\n"
+                f"今後この班のタスク作成時は自動でこのセクションに配置され、"
+                f"通知もこの班のチャンネルに届きます。",
+                executor=interaction.user.display_name),
+            ephemeral=True)
+
+    @group.command(name="unlink-section",
+                   description="セクションと班の紐付けを解除します。")
+    @app_commands.describe(section_id="解除する section_id")
+    @require(Level.L3)
+    async def unlink_section(self, interaction: discord.Interaction, section_id: str):
+        await interaction.response.defer(ephemeral=True)
+        link = await self.section_repo.get_by_section(str(section_id))
+        if not link:
+            await interaction.followup.send(
+                embed=error_embed(f"section_id `{section_id}` の紐付けが見つかりません。"),
+                ephemeral=True)
+            return
+        await self.section_repo.unlink(str(section_id))
+        await interaction.followup.send(
+            embed=success_embed("紐付けを解除しました",
+                                f"section_id `{section_id}`",
+                                executor=interaction.user.display_name),
+            ephemeral=True)
+
+    @group.command(name="push",
+                   description="各セクションの期限が近い/超過タスクを、対応する班チャンネルへ通知します。")
+    @require(Level.L2)
+    async def push(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        reminders_cog = self.bot.get_cog("Reminders")
+        if reminders_cog is None:
+            await interaction.followup.send(
+                embed=error_embed("通知モジュールが読み込まれていません。"), ephemeral=True)
+            return
+        if not self.bot.todoist.enabled:
+            await interaction.followup.send(
+                embed=info_embed("Todoist 無効", "この機能には Todoist 連携が必要です。"),
+                ephemeral=True)
+            return
+        try:
+            sent = await reminders_cog.push_section_tasks()
+        except Exception as e:  # noqa: BLE001
+            log.warning("セクション通知失敗: %s", e)
+            await interaction.followup.send(
+                embed=error_embed("通知の送信中にエラーが発生しました。"), ephemeral=True)
+            return
+        await interaction.followup.send(
+            embed=success_embed("セクション別通知を送信しました",
+                                f"{sent} 件のセクションに通知しました。",
+                                executor=interaction.user.display_name),
             ephemeral=True)
 
     # ====================================================================

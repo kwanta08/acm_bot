@@ -96,6 +96,13 @@ CREATE TABLE IF NOT EXISTS reminders_log (
     error_message  TEXT
 );
 
+CREATE TABLE IF NOT EXISTS todoist_sections (
+    section_id   TEXT PRIMARY KEY,
+    team_key     TEXT NOT NULL,
+    section_name TEXT,
+    updated_at   TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS layer_sessions (
     session_id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id    TEXT UNIQUE NOT NULL,
