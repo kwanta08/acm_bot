@@ -35,19 +35,19 @@ class LayerTracking(commands.Cog):
 
     # ---------- start ----------
     @group.command(name="start", description="桁名と層番号を指定して積層開始を記録します。")
-    @app_commands.describe(keta="桁名（選択）", layer_num="層番号")
+    @app_commands.describe(keta="桁名（選択）", layer_num="層番号（数字または「シュリンク」などのテキスト）")
     @app_commands.choices(keta=KETA_CHOICES)
     @require(Level.L1)
     async def start(self, interaction: discord.Interaction,
                     keta: app_commands.Choice[str],
-                    layer_num: app_commands.Range[int, 1, 9999]):
+                    layer_num: str):
         user_id = str(interaction.user.id)
         # 二重開始チェック（仕様 11.8.5）
         if await self.svc.has_active(user_id):
             active = await self.session_repo.get_by_user(user_id)
             await interaction.response.send_message(
                 embed=error_embed(
-                    f"既に進行中のセッションがあります（{active['keta']} 第{active['layer_num']}層）。\n"
+                    f"既に進行中のセッションがあります（{active['keta']} {active['layer_num']}）。\n"
                     "先に `/layer end` で終了してください。"),
                 ephemeral=True)
             return
@@ -55,7 +55,7 @@ class LayerTracking(commands.Cog):
         started = await self.svc.start(user_id, keta.value, layer_num)
         embed = success_embed(
             "積層開始を記録しました",
-            f"桁名: **{keta.value}**\n層番号: **第{layer_num}層**\n開始: {fmt_jp(started)}",
+            f"桁名: **{keta.value}**\n層番号: **{layer_num}**\n開始: {fmt_jp(started)}",
             executor=interaction.user.display_name)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -85,7 +85,7 @@ class LayerTracking(commands.Cog):
 
         embed = success_embed(
             "積層を記録しました",
-            f"桁名: **{result['keta']}**\n層番号: **第{result['layer_num']}層**\n"
+            f"桁名: **{result['keta']}**\n層番号: **{result['layer_num']}**\n"
             f"作業時間: **{result['minutes']} 分**",
             executor=interaction.user.display_name)
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -111,7 +111,7 @@ class LayerTracking(commands.Cog):
                     name = m.display_name
             embed.add_field(
                 name=f"{name}",
-                value=f"桁: {s['keta']} / 第{s['layer_num']}層 / 経過 {s['elapsed_min']} 分",
+                value=f"桁: {s['keta']} / {s['layer_num']} / 経過 {s['elapsed_min']} 分",
                 inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
 

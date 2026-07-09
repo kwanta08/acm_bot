@@ -20,7 +20,7 @@ class LayerTrackingService:
     async def has_active(self, user_id: str) -> bool:
         return await self.session_repo.get_by_user(user_id) is not None
 
-    async def start(self, user_id: str, keta: str, layer_num: int) -> datetime:
+    async def start(self, user_id: str, keta: str, layer_num: str) -> datetime:
         """開始を記録。開始時刻を返す。"""
         started = now()
         await self.session_repo.start(user_id, keta, layer_num, to_iso(started))
