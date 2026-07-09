@@ -75,19 +75,27 @@ class TodoistService:
             return False
         return await self._run(self._api.delete_task, task_id=todoist_task_id)
 
+    def _get_tasks_sync(self):
+        kwargs = {"project_id": self.project_id} if self.project_id else {}
+        pages = self._api.get_tasks(**kwargs)
+        return [t for page in pages for t in page]
+
     async def get_tasks(self) -> list[Any]:
         if not self.enabled:
             return []
-        kwargs = {"project_id": self.project_id} if self.project_id else {}
-        return await self._run(self._api.get_tasks, **kwargs)
+        return await self._run(self._get_tasks_sync)
 
     # ---------- セクション ----------
+    def _get_sections_sync(self):
+        kwargs = {"project_id": self.project_id} if self.project_id else {}
+        pages = self._api.get_sections(**kwargs)
+        return [s for page in pages for s in page]
+
     async def get_sections(self) -> list[Any]:
         """プロジェクトのセクション一覧を取得（無効時は空）。"""
         if not self.enabled:
             return []
-        kwargs = {"project_id": self.project_id} if self.project_id else {}
-        return await self._run(self._api.get_sections, **kwargs)
+        return await self._run(self._get_sections_sync)
 
     async def get_tasks_by_section(self, section_id: str) -> list[Any]:
         """指定セクション内の未完了タスクを取得する。"""
@@ -97,11 +105,15 @@ class TodoistService:
         return [t for t in tasks if str(getattr(t, "section_id", "") or "") == str(section_id)]
 
     # ---------- ラベル ----------
+    def _get_labels_sync(self):
+        pages = self._api.get_labels()
+        return [l for page in pages for l in page]
+
     async def ensure_label(self) -> None:
         """「今日やること」ラベルが無ければ作成する。"""
         if not self.enabled:
             return
-        labels = await self._run(self._api.get_labels)
+        labels = await self._run(self._get_labels_sync)
         if not any(l.name == self.label_name for l in labels):
             await self._run(self._api.add_label, name=self.label_name)
             log.info("Todoist ラベルを作成: %s", self.label_name)
