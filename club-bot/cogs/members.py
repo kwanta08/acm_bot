@@ -49,6 +49,8 @@ class Members(commands.Cog):
                                 executor=interaction.user.display_name),
             ephemeral=True)
         await self._sync_members_sheet()
+        await self._sync_roles(interaction.guild, user, str(user.id))
+        await self._sync_members_sheet()
 
     # ---------- profile ----------
     @group.command(name="profile", description="メンバー情報を表示します。")
@@ -90,6 +92,97 @@ class Members(commands.Cog):
                                 f"{user.display_name} → {team.name}",
                                 executor=interaction.user.display_name),
             ephemeral=True)
+        await self._sync_members_sheet()
+    
+    async def _sync_roles(self, guild: discord.Guild, member: discord.Member, user_id: str) -> None:
+        from config import config
+
+        m = await self.repo.get_member(user_id)
+        if not m:
+            return
+
+        primary_map = config.primary_team_role_ids
+        secondary_map = config.secondary_team_role_ids
+
+        desired_primary_ids: set[int] = set()
+        primary_team = m.get("primary_team")
+        if primary_team and primary_team in primary_map:
+            desired_primary_ids.add(primary_map[primary_team])
+
+        desired_secondary_ids: set[int] = set()
+        for team_key in m.get("secondary_teams", []):
+            if team_key in secondary_map:
+                desired_secondary_ids.add(secondary_map[team_key])
+
+        managed_primary_ids = set(primary_map.values())
+        managed_secondary_ids = set(secondary_map.values())
+        current_role_ids = {role.id for role in member.roles}
+
+        for role_id in managed_primary_ids:
+            role = guild.get_role(role_id)
+            if not role:
+                continue
+            if role_id in desired_primary_ids and role_id not in current_role_ids:
+                await member.add_roles(role, reason="主所属班ロール同期")
+            elif role_id not in desired_primary_ids and role_id in current_role_ids:
+                await member.remove_roles(role, reason="主所属班ロール同期")
+
+        for role_id in managed_secondary_ids:
+            role = guild.get_role(role_id)
+            if not role:
+                continue
+            if role_id in desired_secondary_ids and role_id not in current_role_ids:
+                await member.add_roles(role, reason="副所属班ロール同期")
+            elif role_id not in desired_secondary_ids and role_id in current_role_ids:
+                await member.remove_roles(role, reason="副所属班ロール同期")
+        
+        await self._sync_roles(interaction.guild, user, str(user.id))
+        await self._sync_members_sheet()
+    
+    # ---------- assign-sub-team ----------
+    @group.command(name="assign-sub-team", description="副所属班を追加または削除します。")
+    @app_commands.describe(user="対象ユーザー", team="副所属班", remove="削除する場合はTrue")
+    @app_commands.choices(team=TEAM_CHOICES)
+    @require(Level.L2)
+    async def assign_sub_team(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+        team: app_commands.Choice[str],
+        remove: bool = False,
+    ):
+        await interaction.response.defer(ephemeral=True)
+
+        await self.repo.upsert_member(str(user.id), user.display_name)
+        m = await self.repo.get_member(str(user.id))
+        secondary_teams = list(m["secondary_teams"])
+
+        if not remove and team.value == m.get("primary_team"):
+            await interaction.followup.send(
+                embed=error_embed("主所属班と同じ班は副所属班に設定できません。"),
+                ephemeral=True,
+            )
+            return
+
+        if remove:
+            secondary_teams = [t for t in secondary_teams if t != team.value]
+            action = "削除"
+        else:
+            if team.value not in secondary_teams:
+                secondary_teams.append(team.value)
+            action = "追加"
+
+        await self.repo.set_secondary_teams(str(user.id), secondary_teams)
+        await self._sync_roles(interaction.guild, user, str(user.id))
+
+        await interaction.followup.send(
+            embed=success_embed(
+                f"副所属班を{action}しました",
+                f"{user.display_name} → {team.name}",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
         await self._sync_members_sheet()
 
     # ---------- set-channel ----------

@@ -86,6 +86,11 @@ class MemberRepository:
     async def set_primary_team(self, user_id: str, team_key: str) -> None:
         await self.db.execute(
             "UPDATE members SET primary_team = ? WHERE user_id = ?", (team_key, user_id))
+        
+    async def set_secondary_teams(self, user_id: str, team_keys: list[str]) -> None:
+        await self.db.execute(
+            "UPDATE members SET secondary_teams = ? WHERE user_id = ?",
+            (json.dumps(team_keys, ensure_ascii=False), user_id),)
 
     async def set_leader(self, user_id: str, is_leader: bool) -> None:
         await self.db.execute(

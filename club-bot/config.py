@@ -74,6 +74,21 @@ def _get_int_list(name: str) -> List[int]:
             out.append(int(part))
     return out
 
+def _get_team_role_map(name: str) -> dict[str, int]:
+    raw = _clean(os.getenv(name, ""))
+    if not raw:
+        return {}
+    result: dict[str, int] = {}
+    for part in raw.split(","):
+        part = _clean(part)
+        if ":" not in part:
+            continue
+        key, val = part.split(":", 1)
+        key, val = _clean(key), _clean(val)
+        if key and val.isdigit():
+            result[key] = int(val)
+    return result
+
 
 @dataclass
 class Config:
@@ -92,6 +107,10 @@ class Config:
     exec_role_id: int | None = _get_int("EXEC_ROLE_ID")
     admin_role_id: int | None = _get_int("ADMIN_ROLE_ID")
     leader_role_ids: List[int] = field(default_factory=lambda: _get_int_list("LEADER_ROLE_IDS"))
+    primary_team_role_ids: dict[str, int] = field(
+    default_factory=lambda: _get_team_role_map("PRIMARY_TEAM_ROLE_IDS"))
+    secondary_team_role_ids: dict[str, int] = field(
+    default_factory=lambda: _get_team_role_map("SECONDARY_TEAM_ROLE_IDS"))
 
     # Todoist
     todoist_api_token: str = _get_str("TODOIST_API_TOKEN")
@@ -166,10 +185,20 @@ INITIAL_TEAMS = [
 
 # 桁名候補（仕様 11.8.3）。サークルの機体設計に合わせて変更する。
 LAYER_KETA_CHOICES = [
-    "主翼前桁",
-    "主翼後桁",
-    "水平尾翼桁",
-    "垂直尾翼桁",
+    "0",
+    "1L",
+    "1R",
+    "2L",
+    "2R",
+    "3L",
+    "3R",
+    "H",
+    "V",
+    "MB",
+    "TB",
+    "シャフト",
+    "手すり",
+    
 ]
 
 # 技能タグ候補（仕様 11.4.3）
