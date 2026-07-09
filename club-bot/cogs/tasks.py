@@ -274,8 +274,39 @@ class Tasks(commands.Cog):
     @require(Level.L1)
     async def team(self, interaction: discord.Interaction, team: app_commands.Choice[str]):
         await interaction.response.defer(ephemeral=True)
-        tasks = await self.repo.list_tasks(status="open", team_key=team.value)
-        embed = self._build_task_list_embed(f"班別タスク: {team.name}", tasks, interaction.guild)
+
+        # Todoist が有効なら Todoist のセクションから取得
+        if self.bot.todoist.enabled:
+            links = await self.section_repo.list_links()
+            section_ids = [l["section_id"] for l in links if l["team_key"] == team.value]
+
+            if not section_ids:
+                await interaction.followup.send(
+                    embed=info_embed(
+                        f"{team.name}班のセクション未紐付け",
+                        "`/task link-section` でセクションを紐付けてください。"
+                    ), ephemeral=True)
+                return
+
+            try:
+                all_todoist_tasks = []
+                for sid in section_ids:
+                    tasks = await self.bot.todoist.get_tasks_by_section(sid)
+                    all_todoist_tasks.extend(tasks)
+            except TodoistError:
+                await interaction.followup.send(
+                    embed=error_embed("Todoist の取得に失敗しました。", code="TODOIST_API_FAILED"),
+                    ephemeral=True)
+                return
+
+            embed = self._build_todoist_task_list_embed(
+                f"班別タスク（Todoist）: {team.name}", all_todoist_tasks
+            )
+        else:
+            # フォールバック: ローカルDB
+            tasks = await self.repo.list_tasks(status="open", team_key=team.value)
+            embed = self._build_task_list_embed(f"班別タスク: {team.name}", tasks, interaction.guild)
+
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ---------- sync（L4）----------
@@ -539,6 +570,23 @@ class Tasks(commands.Cog):
                 name=f"`{t['local_task_id']}` {t['title']}",
                 value=f"担当: {assignee} / 期限: {due} / 優先: {pr}",
                 inline=False)
+        if len(tasks) > 25:
+            embed.set_footer(text=f"他 {len(tasks) - 25} 件")
+        return embed
+    
+    def _build_todoist_task_list_embed(self, title: str, tasks: list) -> discord.Embed:
+        if not tasks:
+            return info_embed(title, "該当するタスクはありません。")
+        embed = task_embed(title)
+        for t in tasks[:25]:
+            due_str = getattr(getattr(t, "due", None), "string", None) or "期限なし"
+            pr = PRIORITY_LABELS.get(t.priority, "—")
+            desc_preview = (t.description[:50] + "…") if t.description else "—"
+            embed.add_field(
+                name=f"`{t.id}` {t.content}",
+                value=f"期限: {due_str} / 優先: {pr} / 補足: {desc_preview}",
+                inline=False,
+            )
         if len(tasks) > 25:
             embed.set_footer(text=f"他 {len(tasks) - 25} 件")
         return embed
