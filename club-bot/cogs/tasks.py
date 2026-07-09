@@ -25,6 +25,37 @@ log = get_logger("tasks")
 TEAM_CHOICES = [app_commands.Choice(name=name, value=key) for key, name in INITIAL_TEAMS]
 PRIORITY_LABELS = {1: "低", 2: "中", 3: "高", 4: "最優先"}
 
+class SectionSelectView(discord.ui.View):
+    def __init__(self, cog: "Tasks", candidates: list[dict], **task_kwargs):
+        super().__init__(timeout=120)
+        self.cog = cog
+        self.task_kwargs = task_kwargs
+
+        options = [
+            discord.SelectOption(
+                label=(c.get("section_name") or c["section_id"])[:100],
+                value=c["section_id"],
+            )
+            for c in candidates[:25]
+        ]
+        select = discord.ui.Select(
+            placeholder="タスクを配置するセクションを選択してください",
+            options=options,
+        )
+        select.callback = self._on_select
+        self.add_item(select)
+
+    async def _on_select(self, interaction: discord.Interaction):
+        section_id = interaction.data["values"][0]
+        await interaction.response.defer(ephemeral=True)
+        await self.cog._finalize_add_task(
+            interaction, section_id=section_id, **self.task_kwargs
+        )
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            item.disabled = True
 
 class Tasks(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -59,21 +90,47 @@ class Tasks(commands.Cog):
             due_string = due_dt.strftime("%Y-%m-%d %H:%M")
 
         team_key = team.value if team else None
+        team_name = team.name if team else None
 
-        # 班に紐付いた Todoist セクションがあれば、そのセクションに配置する。
-        section_id = None
+        # 班に紐付いた Todoist セクション候補を取得する。
+        candidates: list[dict] = []
         if team_key:
             links = await self.section_repo.list_links()
-            section_id = next(
-                (l["section_id"] for l in links if l["team_key"] == team_key), None)
+            candidates = [l for l in links if l["team_key"] == team_key]
 
+        task_kwargs = dict(
+            title=title, due_iso=due_iso, due_string=due_string, due=due,
+            assignee=assignee, team_key=team_key, team_name=team_name,
+            priority=priority, location=location, note=note,
+        )
+
+        if len(candidates) <= 1:
+            section_id = candidates[0]["section_id"] if candidates else None
+            await self._finalize_add_task(interaction, section_id=section_id, **task_kwargs)
+            return
+
+        # 2件以上あれば選択メニューを表示（B案）
+        view = SectionSelectView(self, candidates, **task_kwargs)
+        await interaction.followup.send(
+            embed=info_embed(
+                "配置先セクションを選択してください",
+                f"{team_name}班には複数のセクションが紐付いています。"),
+            view=view, ephemeral=True)
+
+    async def _finalize_add_task(self, interaction: discord.Interaction, *,
+                                  section_id: str | None, title: str,
+                                  due_iso: str | None, due_string: str | None,
+                                  due: str | None, assignee: discord.Member | None,
+                                  team_key: str | None, team_name: str | None,
+                                  priority: int | None, location: str | None,
+                                  note: str | None):
         # Todoist 反映（仕様 11.3.3）
         todoist_id = None
         if self.bot.todoist.enabled:
             try:
                 content = title
-                if team_key:
-                    content = f"[{team.name}] {title}"
+                if team_name:
+                    content = f"[{team_name}] {title}"
                 todoist_id = await self.bot.todoist.add_task(
                     content=content, due_string=due_string, priority=priority,
                     description=note, section_id=section_id)
@@ -332,6 +389,30 @@ class Tasks(commands.Cog):
             embed=success_embed("紐付けを解除しました",
                                 f"section_id `{section_id}`",
                                 executor=interaction.user.display_name),
+            ephemeral=True)
+    
+    @group.command(name="unlink-team-sections",
+                   description="指定した班のセクション紐付けをすべて解除します。")
+    @app_commands.describe(team="対象の班")
+    @app_commands.choices(team=TEAM_CHOICES)
+    @require(Level.L3)
+    async def unlink_team_sections(self, interaction: discord.Interaction,
+                                   team: app_commands.Choice[str]):
+        await interaction.response.defer(ephemeral=True)
+        links = await self.section_repo.list_links()
+        targets = [l for l in links if l["team_key"] == team.value]
+        if not targets:
+            await interaction.followup.send(
+                embed=error_embed(f"{team.name}班に紐付けられたセクションはありません。"),
+                ephemeral=True)
+            return
+        for l in targets:
+            await self.section_repo.unlink(l["section_id"])
+        await interaction.followup.send(
+            embed=success_embed(
+                "紐付けを一括解除しました",
+                f"{team.name}班: {len(targets)} 件のセクション紐付けを解除",
+                executor=interaction.user.display_name),
             ephemeral=True)
 
     @group.command(name="push",
