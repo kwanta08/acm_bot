@@ -74,9 +74,6 @@ class Members(commands.Cog):
             elif role_id not in desired_secondary_ids and role_id in current_role_ids:
                 await member.remove_roles(role, reason="副所属班ロール同期")
         
-        await self._sync_roles(interaction.guild, user, str(user.id))
-        await self._sync_members_sheet()
-    
     # ---------- register ----------
     @group.command(name="register", description="新規メンバーを登録します。")
     @app_commands.describe(user="対象ユーザー", team="主所属班")
@@ -94,7 +91,6 @@ class Members(commands.Cog):
             embed=success_embed("メンバーを登録しました", desc,
                                 executor=interaction.user.display_name),
             ephemeral=True)
-        await self._sync_members_sheet()
         await self._sync_roles(interaction.guild, user, str(user.id))
         await self._sync_members_sheet()
 
