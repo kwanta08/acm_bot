@@ -31,6 +31,52 @@ class Members(commands.Cog):
     group = app_commands.Group(name="member", description="メンバー・班・技能管理")
     skill_group = app_commands.Group(name="skill", description="技能タグ管理", parent=group)
 
+    # ---------- sync_roles ----------
+    async def _sync_roles(self, guild: discord.Guild, member: discord.Member, user_id: str) -> None:
+        from config import config
+
+        m = await self.repo.get_member(user_id)
+        if not m:
+            return
+
+        primary_map = config.primary_team_role_ids
+        secondary_map = config.secondary_team_role_ids
+
+        desired_primary_ids: set[int] = set()
+        primary_team = m.get("primary_team")
+        if primary_team and primary_team in primary_map:
+            desired_primary_ids.add(primary_map[primary_team])
+
+        desired_secondary_ids: set[int] = set()
+        for team_key in m.get("secondary_teams", []):
+            if team_key in secondary_map:
+                desired_secondary_ids.add(secondary_map[team_key])
+
+        managed_primary_ids = set(primary_map.values())
+        managed_secondary_ids = set(secondary_map.values())
+        current_role_ids = {role.id for role in member.roles}
+
+        for role_id in managed_primary_ids:
+            role = guild.get_role(role_id)
+            if not role:
+                continue
+            if role_id in desired_primary_ids and role_id not in current_role_ids:
+                await member.add_roles(role, reason="主所属班ロール同期")
+            elif role_id not in desired_primary_ids and role_id in current_role_ids:
+                await member.remove_roles(role, reason="主所属班ロール同期")
+
+        for role_id in managed_secondary_ids:
+            role = guild.get_role(role_id)
+            if not role:
+                continue
+            if role_id in desired_secondary_ids and role_id not in current_role_ids:
+                await member.add_roles(role, reason="副所属班ロール同期")
+            elif role_id not in desired_secondary_ids and role_id in current_role_ids:
+                await member.remove_roles(role, reason="副所属班ロール同期")
+        
+        await self._sync_roles(interaction.guild, user, str(user.id))
+        await self._sync_members_sheet()
+    
     # ---------- register ----------
     @group.command(name="register", description="新規メンバーを登録します。")
     @app_commands.describe(user="対象ユーザー", team="主所属班")
@@ -92,52 +138,9 @@ class Members(commands.Cog):
                                 f"{user.display_name} → {team.name}",
                                 executor=interaction.user.display_name),
             ephemeral=True)
-        await self._sync_members_sheet()
-    
-    async def _sync_roles(self, guild: discord.Guild, member: discord.Member, user_id: str) -> None:
-        from config import config
-
-        m = await self.repo.get_member(user_id)
-        if not m:
-            return
-
-        primary_map = config.primary_team_role_ids
-        secondary_map = config.secondary_team_role_ids
-
-        desired_primary_ids: set[int] = set()
-        primary_team = m.get("primary_team")
-        if primary_team and primary_team in primary_map:
-            desired_primary_ids.add(primary_map[primary_team])
-
-        desired_secondary_ids: set[int] = set()
-        for team_key in m.get("secondary_teams", []):
-            if team_key in secondary_map:
-                desired_secondary_ids.add(secondary_map[team_key])
-
-        managed_primary_ids = set(primary_map.values())
-        managed_secondary_ids = set(secondary_map.values())
-        current_role_ids = {role.id for role in member.roles}
-
-        for role_id in managed_primary_ids:
-            role = guild.get_role(role_id)
-            if not role:
-                continue
-            if role_id in desired_primary_ids and role_id not in current_role_ids:
-                await member.add_roles(role, reason="主所属班ロール同期")
-            elif role_id not in desired_primary_ids and role_id in current_role_ids:
-                await member.remove_roles(role, reason="主所属班ロール同期")
-
-        for role_id in managed_secondary_ids:
-            role = guild.get_role(role_id)
-            if not role:
-                continue
-            if role_id in desired_secondary_ids and role_id not in current_role_ids:
-                await member.add_roles(role, reason="副所属班ロール同期")
-            elif role_id not in desired_secondary_ids and role_id in current_role_ids:
-                await member.remove_roles(role, reason="副所属班ロール同期")
-        
         await self._sync_roles(interaction.guild, user, str(user.id))
         await self._sync_members_sheet()
+    
     
     # ---------- assign-sub-team ----------
     @group.command(name="assign-sub-team", description="副所属班を追加または削除します。")
