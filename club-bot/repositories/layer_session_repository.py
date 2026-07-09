@@ -15,7 +15,7 @@ class LayerSessionRepository:
             "SELECT * FROM layer_sessions WHERE user_id = ?", (user_id,))
         return dict(row) if row else None
 
-    async def start(self, user_id: str, keta: str, layer_num: int, started_at: str) -> None:
+    async def start(self, user_id: str, keta: str, layer_num: str, started_at: str) -> None:
         """1人1セッション。既存があれば UNIQUE 制約で衝突する想定（呼び出し側で事前確認）。"""
         await self.db.execute(
             """
