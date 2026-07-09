@@ -104,12 +104,24 @@ class TodoistService:
         tasks = await self.get_tasks()
         return [t for t in tasks if str(getattr(t, "section_id", "") or "") == str(section_id)]
 
-    async def get_tasks_by_section(self, section_id: str) -> list:
-        """指定セクションの未完了タスクを返す。"""
-        tasks = await asyncio.to_thread(
-            self._api.get_tasks, section_id=section_id
-        )
+    def _get_tasks_by_section_sync(self, section_id: str):
+        kwargs = {"section_id": str(section_id)}
+        if self.project_id:
+            kwargs["project_id"] = self.project_id
+        result = self._api.get_tasks(**kwargs)
+        # ページネーターの場合と生リストの場合の両方に対応
+        tasks = []
+        for item in result:
+            if hasattr(item, "id"):          # Task オブジェクト
+                tasks.append(item)
+            elif hasattr(item, "__iter__"):  # ページ（リスト）
+                tasks.extend(item)
         return tasks
+
+    async def get_tasks_by_section(self, section_id: str) -> list[Any]:
+        if not self.enabled:
+            return []
+        return await self._run(self._get_tasks_by_section_sync, section_id)
 
     # ---------- ラベル ----------
     def _get_labels_sync(self):

@@ -580,11 +580,13 @@ class Tasks(commands.Cog):
         embed = task_embed(title)
         for t in tasks[:25]:
             due_str = getattr(getattr(t, "due", None), "string", None) or "期限なし"
-            pr = PRIORITY_LABELS.get(t.priority, "—")
-            desc_preview = (t.description[:50] + "…") if t.description else "—"
+            # priority は int または Priority オブジェクトの場合がある
+            raw_pr = getattr(t, "priority", None)
+            pr_int = raw_pr.value if hasattr(raw_pr, "value") else (raw_pr or 1)
+            pr = PRIORITY_LABELS.get(pr_int, "—")
             embed.add_field(
                 name=f"`{t.id}` {t.content}",
-                value=f"期限: {due_str} / 優先: {pr} / 補足: {desc_preview}",
+                value=f"期限: {due_str} / 優先: {pr}",
                 inline=False,
             )
         if len(tasks) > 25:
