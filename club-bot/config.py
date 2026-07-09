@@ -136,6 +136,14 @@ class Config:
     def effective_layer_spreadsheet_id(self) -> str:
         """桁巻き用ブック ID 未指定なら運営台帳ブックを流用する。"""
         return self.layer_spreadsheet_id or self.spreadsheet_id
+    
+    # config.py の sheets 関連プロパティに追加
+    @property
+    def schedule_spreadsheet_id(self) -> str | None:
+        return os.getenv("SCHEDULE_SPREADSHEET_ID") or None
+
+    def schedule_sheets_enabled(self) -> bool:
+        return bool(self.google_credentials_path and self.schedule_spreadsheet_id)
 
     @property
     def today_channel_id(self) -> int | None:

@@ -123,12 +123,87 @@ class SheetsService:
             raise SheetsError("Google Sheets が無効です")
         await self._run(self._append_layer_sync, keta, row)
 
-    # ---------- 同期中フラグ ----------
-    def begin_sync(self) -> bool:
-        if self._syncing:
-            return False
-        self._syncing = True
-        return True
+    SCHEDULE_HEADER = ["候補日時", "◯（参加）", "△（未定）", "✕（不参加）", "未回答"]
 
-    def end_sync(self) -> None:
-        self._syncing = False
+    # SheetsService クラスに追記
+
+    def _resolve_sheet_title(self, book, base_title: str) -> str:
+        """既存シート名と重複しない名前を返す。重複時は (1),(2)... と付加する。"""
+        existing = {ws.title for ws in book.worksheets()}
+        if base_title not in existing:
+            return base_title
+        i = 1
+        while f"{base_title}({i})" in existing:
+            i += 1
+        return f"{base_title}({i})"
+
+    def _create_schedule_sheet_sync(self, title: str, options: list[dict], votes_map: dict):
+        spreadsheet_id = config.schedule_spreadsheet_id
+        if not spreadsheet_id:
+            raise SheetsError("SCHEDULE_SPREADSHEET_ID が未設定です")
+        book = self._open_book(spreadsheet_id)
+
+        # ★ 重複チェックしてユニーク名を確定
+        sheet_title = self._resolve_sheet_title(book, title)
+
+        ws = book.add_worksheet(title=sheet_title, rows=500, cols=10)
+        ws.append_row(SCHEDULE_HEADER, value_input_option="USER_ENTERED")
+        for opt in options:
+            label = opt["label"]
+            v = votes_map.get(opt["option_id"], {"ok":[],"maybe":[],"ng":[],"unanswered":[]})
+            row = [
+                label,
+                "\n".join(v.get("ok", [])),
+                "\n".join(v.get("maybe", [])),
+                "\n".join(v.get("ng", [])),
+                "\n".join(v.get("unanswered", [])),
+            ]
+            ws.append_row(row, value_input_option="USER_ENTERED")
+
+    async def create_schedule_sheet(self, title: str, options: list[dict],
+                                 votes_map: dict) -> None:
+        """スケジュール専用 SS に予定名のシートを作成して出欠を書き込む。"""
+        if not self.enabled and not config.schedule_sheets_enabled():
+            return
+        await self._run(self._create_schedule_sheet_sync, title, options, votes_map)
+
+        # ---------- 同期中フラグ ----------
+        def begin_sync(self) -> bool:
+            if self._syncing:
+                return False
+            self._syncing = True
+            return True
+
+        def end_sync(self) -> None:
+            self._syncing = False
+
+    def _update_schedule_sheet_sync(self, sheet_title: str, options: list[dict], votes_map: dict):
+        """既存シートをタイトルで特定して出欠を上書きする（締切時用）。"""
+        spreadsheet_id = config.schedule_spreadsheet_id
+        if not spreadsheet_id:
+            raise SheetsError("SCHEDULE_SPREADSHEET_ID が未設定です")
+        book = self._open_book(spreadsheet_id)
+        try:
+            ws = book.worksheet(sheet_title)
+        except gspread.WorksheetNotFound:
+            # 万一シートがなければ新規作成（フォールバック）
+            ws = book.add_worksheet(title=sheet_title, rows=500, cols=10)
+        ws.clear()
+        ws.append_row(SCHEDULE_HEADER, value_input_option="USER_ENTERED")
+        for opt in options:
+            label = opt["label"]
+            v = votes_map.get(opt["option_id"], {"ok":[],"maybe":[],"ng":[],"unanswered":[]})
+            row = [
+               label,
+                "\n".join(v.get("ok", [])),
+                "\n".join(v.get("maybe", [])),
+                "\n".join(v.get("ng", [])),
+                "\n".join(v.get("unanswered", [])),
+            ]
+            ws.append_row(row, value_input_option="USER_ENTERED")
+
+    async def update_schedule_sheet(self, sheet_title: str, options: list[dict],votes_map: dict) -> None:
+        """既存シートを最終出欠で上書きする（締切時）。"""
+        if not config.schedule_sheets_enabled():
+            return
+        await self._run(self._update_schedule_sheet_sync, sheet_title, options, votes_map)

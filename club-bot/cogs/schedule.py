@@ -75,6 +75,13 @@ class Schedule(commands.Cog):
                     ephemeral=True)
                 return
             parsed_options.append((label, start))
+        
+        saved_opts = await self.repo.list_options(schedule_id)
+        votes_map = {opt["option_id"]: {"ok":[],"maybe":[],"ng":[],"unanswered":[]}for opt in saved_opts}
+        # create_schedule_sheet が確定したシート名を返すよう変更
+        actual_title = await sheets_cog.service.create_schedule_sheet(title, saved_opts, votes_map)
+        # DBにシート名を保存（repo にメソッド追加が必要）
+        await self.repo.set_schedule_sheet_title(schedule_id, actual_title)
 
         # 投稿先決定
         target_channel = channel or (
@@ -115,7 +122,14 @@ class Schedule(commands.Cog):
                                 f"締切: {fmt_jp(deadline_dt)}\n投稿先: {target_channel.mention}",
                                 executor=interaction.user.display_name),
             ephemeral=True)
-
+    async def create_schedule_sheet(self, title: str, options: list[dict],votes_map: dict) -> str:
+        """スケジュール専用 SS にシートを作成し、確定したシート名を返す。"""
+        if not config.schedule_sheets_enabled():
+            return title
+        # _run は戻り値をそのまま返すので sheet_title が得られる
+        actual_title = await self._run(self._create_schedule_sheet_sync, title, options, votes_map)
+        return actual_title
+        
     # ---------- list ----------
     @group.command(name="list", description="開催中の日程調整一覧を表示します。")
     @require(Level.L1)
@@ -311,6 +325,9 @@ class Schedule(commands.Cog):
 
     async def finalize_schedule(self, schedule: dict):
         """締切処理: クローズ→結果要約投稿（仕様 11.2.5）。"""
+        # finalize_schedule 内
+        sheet_title = schedule.get("sheet_title") or schedule["title"]  # フォールバック
+        await sheets_cog.service.update_schedule_sheet(sheet_title, options, votes_map)
         await self.repo.close_schedule(schedule["schedule_id"])
         guild = self.bot.get_guild(config.guild_id) if config.guild_id else None
         embed = await svc.build_summary_embed(self.repo, self.bot, schedule, guild)
