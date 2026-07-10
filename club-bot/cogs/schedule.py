@@ -42,8 +42,6 @@ class Schedule(commands.Cog):
         channel="投稿先チャンネル（任意）",
     )
     @require(Level.L2)
-    def schedule_sheets_enabled(self) -> bool:
-        return bool(self.google_credentials_path and self.schedule_spreadsheet_id)
     
     async def create(self, interaction: discord.Interaction, title: str, options: str,
                      deadline: str, description: str | None = None,
@@ -51,6 +49,8 @@ class Schedule(commands.Cog):
                      target_role: discord.Role | None = None,
                      channel: discord.TextChannel | None = None):
         await interaction.response.defer(ephemeral=True)
+
+
 
         # 日時パース
         deadline_dt = parse_deadline(deadline)
@@ -121,6 +121,8 @@ class Schedule(commands.Cog):
             bool(sheets_cog), enabled,
             config.schedule_spreadsheet_id, config.google_credentials_path,
         )
+        def schedule_sheets_enabled(self) -> bool:
+            return bool(self.google_credentials_path and self.schedule_spreadsheet_id)
 
         if sheets_cog and enabled:
             try:
