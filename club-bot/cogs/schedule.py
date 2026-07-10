@@ -42,6 +42,9 @@ class Schedule(commands.Cog):
         channel="投稿先チャンネル（任意）",
     )
     @require(Level.L2)
+    def schedule_sheets_enabled(self) -> bool:
+        return bool(self.google_credentials_path and self.schedule_spreadsheet_id)
+    
     async def create(self, interaction: discord.Interaction, title: str, options: str,
                      deadline: str, description: str | None = None,
                      place: str | None = None,
