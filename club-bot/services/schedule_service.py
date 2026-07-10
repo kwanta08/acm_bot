@@ -141,16 +141,36 @@ async def build_summary_embed(repo: ScheduleRepository, bot: discord.Client,
     best_ok = -1
     for opt in options:
         votes = await repo.list_votes(opt["option_id"])
-        ok = sum(1 for v in votes if v["status"] == "ok")
-        ng = sum(1 for v in votes if v["status"] == "ng")
-        maybe = sum(1 for v in votes if v["status"] == "maybe")
-        embed.add_field(
-            name=opt["label"],
-            value=f"参加 {ok}　不参加 {ng}　未定 {maybe}",
-            inline=False,
+
+        ok_users, ng_users, maybe_users = [], [], []
+        for v in votes:
+            name = await _resolve_name(bot, guild, v["user_id"])
+            if v["status"] == "ok":
+                ok_users.append(name)
+            elif v["status"] == "ng":
+                ng_users.append(name)
+            elif v["status"] == "maybe":
+                maybe_users.append(name)
+
+        summary_line = (
+            f"参加 {len(ok_users)}　不参加 {len(ng_users)}　未定 {len(maybe_users)}"
         )
-        if ok > best_ok:
-            best_ok = ok
+        detail_lines = []
+        if ok_users:
+            detail_lines.append(f"参加: {', '.join(ok_users)}")
+        if ng_users:
+            detail_lines.append(f"不参加: {', '.join(ng_users)}")
+        if maybe_users:
+            detail_lines.append(f"未定: {', '.join(maybe_users)}")
+
+        value = summary_line
+        if detail_lines:
+            value += "\n" + "\n".join(detail_lines)
+
+        embed.add_field(name=opt["label"], value=value, inline=False)
+
+        if len(ok_users) > best_ok:
+            best_ok = len(ok_users)
             best_label = opt["label"]
 
     if best_label:
