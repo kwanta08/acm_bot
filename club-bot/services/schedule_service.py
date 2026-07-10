@@ -3,7 +3,7 @@
 
 リアクション集計、Embed 生成、締切処理を担う。
 リアクション絵文字と投票状態の対応:
-  ✅ = yes / ❌ = no / ❓ = maybe
+  ok = 参加 / ng = 不参加 / maybe = 未定
 """
 from __future__ import annotations
 
@@ -17,10 +17,11 @@ from repositories.schedule_repository import ScheduleRepository
 from utils.embeds import schedule_embed
 from utils.parser import fmt_jp, from_iso
 
+
 DEFAULT_STATUS_TO_EMOJI = {
     "ok": "✅",
-    "maube": "❓",
-    "ng": "❌"
+    "maybe": "❓",
+    "ng": "❌",
 }
 
 
@@ -40,19 +41,18 @@ def parse_options(options_str: str) -> list[str]:
 def get_schedule_emojis(bot, guild: discord.Guild | None = None) -> dict[str, str | discord.PartialEmoji]:
     """スケジュール用絵文字を返す。custom emoji が取れなければ既定絵文字へフォールバック。"""
     resolved = {}
-
     mapping = {
         "ok": config.schedule_emoji_ok_id,
         "maybe": config.schedule_emoji_maybe_id,
         "ng": config.schedule_emoji_ng_id,
     }
-
     for status, emoji_id in mapping.items():
         if emoji_id:
             resolved[status] = discord.PartialEmoji(name=status, id=emoji_id)
         else:
             resolved[status] = DEFAULT_STATUS_TO_EMOJI[status]
     return resolved
+
 
 def build_emoji_maps(bot, guild: discord.Guild | None = None) -> dict:
     status_to_emoji = get_schedule_emojis(bot, guild)
@@ -61,7 +61,7 @@ def build_emoji_maps(bot, guild: discord.Guild | None = None) -> dict:
 
     for status, emoji in status_to_emoji.items():
         all_emojis.append(emoji)
-        if isinstance(emoji, discord.Emoji):
+        if isinstance(emoji, discord.PartialEmoji) and emoji.id:
             emoji_to_status[str(emoji.id)] = status
         else:
             emoji_to_status[str(emoji)] = status
@@ -78,17 +78,16 @@ async def build_option_embed(repo: ScheduleRepository, bot: discord.Client,
                              guild: discord.Guild | None) -> discord.Embed:
     """候補日程1件分の投票状況 Embed を生成する（仕様 11.2.4）。"""
     votes = await repo.list_votes(option["option_id"])
-    yes_users, no_users, maybe_users = [], [], []
+    ok_users, ng_users, maybe_users = [], [], []
     for v in votes:
         name = await _resolve_name(bot, guild, v["user_id"])
-        if v["status"] == "yes":
-            yes_users.append(name)
-        elif v["status"] == "no":
-            no_users.append(name)
+        if v["status"] == "ok":
+            ok_users.append(name)
+        elif v["status"] == "ng":
+            ng_users.append(name)
         elif v["status"] == "maybe":
             maybe_users.append(name)
 
-    # 対象ロール名と未回答者数
     target_role_name = "全員"
     unanswered_count = "-"
     if schedule.get("target_role_id") and guild:
@@ -105,11 +104,11 @@ async def build_option_embed(repo: ScheduleRepository, bot: discord.Client,
         embed.add_field(name="場所", value=schedule["place"], inline=True)
     embed.add_field(name="締切", value=fmt_jp(from_iso(schedule["deadline"])), inline=True)
     embed.add_field(name="対象", value=target_role_name, inline=True)
-    embed.add_field(name=f"{"ok"} 参加 ({len(yes_users)})",
-                    value="\n".join(yes_users) or "—", inline=True)
-    embed.add_field(name=f"{"no"} 不参加 ({len(no_users)})",
-                    value="\n".join(no_users) or "—", inline=True)
-    embed.add_field(name=f"{"maybe"} 未定 ({len(maybe_users)})",
+    embed.add_field(name=f"ok 参加 ({len(ok_users)})",
+                    value="\n".join(ok_users) or "—", inline=True)
+    embed.add_field(name=f"ng 不参加 ({len(ng_users)})",
+                    value="\n".join(ng_users) or "—", inline=True)
+    embed.add_field(name=f"maybe 未定 ({len(maybe_users)})",
                     value="\n".join(maybe_users) or "—", inline=True)
     embed.add_field(name="未回答者数", value=unanswered_count, inline=True)
     if schedule.get("description"):
@@ -139,21 +138,21 @@ async def build_summary_embed(repo: ScheduleRepository, bot: discord.Client,
     embed.add_field(name="締切", value=fmt_jp(from_iso(schedule["deadline"])), inline=True)
 
     best_label = None
-    best_yes = -1
+    best_ok = -1
     for opt in options:
         votes = await repo.list_votes(opt["option_id"])
-        yes = sum(1 for v in votes if v["status"] == "yes")
-        no = sum(1 for v in votes if v["status"] == "no")
+        ok = sum(1 for v in votes if v["status"] == "ok")
+        ng = sum(1 for v in votes if v["status"] == "ng")
         maybe = sum(1 for v in votes if v["status"] == "maybe")
         embed.add_field(
             name=opt["label"],
-            value=f"{"yes"}{yes}　{"no"}{no}　{"maybe"}{maybe}",
+            value=f"ok {ok}　ng {ng}　maybe {maybe}",
             inline=False,
         )
-        if yes > best_yes:
-            best_yes = yes
+        if ok > best_ok:
+            best_ok = ok
             best_label = opt["label"]
 
     if best_label:
-        embed.description = f"最多参加候補: **{best_label}**（{best_yes}名）"
+        embed.description = f"最多参加候補: **{best_label}**（{best_ok}名）"
     return embed
