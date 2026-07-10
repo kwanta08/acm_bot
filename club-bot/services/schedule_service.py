@@ -146,7 +146,7 @@ async def build_summary_embed(repo: ScheduleRepository, bot: discord.Client,
         maybe = sum(1 for v in votes if v["status"] == "maybe")
         embed.add_field(
             name=opt["label"],
-            value=f"ok {参加}　ng {不参加}　maybe {未定}",
+            value=f"参加 {ok}　不参加 {ng}　未定 {maybe}",
             inline=False,
         )
         if ok > best_ok:

@@ -1,5 +1,5 @@
 """
-Google Sheets 同期サービス（仕様 11.7, 11.8.6）。
+Google Sheets 同期サービス（仕様 11.7, 11.8.6, 11.2）。
 
 gspread + サービスアカウント認証。全行置換を基本とし、監査ログのみ append。
 レート制限（1分60req）に配慮しシートごとにウェイトを挟む。
@@ -28,6 +28,7 @@ SCOPES = [
 ]
 
 LAYER_HEADER = ["層番号", "作業者", "開始時刻", "終了時刻", "作業時間(分)"]
+SCHEDULE_HEADER = ["候補日時", "参加", "未定", "不参加", "未回答"]
 
 
 class SheetsError(Exception):
@@ -123,10 +124,7 @@ class SheetsService:
             raise SheetsError("Google Sheets が無効です")
         await self._run(self._append_layer_sync, keta, row)
 
-    SCHEDULE_HEADER = ["候補日時", "◯（参加）", "△（未定）", "✕（不参加）", "未回答"]
-
-    # SheetsService クラスに追記
-
+    # ---------- スケジュール専用シート（仕様 11.2）----------
     def _resolve_sheet_title(self, book, base_title: str) -> str:
         """既存シート名と重複しない名前を返す。重複時は (1),(2)... と付加する。"""
         existing = {ws.title for ws in book.worksheets()}
@@ -141,16 +139,17 @@ class SheetsService:
         spreadsheet_id = config.schedule_spreadsheet_id
         if not spreadsheet_id:
             raise SheetsError("SCHEDULE_SPREADSHEET_ID が未設定です")
-        book = self._open_book(spreadsheet_id)
 
-        # ★ 重複チェックしてユニーク名を確定
+        book = self._open_book(spreadsheet_id)
         sheet_title = self._resolve_sheet_title(book, title)
 
         ws = book.add_worksheet(title=sheet_title, rows=500, cols=10)
         ws.append_row(SCHEDULE_HEADER, value_input_option="USER_ENTERED")
+
         for opt in options:
             label = opt["label"]
-            v = votes_map.get(opt["option_id"], {"ok":[],"maybe":[],"ng":[],"unanswered":[]})
+            v = votes_map.get(opt["option_id"],
+                              {"ok": [], "maybe": [], "ng": [], "unanswered": []})
             row = [
                 label,
                 "\n".join(v.get("ok", [])),
@@ -160,22 +159,17 @@ class SheetsService:
             ]
             ws.append_row(row, value_input_option="USER_ENTERED")
 
+        return sheet_title
+
     async def create_schedule_sheet(self, title: str, options: list[dict],
-                                 votes_map: dict) -> None:
-        """スケジュール専用 SS に予定名のシートを作成して出欠を書き込む。"""
-        if not self.enabled and not config.schedule_sheets_enabled():
-            return
-        await self._run(self._create_schedule_sheet_sync, title, options, votes_map)
-
-        # ---------- 同期中フラグ ----------
-        def begin_sync(self) -> bool:
-            if self._syncing:
-                return False
-            self._syncing = True
-            return True
-
-        def end_sync(self) -> None:
-            self._syncing = False
+                                    votes_map: dict) -> str:
+        """スケジュール専用 SS にシートを作成し、確定したシート名を返す。"""
+        if not config.schedule_sheets_enabled():
+            return title
+        sheet_title = await self._run(
+            self._create_schedule_sheet_sync, title, options, votes_map)
+        await asyncio.sleep(1.2)
+        return sheet_title
 
     def _update_schedule_sheet_sync(self, sheet_title: str, options: list[dict], votes_map: dict):
         """既存シートをタイトルで特定して出欠を上書きする（締切時用）。"""
@@ -186,15 +180,16 @@ class SheetsService:
         try:
             ws = book.worksheet(sheet_title)
         except gspread.WorksheetNotFound:
-            # 万一シートがなければ新規作成（フォールバック）
             ws = book.add_worksheet(title=sheet_title, rows=500, cols=10)
+
         ws.clear()
         ws.append_row(SCHEDULE_HEADER, value_input_option="USER_ENTERED")
         for opt in options:
             label = opt["label"]
-            v = votes_map.get(opt["option_id"], {"ok":[],"maybe":[],"ng":[],"unanswered":[]})
+            v = votes_map.get(opt["option_id"],
+                              {"ok": [], "maybe": [], "ng": [], "unanswered": []})
             row = [
-               label,
+                label,
                 "\n".join(v.get("ok", [])),
                 "\n".join(v.get("maybe", [])),
                 "\n".join(v.get("ng", [])),
@@ -202,8 +197,20 @@ class SheetsService:
             ]
             ws.append_row(row, value_input_option="USER_ENTERED")
 
-    async def update_schedule_sheet(self, sheet_title: str, options: list[dict],votes_map: dict) -> None:
+    async def update_schedule_sheet(self, sheet_title: str, options: list[dict],
+                                    votes_map: dict) -> None:
         """既存シートを最終出欠で上書きする（締切時）。"""
         if not config.schedule_sheets_enabled():
             return
         await self._run(self._update_schedule_sheet_sync, sheet_title, options, votes_map)
+        await asyncio.sleep(1.2)
+
+    # ---------- 同期中フラグ（既存機能・削除しないこと）----------
+    def begin_sync(self) -> bool:
+        if self._syncing:
+            return False
+        self._syncing = True
+        return True
+
+    def end_sync(self) -> None:
+        self._syncing = False
