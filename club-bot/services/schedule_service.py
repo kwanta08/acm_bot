@@ -17,13 +17,11 @@ from repositories.schedule_repository import ScheduleRepository
 from utils.embeds import schedule_embed
 from utils.parser import fmt_jp, from_iso
 
-EMOJI_YES = "✅"
-EMOJI_NO = "❌"
-EMOJI_MAYBE = "❓"
-
-EMOJI_TO_STATUS = {EMOJI_YES: "yes", EMOJI_NO: "no", EMOJI_MAYBE: "maybe"}
-STATUS_TO_EMOJI = {v: k for k, v in EMOJI_TO_STATUS.items()}
-ALL_EMOJIS = [EMOJI_YES, EMOJI_NO, EMOJI_MAYBE]
+DEFAULT_STATUS_TO_EMOJI = {
+    "ok": "✅",
+    "maube": "❓",
+    "ng": "❌"
+}
 
 
 def new_schedule_id() -> str:
@@ -37,6 +35,48 @@ def new_option_id() -> str:
 def parse_options(options_str: str) -> list[str]:
     """`;` 区切りの候補日時文字列を分割する（仕様 11.2.2）。"""
     return [p.strip() for p in options_str.split(";") if p.strip()]
+
+
+def get_schedule_emojis(bot, guild: discord.Guild | None = None) -> dict[str, str | discord.Emoji]:
+    """スケジュール用絵文字を返す。custom emoji が取れなければ既定絵文字へフォールバック。"""
+    resolved = {}
+
+    mapping = {
+        "ok": config.schedule_emoji_ok_id,
+        "maybe": config.schedule_emoji_maybe_id,
+        "ng": config.schedule_emoji_ng_id,
+    }
+
+    for status, emoji_id in mapping.items():
+        emoji = None
+        if emoji_id:
+            if guild:
+                emoji = guild.get_emoji(emoji_id)
+            if emoji is None and bot:
+                emoji = bot.get_emoji(emoji_id)
+        resolved[status] = emoji or DEFAULT_STATUS_TO_EMOJI[status]
+
+    return resolved
+
+
+def build_emoji_maps(bot, guild: discord.Guild | None = None):
+    status_to_emoji = get_schedule_emojis(bot, guild)
+    emoji_to_status = {}
+    all_emojis = []
+
+    for status, emoji in status_to_emoji.items():
+        all_emojis.append(emoji)
+        if isinstance(emoji, discord.Emoji):
+            emoji_to_status[str(emoji.id)] = status
+            emoji_to_status[str(emoji)] = status
+        else:
+            emoji_to_status[str(emoji)] = status
+
+    return {
+        "status_to_emoji": status_to_emoji,
+        "emoji_to_status": emoji_to_status,
+        "all_emojis": all_emojis,
+    }
 
 
 async def build_option_embed(repo: ScheduleRepository, bot: discord.Client,

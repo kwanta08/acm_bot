@@ -14,14 +14,10 @@ from discord.ext import commands
 from config import config
 from repositories.schedule_repository import ScheduleRepository
 from services import schedule_service as svc
-from services.schedule_service import (
-    ALL_EMOJIS,
-    EMOJI_TO_STATUS,
-    STATUS_TO_EMOJI,
-)
+from services.schedule_service import built_emoji_maps
 from utils.embeds import error_embed, info_embed, schedule_embed, success_embed
 from utils.logger import get_logger
-from utils.parser import InvalidDatetimeError, fmt_jp, from_iso, parse_datetime, to_iso
+from utils.parser import InvalidDatetimeError, fmt_jp, from_iso, parse_datetime, parse_deadline, to_iso
 from utils.permissions import Level, require
 
 log = get_logger("schedule")
@@ -38,12 +34,14 @@ class Schedule(commands.Cog):
     @group.command(name="create", description="新規日程調整を作成します。")
     @app_commands.describe(
         title="イベント名",
-        options="候補日時を ; 区切りで指定（例: 2026-07-03 19:00; 2026-07-04 19:00）",
-        deadline="締切日時（例: 2026-07-02 23:59）",
+        options="候補日時を ; 区切りで指定（例: 2026-07-03; 2026-07-04 19:00）",
+        deadline="締切日時（例: 2026-07-02 または 2026-07-02 23:59）",
         description="詳細（任意）",
         place="場所（任意）",
         target_role="対象ロール（任意）",
         channel="投稿先チャンネル（任意）",
+        emoji_maps = build_emoji_maps(self.bot, interaction.guild),
+        all_emojis = emoji_maps["all_emojis"]
     )
     @require(Level.L2)
     async def create(self, interaction: discord.Interaction, title: str, options: str,
@@ -54,7 +52,7 @@ class Schedule(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         # 日時パース
-        deadline_dt = parse_datetime(deadline)  # 失敗時 InvalidDatetimeError → ハンドラ
+        deadline_dt = parse_deadline(deadline)  # 失敗時 InvalidDatetimeError → ハンドラ
         option_labels = svc.parse_options(options)
         if not option_labels:
             await interaction.followup.send(
@@ -69,9 +67,7 @@ class Schedule(commands.Cog):
                 start = parse_datetime(label)
             except InvalidDatetimeError:
                 await interaction.followup.send(
-                    embed=error_embed(
-                        f"候補日時「{label}」の形式が不正です。`YYYY-MM-DD HH:MM` 形式で指定してください。",
-                        code="INVALID_DATETIME"),
+                    embed=error_embed(f"候補日時「{label}」の形式が不正です。`YYYY-MM-DD` または `YYYY-MM-DD HH:MM` 形式で指定してください。",code="INVALID_DATETIME"),
                     ephemeral=True)
                 return
             parsed_options.append((label, start))
@@ -109,11 +105,10 @@ class Schedule(commands.Cog):
             option_id = svc.new_option_id()
             await self.repo.add_option(option_id, schedule_id, label, to_iso(start), None, None)
             opt = {"option_id": option_id, "label": label}
-            embed = await svc.build_option_embed(self.repo, self.bot, schedule, opt,
-                                                 interaction.guild)
+            embed = await svc.build_option_embed(self.repo, self.bot, schedule, opt, interaction.guild)
             msg = await target_channel.send(embed=embed)
             await self.repo.set_option_message(option_id, str(msg.id))
-            for emoji in ALL_EMOJIS:
+            for emoji in all_emojis:
                 await msg.add_reaction(emoji)
 
         await interaction.followup.send(
@@ -228,53 +223,74 @@ class Schedule(commands.Cog):
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
         await self._handle_reaction(payload, added=False)
 
-    async def _handle_reaction(self, payload: discord.RawReactionActionEvent, added: bool):
-        if self.bot.user and payload.user_id == self.bot.user.id:
-            return
-        emoji = str(payload.emoji)
-        if emoji not in EMOJI_TO_STATUS:
-            return
+async def _handle_reaction(self, payload: discord.RawReactionActionEvent, added: bool):
+    if self.bot.user and payload.user_id == self.bot.user.id:
+        return
 
-        option = await self.repo.get_option_by_message(str(payload.message_id))
-        if not option:
-            return
-        schedule = await self.repo.get_schedule(option["schedule_id"])
-        if not schedule or schedule["closed_flag"]:
-            return
+    guild = self.bot.get_guild(payload.guild_id) if payload.guild_id else None
+    emoji_maps = build_emoji_maps(self.bot, guild)
+    emoji_to_status = emoji_maps["emoji_to_status"]
+    status_to_emoji = emoji_maps["status_to_emoji"]
 
-        user_id = str(payload.user_id)
-        status = EMOJI_TO_STATUS[emoji]
+    emoji_key = str(payload.emoji.id) if payload.emoji.id else str(payload.emoji)
+    if emoji_key not in emoji_to_status:
+        return
 
-        if added:
-            # 旧状態のリアクションを除去（1候補1状態）
-            await self.repo.set_vote(option["option_id"], user_id, status)
-            await self._remove_other_reactions(payload, keep_emoji=emoji)
-        else:
-            # 現在の状態が外した絵文字と一致する場合のみ票を削除
-            votes = await self.repo.list_votes(option["option_id"])
-            current = next((v for v in votes if v["user_id"] == user_id), None)
-            if current and STATUS_TO_EMOJI.get(current["status"]) == emoji:
-                await self.repo.remove_vote(option["option_id"], user_id)
+    option = await self.repo.get_option_by_message(str(payload.message_id))
+    if not option:
+        return
+    schedule = await self.repo.get_schedule(option["schedule_id"])
+    if not schedule or schedule["closed_flag"]:
+        return
 
-        await self._refresh_option_message(payload, schedule, option)
+    user_id = str(payload.user_id)
+    status = emoji_to_status[emoji_key]
 
-    async def _remove_other_reactions(self, payload: discord.RawReactionActionEvent,
-                                      keep_emoji: str):
-        channel = self.bot.get_channel(payload.channel_id) or \
-            await self.bot.fetch_channel(payload.channel_id)
-        try:
-            message = await channel.fetch_message(payload.message_id)
-        except discord.NotFound:
-            return
-        member = payload.member or channel.guild.get_member(payload.user_id)
-        if member is None:
-            return
-        for reaction in message.reactions:
-            if str(reaction.emoji) in EMOJI_TO_STATUS and str(reaction.emoji) != keep_emoji:
-                try:
-                    await message.remove_reaction(reaction.emoji, member)
-                except (discord.Forbidden, discord.NotFound):
-                    pass
+    if added:
+        await self.repo.set_vote(option["option_id"], user_id, status)
+        await self._remove_other_reactions(payload, keep_status=status, status_to_emoji=status_to_emoji)
+    else:
+        votes = await self.repo.list_votes(option["option_id"])
+        current = next((v for v in votes if v["user_id"] == user_id), None)
+        if current and current["status"] == status:
+            await self.repo.remove_vote(option["option_id"], user_id)
+
+    await self._refresh_option_message(payload, schedule, option)
+
+async def _remove_other_reactions(
+    self,
+    payload: discord.RawReactionActionEvent,
+    keep_status: str,
+    status_to_emoji: dict[str, str | discord.Emoji],
+):
+    channel = self.bot.get_channel(payload.channel_id) or await self.bot.fetch_channel(payload.channel_id)
+    try:
+        message = await channel.fetch_message(payload.message_id)
+    except discord.NotFound:
+        return
+
+    member = payload.member or channel.guild.get_member(payload.user_id)
+    if member is None:
+        return
+
+    keep_emoji = status_to_emoji[keep_status]
+    keep_key = str(keep_emoji.id) if isinstance(keep_emoji, discord.Emoji) else str(keep_emoji)
+
+    for reaction in message.reactions:
+        reaction_key = str(reaction.emoji.id) if hasattr(reaction.emoji, "id") and reaction.emoji.id else str(reaction.emoji)
+
+        is_schedule_emoji = False
+        for emoji in status_to_emoji.values():
+            key = str(emoji.id) if isinstance(emoji, discord.Emoji) else str(emoji)
+            if reaction_key == key:
+                is_schedule_emoji = True
+                break
+
+        if is_schedule_emoji and reaction_key != keep_key:
+            try:
+                await message.remove_reaction(reaction.emoji, member)
+            except (discord.Forbidden, discord.NotFound):
+                pass
 
     async def _refresh_option_message(self, payload, schedule, option):
         channel = self.bot.get_channel(payload.channel_id) or \

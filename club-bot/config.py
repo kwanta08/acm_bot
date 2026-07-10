@@ -167,6 +167,22 @@ class Config:
 
     def todoist_enabled(self) -> bool:
         return bool(self.todoist_api_token)
+    
+    # リアクション絵文字管理
+    @property
+    def schedule_emoji_ok_id(self) -> int | None:
+        v = os.getenv("SCHEDULE_EMOJI_OK_ID")
+        return int(v) if v else None
+
+    @property
+    def schedule_emoji_maybe_id(self) -> int | None:
+        v = os.getenv("SCHEDULE_EMOJI_MAYBE_ID")
+        return int(v) if v else None
+
+    @property
+    def schedule_emoji_ng_id(self) -> int | None:
+        v = os.getenv("SCHEDULE_EMOJI_NG_ID")
+        return int(v) if v else None
 
 
 config = Config()

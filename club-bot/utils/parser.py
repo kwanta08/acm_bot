@@ -23,6 +23,7 @@ DATETIME_FORMATS = [
     "%Y-%m-%dT%H:%M",
     "%Y-%m-%d %H:%M:%S",
     "%Y/%m/%d %H:%M:%S",
+    "%Y-%m-%d"
 ]
 SHORT_FORMATS = [
     "%m-%d %H:%M",
@@ -42,8 +43,19 @@ class InvalidDatetimeError(ValueError):
 def parse_datetime(text: str) -> datetime:
     """文字列をタイムゾーン付き datetime に変換する。失敗時は InvalidDatetimeError。"""
     text = (text or "").strip()
+    patterns = [
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+    ]
     if not text:
         raise InvalidDatetimeError()
+    
+    for pattern in patterns:
+        try:
+            dt = datetime.strptime(text, pattern)
+            return dt.replace(tzinfo=JST)
+        except ValueError:
+            continue
 
     for fmt in DATETIME_FORMATS:
         try:
@@ -65,6 +77,23 @@ def parse_datetime(text: str) -> datetime:
             continue
 
     raise InvalidDatetimeError()
+
+
+def parse_deadline(text: str) -> datetime:
+    text = text.strip()
+    try:
+        dt = datetime.strptime(text, "%Y-%m-%d %H:%M")
+        return dt.replace(tzinfo=JST)
+    except ValueError:
+        pass
+
+    try:
+        dt = datetime.strptime(text, "%Y-%m-%d")
+        return dt.replace(hour=23, minute=59, tzinfo=JST)
+    except ValueError:
+        pass
+
+    raise InvalidDatetimeError(f"Invalid datetime format: {text}")
 
 
 def now() -> datetime:
