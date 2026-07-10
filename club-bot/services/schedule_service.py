@@ -111,11 +111,11 @@ async def build_option_embed(repo: ScheduleRepository, bot: discord.Client,
         embed.add_field(name="場所", value=schedule["place"], inline=True)
     embed.add_field(name="締切", value=fmt_jp(from_iso(schedule["deadline"])), inline=True)
     embed.add_field(name="対象", value=target_role_name, inline=True)
-    embed.add_field(name=f"{EMOJI_YES} 参加 ({len(yes_users)})",
+    embed.add_field(name=f"{"ok"} 参加 ({len(yes_users)})",
                     value="\n".join(yes_users) or "—", inline=True)
-    embed.add_field(name=f"{EMOJI_NO} 不参加 ({len(no_users)})",
+    embed.add_field(name=f"{"no"} 不参加 ({len(no_users)})",
                     value="\n".join(no_users) or "—", inline=True)
-    embed.add_field(name=f"{EMOJI_MAYBE} 未定 ({len(maybe_users)})",
+    embed.add_field(name=f"{"maybe"} 未定 ({len(maybe_users)})",
                     value="\n".join(maybe_users) or "—", inline=True)
     embed.add_field(name="未回答者数", value=unanswered_count, inline=True)
     if schedule.get("description"):
@@ -153,7 +153,7 @@ async def build_summary_embed(repo: ScheduleRepository, bot: discord.Client,
         maybe = sum(1 for v in votes if v["status"] == "maybe")
         embed.add_field(
             name=opt["label"],
-            value=f"{EMOJI_YES}{yes}　{EMOJI_NO}{no}　{EMOJI_MAYBE}{maybe}",
+            value=f"{"yes"}{yes}　{"no"}{no}　{"maybe"}{maybe}",
             inline=False,
         )
         if yes > best_yes:
