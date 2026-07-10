@@ -37,7 +37,7 @@ def parse_options(options_str: str) -> list[str]:
     return [p.strip() for p in options_str.split(";") if p.strip()]
 
 
-def get_schedule_emojis(bot, guild: discord.Guild | None = None) -> dict[str, str | discord.Emoji]:
+def get_schedule_emojis(bot, guild: discord.Guild | None = None) -> dict[str, str | discord.PartialEmoji]:
     """スケジュール用絵文字を返す。custom emoji が取れなければ既定絵文字へフォールバック。"""
     resolved = {}
 
@@ -48,16 +48,11 @@ def get_schedule_emojis(bot, guild: discord.Guild | None = None) -> dict[str, st
     }
 
     for status, emoji_id in mapping.items():
-        emoji = None
         if emoji_id:
-            if guild:
-                emoji = guild.get_emoji(emoji_id)
-            if emoji is None and bot:
-                emoji = bot.get_emoji(emoji_id)
-        resolved[status] = emoji or DEFAULT_STATUS_TO_EMOJI[status]
-
+            resolved[status] = discord.PartialEmoji(name=status, id=emoji_id)
+        else:
+            resolved[status] = DEFAULT_STATUS_TO_EMOJI[status]
     return resolved
-
 
 def build_emoji_maps(bot, guild: discord.Guild | None = None) -> dict:
     status_to_emoji = get_schedule_emojis(bot, guild)
@@ -68,7 +63,6 @@ def build_emoji_maps(bot, guild: discord.Guild | None = None) -> dict:
         all_emojis.append(emoji)
         if isinstance(emoji, discord.Emoji):
             emoji_to_status[str(emoji.id)] = status
-            emoji_to_status[str(emoji)] = status
         else:
             emoji_to_status[str(emoji)] = status
 

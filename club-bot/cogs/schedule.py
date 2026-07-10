@@ -280,11 +280,11 @@ class Schedule(commands.Cog):
             return
 
         keep_emoji = status_to_emoji[keep_status]
-        keep_key = str(keep_emoji.id) if isinstance(keep_emoji, discord.Emoji) else str(keep_emoji)
+        keep_key = str(keep_emoji.id) if isinstance(keep_emoji, discord.PartialEmoji) else str(keep_emoji)
 
         schedule_keys = set()
         for emoji in status_to_emoji.values():
-            key = str(emoji.id) if isinstance(emoji, discord.Emoji) else str(emoji)
+            key = str(emoji.id) if isinstance(emoji, discord.PartialEmoji) else str(emoji)
             schedule_keys.add(key)
 
         for reaction in message.reactions:
