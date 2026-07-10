@@ -14,7 +14,7 @@ from discord.ext import commands
 from config import config
 from repositories.schedule_repository import ScheduleRepository
 from services import schedule_service as svc
-from services.schedule_service import built_emoji_maps
+from services.schedule_service import build_emoji_maps
 from utils.embeds import error_embed, info_embed, schedule_embed, success_embed
 from utils.logger import get_logger
 from utils.parser import InvalidDatetimeError, fmt_jp, from_iso, parse_datetime, parse_deadline, to_iso
