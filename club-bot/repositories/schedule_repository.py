@@ -129,3 +129,10 @@ class ScheduleRepository:
             """,
             (schedule_id,))
         return {r["user_id"] for r in rows}
+    
+    async def set_schedule_sheet_title(self, schedule_id: str, sheet_title: str):
+        await self.db.execute(
+            "UPDATE schedules SET sheet_title = ? WHERE schedule_id = ?",
+            (sheet_title, schedule_id),
+        )
+        await self.db.commit()
