@@ -53,7 +53,7 @@ def parse_datetime(text: str) -> datetime:
     for pattern in patterns:
         try:
             dt = datetime.strptime(text, pattern)
-            return dt.replace(tzinfo=JST)
+            return dt.replace(tzinfo=TZ)
         except ValueError:
             continue
 
