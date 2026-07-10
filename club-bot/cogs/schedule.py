@@ -1,7 +1,7 @@
 """
 Schedule モジュール（仕様 11.2）。
 
-日程調整・出欠投票。候補日ごとに1メッセージを投稿し ✅❌❓ で投票する。
+日程調整・出欠投票。候補日ごとに1メッセージを投稿し状態を投票する。
 1候補1ユーザー1状態。状態変更時は旧リアクションを自動除去する。
 Bot 再起動後も on_raw_reaction_add/remove で処理可能。
 """
@@ -30,7 +30,7 @@ class Schedule(commands.Cog):
 
     group = app_commands.Group(name="schedule", description="日程調整・出欠管理")
 
-    # ---------- create ----------    
+    # ---------- create ----------
     @group.command(name="create", description="新規日程調整を作成します。")
     @app_commands.describe(
         title="イベント名",
@@ -50,7 +50,7 @@ class Schedule(commands.Cog):
         await interaction.response.defer(ephemeral=True)
 
         # 日時パース
-        deadline_dt = parse_deadline(deadline)  # 失敗時 InvalidDatetimeError → ハンドラ
+        deadline_dt = parse_deadline(deadline)
         option_labels = svc.parse_options(options)
         if not option_labels:
             await interaction.followup.send(
@@ -65,17 +65,13 @@ class Schedule(commands.Cog):
                 start = parse_datetime(label)
             except InvalidDatetimeError:
                 await interaction.followup.send(
-                    embed=error_embed(f"候補日時「{label}」の形式が不正です。`YYYY-MM-DD` または `YYYY-MM-DD HH:MM` 形式で指定してください。",code="INVALID_DATETIME"),
+                    embed=error_embed(
+                        f"候補日時「{label}」の形式が不正です。"
+                        f"`YYYY-MM-DD` または `YYYY-MM-DD HH:MM` 形式で指定してください。",
+                        code="INVALID_DATETIME"),
                     ephemeral=True)
                 return
             parsed_options.append((label, start))
-        
-        saved_opts = await self.repo.list_options(schedule_id)
-        votes_map = {opt["option_id"]: {"ok":[],"maybe":[],"ng":[],"unanswered":[]}for opt in saved_opts}
-        # create_schedule_sheet が確定したシート名を返すよう変更
-        actual_title = await sheets_cog.service.create_schedule_sheet(title, saved_opts, votes_map)
-        # DBにシート名を保存（repo にメソッド追加が必要）
-        await self.repo.set_schedule_sheet_title(schedule_id, actual_title)
 
         # 投稿先決定
         target_channel = channel or (
@@ -87,6 +83,7 @@ class Schedule(commands.Cog):
                 ephemeral=True)
             return
 
+        # ★ schedule_id はここで初めて確定する
         schedule_id = svc.new_schedule_id()
         await self.repo.create_schedule(
             schedule_id=schedule_id, title=title, description=description, place=place,
@@ -106,11 +103,27 @@ class Schedule(commands.Cog):
             option_id = svc.new_option_id()
             await self.repo.add_option(option_id, schedule_id, label, to_iso(start), None, None)
             opt = {"option_id": option_id, "label": label}
-            embed = await svc.build_option_embed(self.repo, self.bot, schedule, opt, interaction.guild)
+            embed = await svc.build_option_embed(self.repo, self.bot, schedule, opt,
+                                                 interaction.guild)
             msg = await target_channel.send(embed=embed)
             await self.repo.set_option_message(option_id, str(msg.id))
             for emoji in all_emojis:
                 await msg.add_reaction(emoji)
+
+        # ★ シート作成は、候補がすべてDB保存された後に行う
+        sheets_cog = self.bot.get_cog("Sheets")
+        if sheets_cog and config.schedule_sheets_enabled():
+            try:
+                saved_opts = await self.repo.list_options(schedule_id)
+                votes_map = {
+                    opt["option_id"]: {"ok": [], "maybe": [], "ng": [], "unanswered": []}
+                    for opt in saved_opts
+                }
+                actual_title = await sheets_cog.service.create_schedule_sheet(
+                    title, saved_opts, votes_map)
+                await self.repo.set_schedule_sheet_title(schedule_id, actual_title)
+            except Exception as e:  # noqa: BLE001
+                log.warning("スケジュールシート初期化失敗: %s", e)
 
         await interaction.followup.send(
             embed=success_embed("日程調整を作成しました",
@@ -118,14 +131,7 @@ class Schedule(commands.Cog):
                                 f"締切: {fmt_jp(deadline_dt)}\n投稿先: {target_channel.mention}",
                                 executor=interaction.user.display_name),
             ephemeral=True)
-    async def create_schedule_sheet(self, title: str, options: list[dict],votes_map: dict) -> str:
-        """スケジュール専用 SS にシートを作成し、確定したシート名を返す。"""
-        if not config.schedule_sheets_enabled():
-            return title
-        # _run は戻り値をそのまま返すので sheet_title が得られる
-        actual_title = await self._run(self._create_schedule_sheet_sync, title, options, votes_map)
-        return actual_title
-        
+
     # ---------- list ----------
     @group.command(name="list", description="開催中の日程調整一覧を表示します。")
     @require(Level.L1)
@@ -224,71 +230,72 @@ class Schedule(commands.Cog):
     async def on_raw_reaction_remove(self, payload: discord.RawReactionActionEvent):
         await self._handle_reaction(payload, added=False)
 
-async def _handle_reaction(self, payload: discord.RawReactionActionEvent, added: bool):
-    if self.bot.user and payload.user_id == self.bot.user.id:
-        return
+    async def _handle_reaction(self, payload: discord.RawReactionActionEvent, added: bool):
+        if self.bot.user and payload.user_id == self.bot.user.id:
+            return
 
-    guild = self.bot.get_guild(payload.guild_id) if payload.guild_id else None
-    emoji_maps = build_emoji_maps(self.bot, guild)
-    emoji_to_status = emoji_maps["emoji_to_status"]
-    status_to_emoji = emoji_maps["status_to_emoji"]
+        guild = self.bot.get_guild(payload.guild_id) if payload.guild_id else None
+        emoji_maps = build_emoji_maps(self.bot, guild)
+        emoji_to_status = emoji_maps["emoji_to_status"]
+        status_to_emoji = emoji_maps["status_to_emoji"]
 
-    emoji_key = str(payload.emoji.id) if payload.emoji.id else str(payload.emoji)
-    if emoji_key not in emoji_to_status:
-        return
+        emoji_key = str(payload.emoji.id) if payload.emoji.id else str(payload.emoji)
+        if emoji_key not in emoji_to_status:
+            return
 
-    option = await self.repo.get_option_by_message(str(payload.message_id))
-    if not option:
-        return
-    schedule = await self.repo.get_schedule(option["schedule_id"])
-    if not schedule or schedule["closed_flag"]:
-        return
+        option = await self.repo.get_option_by_message(str(payload.message_id))
+        if not option:
+            return
+        schedule = await self.repo.get_schedule(option["schedule_id"])
+        if not schedule or schedule["closed_flag"]:
+            return
 
-    user_id = str(payload.user_id)
-    status = emoji_to_status[emoji_key]
+        user_id = str(payload.user_id)
+        status = emoji_to_status[emoji_key]
 
-    if added:
-        await self.repo.set_vote(option["option_id"], user_id, status)
-        await self._remove_other_reactions(payload, keep_status=status, status_to_emoji=status_to_emoji)
-    else:
-        votes = await self.repo.list_votes(option["option_id"])
-        current = next((v for v in votes if v["user_id"] == user_id), None)
-        if current and current["status"] == status:
-            await self.repo.remove_vote(option["option_id"], user_id)
+        if added:
+            await self.repo.set_vote(option["option_id"], user_id, status)
+            await self._remove_other_reactions(payload, keep_status=status,
+                                               status_to_emoji=status_to_emoji)
+        else:
+            votes = await self.repo.list_votes(option["option_id"])
+            current = next((v for v in votes if v["user_id"] == user_id), None)
+            if current and current["status"] == status:
+                await self.repo.remove_vote(option["option_id"], user_id)
 
-    await self._refresh_option_message(payload, schedule, option)
+        await self._refresh_option_message(payload, schedule, option)
 
-async def _remove_other_reactions(
-    self,
-    payload: discord.RawReactionActionEvent,
-    keep_status: str,
-    status_to_emoji: dict[str, str | discord.Emoji],
-):
-    channel = self.bot.get_channel(payload.channel_id) or await self.bot.fetch_channel(payload.channel_id)
-    try:
-        message = await channel.fetch_message(payload.message_id)
-    except discord.NotFound:
-        return
+    async def _remove_other_reactions(self, payload: discord.RawReactionActionEvent,
+                                      keep_status: str,
+                                      status_to_emoji: dict[str, str | discord.Emoji]):
+        channel = self.bot.get_channel(payload.channel_id) or \
+            await self.bot.fetch_channel(payload.channel_id)
+        try:
+            message = await channel.fetch_message(payload.message_id)
+        except discord.NotFound:
+            return
 
-    member = payload.member or channel.guild.get_member(payload.user_id)
-    if member is None:
-        return
+        member = payload.member or channel.guild.get_member(payload.user_id)
+        if member is None:
+            return
 
-    keep_emoji = status_to_emoji[keep_status]
-    keep_key = str(keep_emoji.id) if isinstance(keep_emoji, discord.Emoji) else str(keep_emoji)
+        keep_emoji = status_to_emoji[keep_status]
+        keep_key = str(keep_emoji.id) if isinstance(keep_emoji, discord.Emoji) else str(keep_emoji)
 
-    schedule_keys = set()
-    for emoji in status_to_emoji.values():
-        key = str(emoji.id) if isinstance(emoji, discord.Emoji) else str(emoji)
-        schedule_keys.add(key)
+        schedule_keys = set()
+        for emoji in status_to_emoji.values():
+            key = str(emoji.id) if isinstance(emoji, discord.Emoji) else str(emoji)
+            schedule_keys.add(key)
 
-    for reaction in message.reactions:
-        reaction_key = str(reaction.emoji.id) if hasattr(reaction.emoji, "id") and reaction.emoji.id else str(reaction.emoji)
-        if reaction_key in schedule_keys and reaction_key != keep_key:
-            try:
-                await message.remove_reaction(reaction.emoji, member)
-            except (discord.Forbidden, discord.NotFound):
-                pass
+        for reaction in message.reactions:
+            reaction_key = (str(reaction.emoji.id)
+                           if hasattr(reaction.emoji, "id") and reaction.emoji.id
+                           else str(reaction.emoji))
+            if reaction_key in schedule_keys and reaction_key != keep_key:
+                try:
+                    await message.remove_reaction(reaction.emoji, member)
+                except (discord.Forbidden, discord.NotFound):
+                    pass
 
     async def _refresh_option_message(self, payload, schedule, option):
         channel = self.bot.get_channel(payload.channel_id) or \
@@ -339,9 +346,6 @@ async def _remove_other_reactions(
 
     async def finalize_schedule(self, schedule: dict):
         """締切処理: クローズ→結果要約投稿（仕様 11.2.5）。"""
-        # finalize_schedule 内
-        sheet_title = schedule.get("sheet_title") or schedule["title"]  # フォールバック
-        await sheets_cog.service.update_schedule_sheet(sheet_title, options, votes_map)
         await self.repo.close_schedule(schedule["schedule_id"])
         guild = self.bot.get_guild(config.guild_id) if config.guild_id else None
         embed = await svc.build_summary_embed(self.repo, self.bot, schedule, guild)
@@ -351,13 +355,25 @@ async def _remove_other_reactions(
                 await channel.send(embed=embed)
             except discord.HTTPException:
                 pass
+
         # 出欠結果を Sheets へ（任意・有効時）
         sheets_cog = self.bot.get_cog("Sheets")
         if sheets_cog:
             try:
-                await sheets_cog.sync_attendance_for(schedule["schedule_id"])
+                options = await self.repo.list_options(schedule["schedule_id"])
+                votes_map = {}
+                for opt in options:
+                    votes = await self.repo.list_votes(opt["option_id"])
+                    votes_map[opt["option_id"]] = {
+                        "ok": [v["user_id"] for v in votes if v["status"] == "ok"],
+                        "maybe": [v["user_id"] for v in votes if v["status"] == "maybe"],
+                        "ng": [v["user_id"] for v in votes if v["status"] == "ng"],
+                        "unanswered": [],
+                    }
+                sheet_title = schedule.get("sheet_title") or schedule["title"]
+                await sheets_cog.service.update_schedule_sheet(sheet_title, options, votes_map)
             except Exception as e:  # noqa: BLE001
-                log.warning("出欠 Sheets 同期失敗: %s", e)
+                log.warning("スケジュール Sheets 同期失敗: %s", e)
 
 
 async def setup(bot: commands.Bot):
