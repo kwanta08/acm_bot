@@ -83,13 +83,13 @@ def parse_deadline(text: str) -> datetime:
     text = text.strip()
     try:
         dt = datetime.strptime(text, "%Y-%m-%d %H:%M")
-        return dt.replace(tzinfo=JST)
+        return dt.replace(tzinfo=TZ)
     except ValueError:
         pass
 
     try:
         dt = datetime.strptime(text, "%Y-%m-%d")
-        return dt.replace(hour=23, minute=59, tzinfo=JST)
+        return dt.replace(hour=23, minute=59, tzinfo=TZ)
     except ValueError:
         pass
 
