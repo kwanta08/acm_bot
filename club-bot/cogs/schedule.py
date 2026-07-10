@@ -112,7 +112,14 @@ class Schedule(commands.Cog):
 
         # ★ シート作成は、候補がすべてDB保存された後に行う
         sheets_cog = self.bot.get_cog("Sheets")
-        if sheets_cog and config.schedule_sheets_enabled():
+        enabled = config.schedule_sheets_enabled()
+        log.info(
+            "Sheets診断: sheets_cog=%s enabled=%s spreadsheet_id=%s creds_path=%s",
+            bool(sheets_cog), enabled,
+            config.schedule_spreadsheet_id, config.google_credentials_path,
+        )
+
+        if sheets_cog and enabled:
             try:
                 saved_opts = await self.repo.list_options(schedule_id)
                 votes_map = {
@@ -122,8 +129,11 @@ class Schedule(commands.Cog):
                 actual_title = await sheets_cog.service.create_schedule_sheet(
                     title, saved_opts, votes_map)
                 await self.repo.set_schedule_sheet_title(schedule_id, actual_title)
-            except Exception as e:  # noqa: BLE001
-                log.warning("スケジュールシート初期化失敗: %s", e)
+                log.info("スケジュールシート作成成功: %s", actual_title)
+            except Exception as e:
+                log.exception("スケジュールシート初期化失敗")  # ★ フルトレースバック出力
+        else:
+            log.warning("Sheets連携スキップ: cog=%s enabled=%s", bool(sheets_cog), enabled)
 
         await interaction.followup.send(
             embed=success_embed("日程調整を作成しました",
