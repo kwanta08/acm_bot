@@ -124,29 +124,28 @@ class Schedule(commands.Cog):
         def schedule_sheets_enabled(self) -> bool:
             return bool(self.google_credentials_path and self.schedule_spreadsheet_id)
 
-        if sheets_cog and enabled:
+        if sheets_cog and config.schedule_sheets_enabled():
             try:
                 saved_opts = await self.repo.list_options(schedule_id)
-                votes_map = {
-                    opt["option_id"]: {"ok": [], "maybe": [], "ng": [], "unanswered": []}
+                votes_map = {opt["option_id"]: {"ok": [], "maybe": [], "ng": [], "unanswered": []}
                     for opt in saved_opts
                 }
-                actual_title = await sheets_cog.service.create_schedule_sheet(
-                    title, saved_opts, votes_map)
+                actual_title = await sheets_cog.service.create_schedule_sheet(title, saved_opts, votes_map)
                 await self.repo.set_schedule_sheet_title(schedule_id, actual_title)
-                log.info("スケジュールシート作成成功: %s", actual_title)
+                sheet_status = f"作成済み（{actual_title}）"
             except Exception as e:
-                log.exception("スケジュールシート初期化失敗")  # ★ フルトレースバック出力
+                log.exception("スケジュールシート初期化失敗")
+                sheet_status = f"失敗（{e}）"
         else:
-            log.warning("Sheets連携スキップ: cog=%s enabled=%s", bool(sheets_cog), enabled)
+            sheet_status = "無効（未設定）"
 
         await interaction.followup.send(
             embed=success_embed("日程調整を作成しました",
-                                f"ID: `{schedule_id}`\n候補数: {len(parsed_options)}\n"
-                                f"締切: {fmt_jp(deadline_dt)}\n投稿先: {target_channel.mention}",
-                                executor=interaction.user.display_name),
+                        f"ID: `{schedule_id}`\n候補数: {len(parsed_options)}\n"
+                        f"締切: {fmt_jp(deadline_dt)}\n投稿先: {target_channel.mention}\n"
+                        f"シート: {sheet_status}",
+                        executor=interaction.user.display_name),
             ephemeral=True)
-
     # ---------- list ----------
     @group.command(name="list", description="開催中の日程調整一覧を表示します。")
     @require(Level.L1)
