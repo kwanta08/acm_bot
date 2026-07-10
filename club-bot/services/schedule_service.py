@@ -59,7 +59,7 @@ def get_schedule_emojis(bot, guild: discord.Guild | None = None) -> dict[str, st
     return resolved
 
 
-def build_emoji_maps(bot, guild: discord.Guild | None = None):
+def build_emoji_maps(bot, guild: discord.Guild | None = None) -> dict:
     status_to_emoji = get_schedule_emojis(bot, guild)
     emoji_to_status = {}
     all_emojis = []

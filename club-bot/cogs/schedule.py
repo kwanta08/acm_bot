@@ -30,7 +30,7 @@ class Schedule(commands.Cog):
 
     group = app_commands.Group(name="schedule", description="日程調整・出欠管理")
 
-    # ---------- create ----------
+    # ---------- create ----------    
     @group.command(name="create", description="新規日程調整を作成します。")
     @app_commands.describe(
         title="イベント名",
@@ -40,8 +40,6 @@ class Schedule(commands.Cog):
         place="場所（任意）",
         target_role="対象ロール（任意）",
         channel="投稿先チャンネル（任意）",
-        emoji_maps = build_emoji_maps(self.bot, interaction.guild),
-        all_emojis = emoji_maps["all_emojis"]
     )
     @require(Level.L2)
     async def create(self, interaction: discord.Interaction, title: str, options: str,
@@ -101,6 +99,9 @@ class Schedule(commands.Cog):
         schedule = await self.repo.get_schedule(schedule_id)
 
         # 候補ごとに1メッセージ投稿（仕様 11.2.3）
+        emoji_maps = build_emoji_maps(self.bot, interaction.guild)
+        all_emojis = emoji_maps["all_emojis"]
+
         for label, start in parsed_options:
             option_id = svc.new_option_id()
             await self.repo.add_option(option_id, schedule_id, label, to_iso(start), None, None)
@@ -276,17 +277,14 @@ async def _remove_other_reactions(
     keep_emoji = status_to_emoji[keep_status]
     keep_key = str(keep_emoji.id) if isinstance(keep_emoji, discord.Emoji) else str(keep_emoji)
 
+    schedule_keys = set()
+    for emoji in status_to_emoji.values():
+        key = str(emoji.id) if isinstance(emoji, discord.Emoji) else str(emoji)
+        schedule_keys.add(key)
+
     for reaction in message.reactions:
         reaction_key = str(reaction.emoji.id) if hasattr(reaction.emoji, "id") and reaction.emoji.id else str(reaction.emoji)
-
-        is_schedule_emoji = False
-        for emoji in status_to_emoji.values():
-            key = str(emoji.id) if isinstance(emoji, discord.Emoji) else str(emoji)
-            if reaction_key == key:
-                is_schedule_emoji = True
-                break
-
-        if is_schedule_emoji and reaction_key != keep_key:
+        if reaction_key in schedule_keys and reaction_key != keep_key:
             try:
                 await message.remove_reaction(reaction.emoji, member)
             except (discord.Forbidden, discord.NotFound):
