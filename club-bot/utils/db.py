@@ -122,6 +122,13 @@ CREATE TABLE IF NOT EXISTS layer_records (
     minutes     INTEGER NOT NULL,
     synced_flag INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS layer_keta (
+    keta_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    keta_name   TEXT UNIQUE NOT NULL,
+    active_flag INTEGER NOT NULL DEFAULT 1,
+    created_by  TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
 
 CREATE INDEX IF NOT EXISTS idx_layer_records_synced ON layer_records(synced_flag);
 CREATE INDEX IF NOT EXISTS idx_votes_option ON schedule_votes(option_id);
