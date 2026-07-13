@@ -47,7 +47,8 @@ CREATE TABLE IF NOT EXISTS schedules (
     created_by         TEXT NOT NULL,
     channel_id         TEXT NOT NULL,
     closed_flag        INTEGER NOT NULL DEFAULT 0,
-    reminder_sent_flag INTEGER NOT NULL DEFAULT 0
+    reminder_sent_flag INTEGER NOT NULL DEFAULT 0,
+    sheet_title         TEXT
 );
 
 CREATE TABLE IF NOT EXISTS schedule_options (
@@ -131,12 +132,24 @@ class Database:
         await self._conn.execute("PRAGMA foreign_keys = ON;")
         await self._conn.execute("PRAGMA journal_mode = WAL;")
         await self.init_schema()
+        await self._migrate()
         log.info("SQLite に接続しました: %s", self.path)
 
     async def init_schema(self) -> None:
         assert self._conn is not None
         await self._conn.executescript(SCHEMA)
         await self._conn.commit()
+
+    async def _migrate(self) -> None:
+        """既存 DB に後から追加されたカラムを補完する（後方互換用）。"""
+        assert self._conn is not None
+        cur = await self._conn.execute("PRAGMA table_info(schedules)")
+        cols = {row[1] for row in await cur.fetchall()}
+        await cur.close()
+        if "sheet_title" not in cols:
+            await self._conn.execute("ALTER TABLE schedules ADD COLUMN sheet_title TEXT")
+            await self._conn.commit()
+            log.info("schedules テーブルに sheet_title カラムを追加しました。")
 
     async def close(self) -> None:
         if self._conn is not None:
