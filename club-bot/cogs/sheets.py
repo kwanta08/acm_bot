@@ -127,6 +127,47 @@ class Sheets(commands.Cog):
             embed=success_embed("出欠シート同期完了", f"{n} 行",
                                 executor=interaction.user.display_name),
             ephemeral=True)
+    
+    @group.command(name="sync-layers", description="未反映の桁巻き記録をシートへ再送信します。")
+    @require(Level.L2)
+    async def sync_layers_cmd(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        if not self.bot.sheets.enabled:
+            await interaction.followup.send(embed=self._disabled_embed(), ephemeral=True)
+            return
+        try:
+            n = await self.sync_layer_records()
+        except SheetsError:
+            await interaction.followup.send(
+                embed=error_embed("同期に失敗しました。"), ephemeral=True)
+            return
+        await interaction.followup.send(
+            embed=success_embed("桁巻き記録シート同期完了", f"{n} 件を再送信しました",
+                                executor=interaction.user.display_name),
+            ephemeral=True)
+
+
+    async def sync_layer_records(self) -> int:
+        """synced_flag=0 の記録をすべてシートへ再送信する。"""
+        from repositories.layer_session_repository import LayerSessionRepository
+        repo = LayerSessionRepository(self.bot.db)
+        guild = self.bot.get_guild(config.guild_id) if config.guild_id else None
+
+        unsynced = await repo.list_unsynced()
+        count = 0
+        for rec in unsynced:
+            name = rec["user_id"]
+            if guild:
+                m = guild.get_member(int(rec["user_id"]))
+                if m:
+                    name = m.display_name
+            row = [rec["layer_num"], name,
+                fmt_jp(from_iso(rec["started_at"])), fmt_jp(from_iso(rec["ended_at"])),
+                rec["minutes"]]
+            await self.bot.sheets.append_layer_row(rec["keta"], row)
+            await repo.mark_synced(rec["record_id"])
+            count += 1
+        return count
 
     @group.command(name="status", description="最終同期日時と件数を表示します。")
     @require(Level.L1)

@@ -2,6 +2,7 @@
 桁巻き積層作業の開始/終了ロジック（仕様 11.8）。
 
 SQLite に進行中セッションを永続化し、Sheets の桁ごとシートへ追記する。
+書き込み失敗時も記録は DB に残り、後から同期コマンドで再送信できる。
 """
 from __future__ import annotations
 
@@ -28,7 +29,8 @@ class LayerTrackingService:
 
     async def end(self, user_id: str, display_name: str) -> dict:
         """
-        進行中セッションを終了し Sheets へ追記する。
+        進行中セッションを終了し、DBへ記録を保存してから Sheets へ追記する。
+        Sheets 書き込みに失敗しても記録は DB に残るため、後から再送信できる。
         戻り値: {keta, layer_num, minutes, started, ended}
         呼び出し側で事前にセッション存在を確認すること。
         """
@@ -40,6 +42,12 @@ class LayerTrackingService:
         ended = now()
         minutes = int((ended - started).total_seconds() // 60)  # 端数切り捨て（仕様 11.8.4）
 
+        # 記録をDBへ保存し、進行中セッションを削除（仕様 11.8.5）
+        record_id = await self.session_repo.add_record(
+            user_id, session["keta"], session["layer_num"],
+            session["started_at"], to_iso(ended), minutes)
+        await self.session_repo.end(user_id)
+
         row = [
             session["layer_num"],          # A 層番号
             display_name,                  # B 作業者
@@ -47,11 +55,11 @@ class LayerTrackingService:
             fmt_sheet(ended),              # D 終了時刻
             minutes,                       # E 作業時間(分)
         ]
-        # Sheets 書き込み（失敗時は例外を上位へ。セッションは保持したまま）
+        # Sheets 書き込み。失敗しても record は DB に残っているため、
+        # 呼び出し側で捕捉してユーザーへ「後で同期される」旨を案内する。
         await self.sheets.append_layer_row(session["keta"], row)
+        await self.session_repo.mark_synced(record_id)
 
-        # 書き込み成功後にセッション削除（仕様 11.8.5）
-        await self.session_repo.end(user_id)
         return {
             "keta": session["keta"],
             "layer_num": session["layer_num"],
@@ -59,6 +67,22 @@ class LayerTrackingService:
             "started": started,
             "ended": ended,
         }
+
+    async def sync_unsynced_records(self) -> int:
+        """synced_flag=0 の記録をすべて Sheets へ再送信する。"""
+        records = await self.session_repo.list_unsynced()
+        count = 0
+        for rec in records:
+            row = [
+                rec["layer_num"], rec["user_id"],
+                fmt_sheet(from_iso(rec["started_at"])),
+                fmt_sheet(from_iso(rec["ended_at"])),
+                rec["minutes"],
+            ]
+            await self.sheets.append_layer_row(rec["keta"], row)
+            await self.session_repo.mark_synced(rec["record_id"])
+            count += 1
+        return count
 
     async def list_active(self) -> list[dict]:
         sessions = await self.session_repo.list_all()

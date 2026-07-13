@@ -112,6 +112,18 @@ CREATE TABLE IF NOT EXISTS layer_sessions (
     started_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS layer_records (
+    record_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT NOT NULL,
+    keta        TEXT NOT NULL,
+    layer_num   TEXT NOT NULL,
+    started_at  TEXT NOT NULL,
+    ended_at    TEXT NOT NULL,
+    minutes     INTEGER NOT NULL,
+    synced_flag INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_layer_records_synced ON layer_records(synced_flag);
 CREATE INDEX IF NOT EXISTS idx_votes_option ON schedule_votes(option_id);
 CREATE INDEX IF NOT EXISTS idx_options_schedule ON schedule_options(schedule_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);

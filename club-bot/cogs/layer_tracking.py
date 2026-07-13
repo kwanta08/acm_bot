@@ -115,6 +115,30 @@ class LayerTracking(commands.Cog):
                 inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
+    # ---------- sync ----------
+    @group.command(name="sync", description="未反映の桁巻き記録をシートへ再送信します。")
+    @require(Level.L2)
+    async def sync_cmd(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        if not self.bot.sheets.enabled:
+            await interaction.followup.send(
+                embed=info_embed("Google Sheets 無効",
+                                "credentials.json と SPREADSHEET_ID を設定すると有効化されます。"),
+                ephemeral=True)
+            return
+        try:
+            n = await self.svc.sync_unsynced_records()
+        except SheetsError as e:
+            await self.bot.log_to_channel(f"[Layer] sync 失敗: {e}")
+            await interaction.followup.send(
+                embed=error_embed("同期に失敗しました。時間をおいて再試行してください。"),
+                ephemeral=True)
+            return
+        await interaction.followup.send(
+            embed=success_embed("桁巻き記録シート同期完了", f"{n} 件を再送信しました",
+                                executor=interaction.user.display_name),
+            ephemeral=True)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(LayerTracking(bot))
