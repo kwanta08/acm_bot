@@ -135,4 +135,3 @@ class ScheduleRepository:
             "UPDATE schedules SET sheet_title = ? WHERE schedule_id = ?",
             (sheet_title, schedule_id),
         )
-        await self.db.commit()
