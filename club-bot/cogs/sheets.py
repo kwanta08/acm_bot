@@ -60,6 +60,7 @@ class Sheets(commands.Cog):
             t = await self.sync_tasks()
             m = await self.sync_members()
             a = await self.sync_all_attendance()
+            s = await self.sync_all_schedule_sheets()   # ★ 追加
         except SheetsError as e:
             await self.bot.log_to_channel(f"[Sheets] sync-all 失敗: {e}")
             await interaction.followup.send(
@@ -70,7 +71,8 @@ class Sheets(commands.Cog):
             self.bot.sheets.end_sync()
         await interaction.followup.send(
             embed=success_embed("全シート同期完了",
-                                f"タスク: {t} 行 / メンバー: {m} 行 / 出欠: {a} 行",
+                                f"タスク: {t} 行 / メンバー: {m} 行 / 出欠: {a} 行 / "
+                                f"日程調整シート: {s} 件",
                                 executor=interaction.user.display_name),
             ephemeral=True)
 
@@ -125,6 +127,24 @@ class Sheets(commands.Cog):
             return
         await interaction.followup.send(
             embed=success_embed("出欠シート同期完了", f"{n} 行",
+                                executor=interaction.user.display_name),
+            ephemeral=True)
+
+    @group.command(name="sync-schedules", description="日程調整シートを一括同期します。")
+    @require(Level.L2)
+    async def sync_schedules_cmd(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        if not self.bot.sheets.enabled or not config.schedule_sheets_enabled():
+            await interaction.followup.send(embed=self._disabled_embed(), ephemeral=True)
+            return
+        try:
+            n = await self.sync_all_schedule_sheets()
+        except SheetsError:
+            await interaction.followup.send(
+                embed=error_embed("同期に失敗しました。"), ephemeral=True)
+            return
+        await interaction.followup.send(
+            embed=success_embed("日程調整シート同期完了", f"{n} 件のシートを更新しました",
                                 executor=interaction.user.display_name),
             ephemeral=True)
     
@@ -267,6 +287,42 @@ class Sheets(commands.Cog):
                         fmt_jp(from_iso(s["deadline"])), agg_time,
                     ])
         return rows
+    
+    async def sync_all_schedule_sheets(self) -> int:
+        """sheet_title が設定済みの全スケジュールを最新状態でシートへ反映する。"""
+        if not self.bot.sheets.enabled or not config.schedule_sheets_enabled():
+            return 0
+        rows = await self.bot.db.fetchall(
+            "SELECT * FROM schedules WHERE sheet_title IS NOT NULL")
+        guild = self.bot.get_guild(config.guild_id) if config.guild_id else None
+        count = 0
+        for row in rows:
+            schedule = dict(row)
+            options = await self.schedule_repo.list_options(schedule["schedule_id"])
+            votes_map = {}
+            for opt in options:
+                votes = await self.schedule_repo.list_votes(opt["option_id"])
+                votes_map[opt["option_id"]] = {
+                    "ok": [self._display_name(guild, v["user_id"])
+                        for v in votes if v["status"] == "ok"],
+                    "maybe": [self._display_name(guild, v["user_id"])
+                            for v in votes if v["status"] == "maybe"],
+                    "ng": [self._display_name(guild, v["user_id"])
+                        for v in votes if v["status"] == "ng"],
+                    "unanswered": [],
+                }
+            await self.bot.sheets.update_schedule_sheet(
+                schedule["sheet_title"], options, votes_map)
+            count += 1
+        return count
+
+
+    def _display_name(self, guild: discord.Guild | None, user_id: str) -> str:
+        if guild:
+            member = guild.get_member(int(user_id))
+            if member:
+                return member.display_name
+        return f"<@{user_id}>"
 
 
 async def setup(bot: commands.Bot):
