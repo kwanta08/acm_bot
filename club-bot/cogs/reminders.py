@@ -157,16 +157,11 @@ class Reminders(commands.Cog):
 
     # ---------- Todoist セクション別通知 ----------
     async def push_section_tasks(self) -> int:
-        """Todoist セクションごとに、期限7日以内または超過のタスクを
-        対応する班チャンネルへ通知する。送信したセクション数を返す。
-
-        班チャンネル未設定の場合は共通チャンネルにフォールバックする。
-        """
         if not self.bot.todoist.enabled:
             return 0
         links = await self.section_repo.list_links()
-        if not links:
-            return 0
+        # 紐付け済みセクションIDのセット
+        linked_section_ids: set[str] = {l["section_id"] for l in links}
 
         team_map = await self._team_map()
         default_channel = self._task_channel()
@@ -175,6 +170,7 @@ class Reminders(commands.Cog):
         until = today + timedelta(days=7)
         sent = 0
 
+        # ── 既存: 紐付け済みセクションの通知（省略なし） ──
         for link in links:
             section_id = link["section_id"]
             team_key = link["team_key"]
@@ -182,22 +178,20 @@ class Reminders(commands.Cog):
 
             try:
                 sec_tasks = await self.bot.todoist.get_tasks_by_section(section_id)
-            except Exception as e:  # noqa: BLE001
+            except Exception as e:
                 log.warning("セクション %s のタスク取得失敗: %s", section_id, e)
                 continue
 
-            # 期限7日以内 or 超過のものに絞る（期限なしは除外）。
             filtered = []
             for t in sec_tasks:
                 due_date = self._todoist_due_date(t)
                 if due_date is None:
                     continue
-                if due_date <= until:  # 超過（today未満）も today〜until も含む
+                if due_date <= until:
                     filtered.append((t, due_date))
             if not filtered:
                 continue
 
-            # 送信先チャンネルを決定（班チャンネル → なければ共通）。
             info = team_map.get(team_key, {})
             channel = None
             if info.get("channel_id"):
@@ -225,65 +219,92 @@ class Reminders(commands.Cog):
                 str(channel.id), "success")
             sent += 1
 
+        # ── ここから追記: 未紐付けセクション + セクションなしタスクの収集 ──
+        if default_channel is None:
+            log.warning("DEFAULT_TASK_CHANNEL 未設定のため未紐付けタスク通知をスキップ")
+            return sent
+
+        unlinked_items: list[tuple] = []  # (task, due_date, label)
+
+        try:
+            all_sections = await self.bot.todoist.get_sections()
+        except Exception as e:
+            log.warning("全セクション取得失敗: %s", e)
+            all_sections = []
+
+        # 未紐付けセクションのタスクを収集
+        for section in all_sections:
+            sid = str(section.id)
+            if sid in linked_section_ids:
+                continue  # 紐付け済みはスキップ
+            try:
+                sec_tasks = await self.bot.todoist.get_tasks_by_section(sid)
+            except Exception as e:
+                log.warning("未紐付けセクション %s のタスク取得失敗: %s", sid, e)
+                continue
+            for t in sec_tasks:
+                due_date = self._todoist_due_date(t)
+                if due_date is None or due_date > until:
+                    continue
+                unlinked_items.append((t, due_date, section.name))
+
+        # セクションなし（inbox/プロジェクト直下）のタスクを収集
+        try:
+            no_section_tasks = await self.bot.todoist.get_tasks_without_section()
+        except Exception as e:
+            log.warning("セクションなしタスク取得失敗: %s", e)
+            no_section_tasks = []
+
+        for t in no_section_tasks:
+            due_date = self._todoist_due_date(t)
+            if due_date is None or due_date > until:
+                continue
+            unlinked_items.append((t, due_date, "（セクションなし）"))
+
+        if unlinked_items:
+            embed = task_embed(
+                "【Todoist】全体タスク",
+            )
+            for t, due_date, label in sorted(unlinked_items, key=lambda x: x[1])[:25]:
+                overdue = "（超過）" if due_date < today else ""
+                embed.add_field(
+                    name=t.content,
+                    value=f"セクション: {label} / 期限: {due_date.isoformat()}{overdue}",
+                    inline=False,
+                )
+            if len(unlinked_items) > 25:
+                embed.set_footer(text=f"他 {len(unlinked_items) - 25} 件")
+            await self._safe_send(default_channel, embed=embed)
+            await self._log_reminder(
+                "todoist_unlinked", "unlinked", None, str(default_channel.id), "success"
+            )
+            sent += 1
+
         return sent
 
-    @staticmethod
-    def _todoist_due_date(task):
-        """Todoist タスクの due から date を取り出す。期限なしは None。"""
-        due = getattr(task, "due", None)
-        if not due:
-            return None
-        date_str = getattr(due, "date", None)
-        if not date_str:
-            return None
-        try:
-            return parse_datetime(str(date_str)[:10]).date()
-        except Exception:  # noqa: BLE001
+        @daily_night.before_loop
+        async def _before_night(self):
+            await self.bot.wait_until_ready()
+
+        # ---------- 毎日 04:00: Sheets 定期同期 ----------
+        @tasks.loop(time=time(hour=4, minute=0, tzinfo=TZ))
+        async def daily_sheets_sync(self):
+            if not self.bot.sheets.enabled:
+                return
+            sheets_cog = self.bot.get_cog("Sheets")
+            if not sheets_cog:
+                return
+            if not self.bot.sheets.begin_sync():
+                return
             try:
-                return from_iso(str(date_str)).date()
-            except Exception:  # noqa: BLE001
-                return None
-
-    # ---------- 毎晚 21:00: 超過通知 ----------
-    @tasks.loop(time=time(hour=21, minute=0, tzinfo=TZ))
-    async def daily_night(self):
-        today = now().date().isoformat()
-        try:
-            tasks_ = await self.task_repo.list_overdue(today)
-        except Exception as e:  # noqa: BLE001
-            log.warning("超過タスク取得失敗: %s", e)
-            return
-        if not tasks_:
-            return
-        await self._dispatch_by_team(
-            tasks_,
-            title="⚠️【期限超過タスク】対応をお願いします",
-            reminder_type="task_overdue",
-        )
-
-    @daily_night.before_loop
-    async def _before_night(self):
-        await self.bot.wait_until_ready()
-
-    # ---------- 毎日 04:00: Sheets 定期同期 ----------
-    @tasks.loop(time=time(hour=4, minute=0, tzinfo=TZ))
-    async def daily_sheets_sync(self):
-        if not self.bot.sheets.enabled:
-            return
-        sheets_cog = self.bot.get_cog("Sheets")
-        if not sheets_cog:
-            return
-        if not self.bot.sheets.begin_sync():
-            return
-        try:
-            await sheets_cog.sync_tasks()
-            await sheets_cog.sync_members()
-            await sheets_cog.sync_all_attendance()
-            log.info("定期 Sheets 同期 完了")
-        except Exception as e:  # noqa: BLE001
-            await self.bot.log_to_channel(f"[Reminder] Sheets 定期同期失敗: {e}")
-        finally:
-            self.bot.sheets.end_sync()
+                await sheets_cog.sync_tasks()
+                await sheets_cog.sync_members()
+                await sheets_cog.sync_all_attendance()
+                log.info("定期 Sheets 同期 完了")
+            except Exception as e:  # noqa: BLE001
+                await self.bot.log_to_channel(f"[Reminder] Sheets 定期同期失敗: {e}")
+            finally:
+                self.bot.sheets.end_sync()
 
     @daily_sheets_sync.before_loop
     async def _before_sheets(self):
