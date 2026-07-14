@@ -184,6 +184,91 @@ class Members(commands.Cog):
         )
         await self._sync_members_sheet()
 
+    # ---------- setup (統合コマンド) ----------
+    @group.command(name="setup", description="主所属班・副所属班・班長を一括設定します。")
+    @app_commands.describe(
+        user="対象ユーザー",
+        primary_team="主所属班",
+        secondary_teams="副所属班（複数の場合はカンマ区切り、例: wing,tail）",
+        is_leader="班長にするか（省略時は変更しない）",
+    )
+    @app_commands.choices(primary_team=TEAM_CHOICES)
+    @require(Level.L3)
+    async def setup_member(
+        self,
+        interaction: discord.Interaction,
+        user: discord.Member,
+        primary_team: app_commands.Choice[str] | None = None,
+        secondary_teams: str | None = None,
+        is_leader: bool | None = None,
+    ):
+        await interaction.response.defer(ephemeral=True)
+        await self.repo.upsert_member(str(user.id), user.display_name)
+
+        changes: list[str] = []
+
+        # 主所属班
+        if primary_team is not None:
+            await self.repo.set_primary_team(str(user.id), primary_team.value)
+            changes.append(f"主所属班: {primary_team.name}")
+
+        # 副所属班（カンマ区切りでパース）
+        if secondary_teams is not None:
+            raw_keys = [s.strip() for s in secondary_teams.split(",") if s.strip()]
+            # バリデーション
+            valid_keys = {key for key, _ in INITIAL_TEAMS}
+            invalid = [k for k in raw_keys if k not in valid_keys]
+            if invalid:
+                await interaction.followup.send(
+                    embed=error_embed(
+                        f"無効な班キーが含まれています: {', '.join(invalid)}\n"
+                        f"有効な値: {', '.join(valid_keys)}"
+                    ),
+                    ephemeral=True,
+                )
+                return
+
+            # 主所属班と重複チェック
+            current_primary = primary_team.value if primary_team else (
+                (await self.repo.get_member(str(user.id)) or {}).get("primary_team")
+            )
+            if current_primary and current_primary in raw_keys:
+                await interaction.followup.send(
+                    embed=error_embed(
+                        f"副所属班に主所属班（{TEAM_NAME.get(current_primary, current_primary)}）は設定できません。"
+                    ),
+                    ephemeral=True,
+                )
+                return
+
+            await self.repo.set_secondary_teams(str(user.id), raw_keys)
+            names = "、".join(TEAM_NAME.get(k, k) for k in raw_keys) or "なし"
+            changes.append(f"副所属班: {names}")
+
+        # 班長フラグ
+        if is_leader is not None:
+            await self.repo.set_leader(str(user.id), is_leader)
+            changes.append(f"班長: {'はい' if is_leader else 'いいえ'}")
+
+        if not changes:
+            await interaction.followup.send(
+                embed=info_embed("変更なし", "設定する項目を1つ以上指定してください。"),
+                ephemeral=True,
+            )
+            return
+
+        await self._sync_roles(interaction.guild, user, str(user.id))
+        await self._sync_members_sheet()
+
+        await interaction.followup.send(
+            embed=success_embed(
+                "メンバー設定を更新しました",
+                f"**{user.display_name}**\n" + "\n".join(f"・{c}" for c in changes),
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
+
     # ---------- set-channel ----------
     @group.command(name="set-channel",
                    description="班の通知先チャンネルを設定します（タスクの班別通知に使用）。")
