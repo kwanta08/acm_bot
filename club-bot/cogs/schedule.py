@@ -172,6 +172,25 @@ class Schedule(commands.Cog):
                                                  interaction.guild)
             await interaction.followup.send(embed=embed, ephemeral=True)
 
+    @group.command(name="list-closed", description="締切済みの日程調整一覧を表示します。")
+    @require(Level.L1)
+    async def list_closed_cmd(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        schedules = await self.repo.list_closed_schedules()
+        if not schedules:
+            await interaction.followup.send(
+                embed=info_embed("締切済みの日程調整", "締切済みの投票はありません。"),
+                ephemeral=True)
+            return
+        embed = schedule_embed("締切済みの日程調整一覧")
+        for s in schedules:
+            sheet_info = f" / シート: {s['sheet_title']}" if s.get("sheet_title") else ""
+            embed.add_field(
+                name=f"{s['title']}（`{s['schedule_id']}`）",
+                value=f"締切: {fmt_jp(from_iso(s['deadline']))}{sheet_info}",
+                inline=False)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
     # ---------- close ----------
     @group.command(name="close", description="日程調整を手動で締め切ります。")
     @app_commands.describe(schedule_id="投票 ID")
@@ -207,7 +226,7 @@ class Schedule(commands.Cog):
             ephemeral=True)
 
     # ---------- delete ----------
-    @group.command(name="delete", description="日程調整を削除します。")
+    @group.command(name="delete", description="日程調整を削除します（Discordメッセージ・シートも削除）。")
     @app_commands.describe(schedule_id="投票 ID")
     @require(Level.L3)
     async def delete(self, interaction: discord.Interaction, schedule_id: str):
@@ -217,9 +236,38 @@ class Schedule(commands.Cog):
             await interaction.followup.send(
                 embed=error_embed("指定 ID の投票が見つかりません。"), ephemeral=True)
             return
+
+        # Discord上の候補メッセージを削除
+        options = await self.repo.list_options(schedule_id)
+        channel = self.bot.get_channel(int(schedule["channel_id"]))
+        deleted_msgs = 0
+        for opt in options:
+            if not opt.get("message_id") or not channel:
+                continue
+            try:
+                msg = await channel.fetch_message(int(opt["message_id"]))
+                await msg.delete()
+                deleted_msgs += 1
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                pass
+
+        # スプレッドシートを削除
+        sheet_deleted = False
+        if schedule.get("sheet_title") and self.bot.sheets.enabled:
+            try:
+                await self.bot.sheets.delete_schedule_sheet(schedule["sheet_title"])
+                sheet_deleted = True
+            except Exception as e:
+                log.warning("スケジュールシート削除失敗: %s", e)
+
+        # DBから削除（外部キーCASCADEでoptions/votesも削除される）
         await self.repo.delete_schedule(schedule_id)
+
+        detail = f"ID: `{schedule_id}`\nDiscordメッセージ削除: {deleted_msgs} 件"
+        detail += f"\nシート削除: {'成功' if sheet_deleted else '対象なし/失敗'}"
+
         await interaction.followup.send(
-            embed=success_embed("削除しました", f"ID: `{schedule_id}`",
+            embed=success_embed("削除しました", detail,
                                 executor=interaction.user.display_name),
             ephemeral=True)
 

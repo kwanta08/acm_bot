@@ -215,6 +215,23 @@ class SheetsService:
         await self._run(self._update_schedule_sheet_sync, sheet_title, options, votes_map)
         await asyncio.sleep(1.2)
 
+    def _delete_schedule_sheet_sync(self, sheet_title: str):
+        spreadsheet_id = config.schedule_spreadsheet_id
+        if not spreadsheet_id:
+            raise SheetsError("SCHEDULE_SPREADSHEET_ID が未設定です")
+        book = self._open_book(spreadsheet_id)
+        try:
+            ws = book.worksheet(sheet_title)
+            book.del_worksheet(ws)
+        except gspread.WorksheetNotFound:
+            pass  # 既に無ければ何もしない
+
+    async def delete_schedule_sheet(self, sheet_title: str) -> None:
+        """スケジュール専用シートを削除する。存在しなければ何もしない。"""
+        if not config.schedule_sheets_enabled():
+            return
+        await self._run(self._delete_schedule_sheet_sync, sheet_title)
+
     # ---------- 同期中フラグ（既存機能・削除しないこと）----------
     def begin_sync(self) -> bool:
         if self._syncing:

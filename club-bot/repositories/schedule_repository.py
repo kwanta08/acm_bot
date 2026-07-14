@@ -135,3 +135,8 @@ class ScheduleRepository:
             "UPDATE schedules SET sheet_title = ? WHERE schedule_id = ?",
             (sheet_title, schedule_id),
         )
+
+    async def list_closed_schedules(self) -> list[dict[str, Any]]:
+        rows = await self.db.fetchall(
+            "SELECT * FROM schedules WHERE closed_flag = 1 ORDER BY deadline DESC")
+        return [dict(r) for r in rows]
