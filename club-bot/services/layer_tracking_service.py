@@ -69,19 +69,28 @@ class LayerTrackingService:
         }
 
     async def sync_unsynced_records(self) -> int:
-        """synced_flag=0 の記録をすべて Sheets へ再送信する。"""
+        """synced_flag=0 の記録を桁ごとにまとめて Sheets へ再送信する。"""
         records = await self.session_repo.list_unsynced()
-        count = 0
+        if not records:
+            return 0
+
+        by_keta: dict[str, list[dict]] = {}
         for rec in records:
-            row = [
-                rec["layer_num"], rec["user_id"],
+            by_keta.setdefault(rec["keta"], []).append(rec)
+
+        count = 0
+        for keta, recs in by_keta.items():
+            rows = [
+                [rec["layer_num"], rec["user_id"],
                 fmt_sheet(from_iso(rec["started_at"])),
                 fmt_sheet(from_iso(rec["ended_at"])),
-                rec["minutes"],
+                rec["minutes"]]
+                for rec in recs
             ]
-            await self.sheets.append_layer_row(rec["keta"], row)
-            await self.session_repo.mark_synced(rec["record_id"])
-            count += 1
+            await self.sheets.append_layer_rows(keta, rows)  # ★ 複数行まとめて追記
+            for rec in recs:
+                await self.session_repo.mark_synced(rec["record_id"])
+            count += len(recs)
         return count
 
     async def list_active(self) -> list[dict]:

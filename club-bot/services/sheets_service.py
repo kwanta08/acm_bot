@@ -8,6 +8,8 @@ Sheets 無効時（credentials または spreadsheet_id 未設定）は no-op。
 from __future__ import annotations
 
 import asyncio
+import time
+import random
 from typing import Any
 
 from config import config
@@ -40,6 +42,7 @@ class SheetsService:
         self.enabled = config.sheets_enabled() and gspread is not None
         self._client = None
         self._syncing = False  # 同期中フラグ（仕様 11.7.3 二重書き込み防止）
+        self._rate_limiter = RateLimiter(max_per_minute=50)
 
     def _ensure_client(self):
         if self._client is not None:
@@ -52,11 +55,20 @@ class SheetsService:
         return self._client
 
     async def _run(self, fn, *args, **kwargs):
-        try:
-            return await asyncio.to_thread(fn, *args, **kwargs)
-        except Exception as e:  # noqa: BLE001
-            log.error("Sheets API 失敗: %s", e)
-            raise SheetsError(str(e)) from e
+        await self._rate_limiter.acquire()
+        max_retries = 5
+        for attempt in range(max_retries):
+            try:
+                return await asyncio.to_thread(fn, *args, **kwargs)
+            except Exception as e:
+                is_quota = "429" in str(e) or "Quota exceeded" in str(e)
+                if is_quota and attempt < max_retries - 1:
+                    wait = (2 ** attempt) + random.uniform(0, 1)
+                    log.warning("Sheets 429 リトライ (%d/%d) %.1f秒待機", attempt + 1, max_retries, wait)
+                    await asyncio.sleep(wait)
+                    continue
+                log.error("Sheets API 失敗: %s", e)
+                raise SheetsError(str(e)) from e
 
     def _open_book(self, spreadsheet_id: str):
         client = self._ensure_client()
@@ -106,7 +118,7 @@ class SheetsService:
         await asyncio.sleep(0.5)
 
     # ---------- 桁巻き追記（仕様 11.8.6）----------
-    def _append_layer_sync(self, keta: str, row: list[Any]):
+    def _append_layer_rows_sync(self, keta: str, rows: list[list[Any]]):
         spreadsheet_id = config.effective_layer_spreadsheet_id
         if not spreadsheet_id:
             raise SheetsError("LAYER_SPREADSHEET_ID / SPREADSHEET_ID が未設定です")
@@ -116,13 +128,13 @@ class SheetsService:
         except gspread.WorksheetNotFound:
             sheet = book.add_worksheet(title=keta, rows=1000, cols=6)
             sheet.append_row(LAYER_HEADER, value_input_option="USER_ENTERED")
-        sheet.append_row(row, value_input_option="USER_ENTERED")
+        sheet.append_rows(rows, value_input_option="USER_ENTERED")  # ★ まとめて追記
 
-    async def append_layer_row(self, keta: str, row: list[Any]) -> None:
-        """桁名に対応するシートへ1行追記。無ければヘッダー付きで自動作成。"""
+    async def append_layer_rows(self, keta: str, rows: list[list[Any]]) -> None:
+        """桁名に対応するシートへ複数行を一括追記する。"""
         if not self.enabled:
             raise SheetsError("Google Sheets が無効です")
-        await self._run(self._append_layer_sync, keta, row)
+        await self._run(self._append_layer_rows_sync, keta, rows)
 
     # ---------- スケジュール専用シート（仕様 11.2）----------
     def _resolve_sheet_title(self, book, base_title: str) -> str:
@@ -143,22 +155,21 @@ class SheetsService:
         book = self._open_book(spreadsheet_id)
         sheet_title = self._resolve_sheet_title(book, title)
 
-        ws = book.add_worksheet(title=sheet_title, rows=500, cols=10)
-        ws.append_row(SCHEDULE_HEADER, value_input_option="USER_ENTERED")
+        ws = book.add_worksheet(title=sheet_title, rows=max(500, len(options) + 10), cols=10)
 
+        rows = [SCHEDULE_HEADER]
         for opt in options:
             label = opt["label"]
             v = votes_map.get(opt["option_id"],
-                              {"ok": [], "maybe": [], "ng": [], "unanswered": []})
-            row = [
+                            {"ok": [], "maybe": [], "ng": [], "unanswered": []})
+            rows.append([
                 label,
                 "\n".join(v.get("ok", [])),
-                "\n".join(v.get("maybe", [])),
                 "\n".join(v.get("ng", [])),
+                "\n".join(v.get("maybe", [])),
                 "\n".join(v.get("unanswered", [])),
-            ]
-            ws.append_row(row, value_input_option="USER_ENTERED")
-
+            ])
+        ws.update(range_name="A1", values=rows, value_input_option="USER_ENTERED")  # ★ 1回のAPI呼び出しに統一
         return sheet_title
 
     async def create_schedule_sheet(self, title: str, options: list[dict],
@@ -172,7 +183,6 @@ class SheetsService:
         return sheet_title
 
     def _update_schedule_sheet_sync(self, sheet_title: str, options: list[dict], votes_map: dict):
-        """既存シートをタイトルで特定して出欠を上書きする（締切時用）。"""
         spreadsheet_id = config.schedule_spreadsheet_id
         if not spreadsheet_id:
             raise SheetsError("SCHEDULE_SPREADSHEET_ID が未設定です")
@@ -180,22 +190,22 @@ class SheetsService:
         try:
             ws = book.worksheet(sheet_title)
         except gspread.WorksheetNotFound:
-            ws = book.add_worksheet(title=sheet_title, rows=500, cols=10)
+            ws = book.add_worksheet(title=sheet_title, rows=max(500, len(options) + 10), cols=10)
 
-        ws.clear()
-        ws.append_row(SCHEDULE_HEADER, value_input_option="USER_ENTERED")
+        rows = [SCHEDULE_HEADER]
         for opt in options:
             label = opt["label"]
             v = votes_map.get(opt["option_id"],
-                              {"ok": [], "maybe": [], "ng": [], "unanswered": []})
-            row = [
+                            {"ok": [], "maybe": [], "ng": [], "unanswered": []})
+            rows.append([
                 label,
                 "\n".join(v.get("ok", [])),
-                "\n".join(v.get("maybe", [])),
                 "\n".join(v.get("ng", [])),
+                "\n".join(v.get("maybe", [])),
                 "\n".join(v.get("unanswered", [])),
-            ]
-            ws.append_row(row, value_input_option="USER_ENTERED")
+            ])
+        ws.clear()
+        ws.update(range_name="A1", values=rows, value_input_option="USER_ENTERED")  # ★ clear+updateの2回のみ
 
     async def update_schedule_sheet(self, sheet_title: str, options: list[dict],
                                     votes_map: dict) -> None:
@@ -214,3 +224,21 @@ class SheetsService:
 
     def end_sync(self) -> None:
         self._syncing = False
+
+class RateLimiter:
+    """1分間の書き込み回数を制限するトークンバケット。"""
+    def __init__(self, max_per_minute: int = 50):  # 60より少し余裕を持たせる
+        self.max_per_minute = max_per_minute
+        self._timestamps: list[float] = []
+        self._lock = asyncio.Lock()
+
+    async def acquire(self):
+        async with self._lock:
+            now_t = time.monotonic()
+            self._timestamps = [t for t in self._timestamps if now_t - t < 60]
+            if len(self._timestamps) >= self.max_per_minute:
+                wait = 60 - (now_t - self._timestamps[0]) + 0.1
+                await asyncio.sleep(wait)
+                now_t = time.monotonic()
+                self._timestamps = [t for t in self._timestamps if now_t - t < 60]
+            self._timestamps.append(now_t)
