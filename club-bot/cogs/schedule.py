@@ -271,6 +271,74 @@ class Schedule(commands.Cog):
                                 executor=interaction.user.display_name),
             ephemeral=True)
 
+    @group.command(name="edit-deadline", description="開催中の日程調整の締切を変更します。")
+    @app_commands.describe(schedule_id="投票 ID", deadline="新しい締切（例: 2026-07-20 または 2026-07-20 23:59）")
+    @require(Level.L2)
+    async def edit_deadline(self, interaction: discord.Interaction, schedule_id: str, deadline: str):
+        await interaction.response.defer(ephemeral=True)
+        schedule = await self.repo.get_schedule(schedule_id)
+        if not schedule:
+            await interaction.followup.send(
+                embed=error_embed("指定 ID の投票が見つかりません。"), ephemeral=True)
+            return
+        if schedule["closed_flag"]:
+            await interaction.followup.send(
+                embed=error_embed("この投票は既に締切済みです。締切済みの投票は変更できません。"),
+                ephemeral=True)
+            return
+
+        try:
+            new_deadline_dt = parse_deadline(deadline)
+        except InvalidDatetimeError:
+            await interaction.followup.send(
+                embed=error_embed(
+                    f"締切「{deadline}」の形式が不正です。"
+                    f"`YYYY-MM-DD` または `YYYY-MM-DD HH:MM` 形式で指定してください。",
+                    code="INVALID_DATETIME"),
+                ephemeral=True)
+            return
+
+        old_deadline_str = fmt_jp(from_iso(schedule["deadline"]))
+        await self.repo.update_deadline(schedule_id, to_iso(new_deadline_dt))
+
+        # 更新後のスケジュール情報でEmbedを再取得
+        updated_schedule = await self.repo.get_schedule(schedule_id)
+
+        # 各候補メッセージの締切表示を更新
+        options = await self.repo.list_options(schedule_id)
+        channel = self.bot.get_channel(int(schedule["channel_id"]))
+        updated_msgs = 0
+        if channel:
+            for opt in options:
+                if not opt.get("message_id"):
+                    continue
+                try:
+                    msg = await channel.fetch_message(int(opt["message_id"]))
+                    embed = await svc.build_option_embed(
+                        self.repo, self.bot, updated_schedule, opt, interaction.guild)
+                    await msg.edit(embed=embed)
+                    updated_msgs += 1
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+
+        # 変更をチャンネルに通知
+        if channel:
+            try:
+                await channel.send(
+                    f"【日程調整】「{schedule['title']}」の締切が変更されました。\n"
+                    f"変更前: {old_deadline_str}\n変更後: {fmt_jp(new_deadline_dt)}")
+            except discord.HTTPException:
+                pass
+
+        await interaction.followup.send(
+            embed=success_embed(
+                "締切を変更しました",
+                f"ID: `{schedule_id}`\n変更前: {old_deadline_str}\n"
+                f"変更後: {fmt_jp(new_deadline_dt)}\n更新メッセージ: {updated_msgs} 件",
+                executor=interaction.user.display_name),
+            ephemeral=True)
+    
+
     # ====================================================================
     # リアクション処理（raw イベント。Bot 再起動後も動作）
     # ====================================================================

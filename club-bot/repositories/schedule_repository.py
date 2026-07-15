@@ -140,3 +140,9 @@ class ScheduleRepository:
         rows = await self.db.fetchall(
             "SELECT * FROM schedules WHERE closed_flag = 1 ORDER BY deadline DESC")
         return [dict(r) for r in rows]
+
+    async def update_deadline(self, schedule_id: str, deadline_iso: str) -> None:
+        """締切を変更する。再通知フラグもリセットし、変更後の期間で再度リマインドできるようにする。"""
+        await self.db.execute(
+            "UPDATE schedules SET deadline = ?, reminder_sent_flag = 0 WHERE schedule_id = ?",
+            (deadline_iso, schedule_id))
