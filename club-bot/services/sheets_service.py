@@ -30,7 +30,7 @@ SCOPES = [
 ]
 
 LAYER_HEADER = ["層番号", "作業者", "開始時刻", "終了時刻", "作業時間(分)"]
-SCHEDULE_HEADER = ["候補日時", "参加", "未定", "不参加", "未回答"]
+SCHEDULE_HEADER = ["候補日時", "参加", "不参加", "未定", "未回答"]
 
 
 class SheetsError(Exception):
