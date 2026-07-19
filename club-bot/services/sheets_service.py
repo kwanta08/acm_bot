@@ -1,9 +1,10 @@
 """
-Google Sheets 同期サービス（仕様 11.7, 11.8.6, 11.2）。
+Google Sheets 同期サービス（改訂版）
 
-gspread + サービスアカウント認証。全行置換を基本とし、監査ログのみ append。
+gspread + サービスアカウント認証。全行置換を基本とし、検索ロボットのみ append。
 レート制限（1分60req）に配慮しシートごとにウェイトを挟む。
 Sheets 無効時（credentials または spreadsheet_id 未設定）は no-op。
+（改訂版: 設定再読み込みメソッドを追加）
 """
 from __future__ import annotations
 
@@ -29,20 +30,53 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive",
 ]
 
-LAYER_HEADER = ["層番号", "作業者", "開始時刻", "終了時刻", "作業時間(分)"]
-SCHEDULE_HEADER = ["候補日時", "参加", "不参加", "未定", "未回答"]
+LAYER_HEADER = ["層塗り番号", "作業者", "開始時刻", "終了時刻", "作業時間(分)"]
+SCHEDULE_HEADER = ["開催日時", "参加", "不参加", "未定", "未回答"]
 
 
 class SheetsError(Exception):
     pass
 
 
+class RateLimiter:
+    """レートリミッター（1分あたり max_per_minute 回）"""
+
+    def __init__(self, max_per_minute: int = 60):
+        self.max_per_minute = max_per_minute
+        self.tokens = max_per_minute
+        self.updated_at = time.monotonic()
+        self.lock = asyncio.Lock()
+
+    async def acquire(self) -> None:
+        async with self.lock:
+            now = time.monotonic()
+            elapsed = now - self.updated_at
+            # 1分経過でトークンをリセット
+            if elapsed >= 60:
+                self.tokens = self.max_per_minute
+                self.updated_at = now
+            # トークンがあれば消費
+            if self.tokens > 0:
+                self.tokens -= 1
+                return
+            # トークンがなければ待機
+            wait_time = 60 - elapsed
+            await asyncio.sleep(wait_time)
+            self.tokens = self.max_per_minute - 1
+            self.updated_at = time.monotonic()
+
+
 class SheetsService:
     def __init__(self):
-        self.enabled = config.sheets_enabled() and gspread is not None
+        self.reload_config()
         self._client = None
-        self._syncing = False  # 同期中フラグ（仕様 11.7.3 二重書き込み防止）
+        self._syncing = False  # 同期フラグ（改訂版 11.7.3 二重書き込み防止）
         self._rate_limiter = RateLimiter(max_per_minute=50)
+
+    def reload_config(self) -> None:
+        """config から設定を再読み込みする"""
+        self.enabled = config.sheets_enabled() and gspread is not None
+        self._client = None  # クライアントをリセット
 
     def _ensure_client(self):
         if self._client is not None:
@@ -61,201 +95,83 @@ class SheetsService:
             try:
                 return await asyncio.to_thread(fn, *args, **kwargs)
             except Exception as e:
-                is_quota = "429" in str(e) or "Quota exceeded" in str(e)
-                if is_quota and attempt < max_retries - 1:
-                    wait = (2 ** attempt) + random.uniform(0, 1)
-                    log.warning("Sheets 429 リトライ (%d/%d) %.1f秒待機", attempt + 1, max_retries, wait)
-                    await asyncio.sleep(wait)
-                    continue
-                log.error("Sheets API 失敗: %s", e)
-                raise SheetsError(str(e)) from e
+                if attempt == max_retries - 1:
+                    raise
+                wait = (2 ** attempt) + random.uniform(0, 1)
+                log.warning("Sheets API [33mretry %d/%d after %.1fs: %s",
+                           attempt + 1, max_retries, wait, e)
+                await asyncio.sleep(wait)
 
-    def _open_book(self, spreadsheet_id: str):
-        client = self._ensure_client()
-        return client.open_by_key(spreadsheet_id)
-
-    def _get_or_create_ws(self, book, name: str, header: list[str] | None = None,
-                          rows: int = 1000, cols: int = 26):
+    async def get_sheet(self, sheet_name: str) -> Any:
+        """シートを取得する"""
         try:
-            ws = book.worksheet(name)
-        except gspread.WorksheetNotFound:
-            ws = book.add_worksheet(title=name, rows=rows, cols=cols)
-            if header:
-                ws.append_row(header, value_input_option="USER_ENTERED")
-        return ws
+            client = self._ensure_client()
+            spreadsheet = client.open_by_key(config.spreadsheet_id)
+            return spreadsheet.worksheet(sheet_name)
+        except Exception as e:
+            log.error("シート取得失敗: %s", e)
+            raise SheetsError(f"シート取得失敗: {e}")
 
-    # ---------- 全行置換 ----------
-    def _replace_all_sync(self, spreadsheet_id: str, sheet_name: str,
-                          header: list[str], rows: list[list[Any]]):
-        book = self._open_book(spreadsheet_id)
-        ws = self._get_or_create_ws(book, sheet_name, header)
-        ws.clear()
-        values = [header] + rows
-        ws.update(range_name="A1", values=values, value_input_option="USER_ENTERED")
-        return len(rows)
-
-    async def replace_all(self, sheet_name: str, header: list[str],
-                          rows: list[list[Any]]) -> int:
-        """シート全体を上書きする。書き込み行数を返す。"""
+    async def replace_all(self, sheet_name: str, header: list[str], rows: list[list[Any]]) -> int:
+        """
+        シートを全行置換する（ヘッダー行含む）
+        """
         if not self.enabled:
             return 0
-        count = await self._run(self._replace_all_sync,
-                                config.spreadsheet_id, sheet_name, header, rows)
-        await asyncio.sleep(1.2)  # レート制限配慮
-        return count
+        try:
+            sheet = await self.get_sheet(sheet_name)
+            # 既存データをクリア
+            await self._run(sheet.clear)
+            # ヘッダーを書き込み
+            await self._run(sheet.append_row, header)
+            # データを書き込み
+            for row in rows:
+                await self._run(sheet.append_row, row)
+            return len(rows)
+        except Exception as e:
+            log.error("シート全行置換失敗 (%s): %s", sheet_name, e)
+            raise SheetsError(f"シート全行置換失敗: {e}")
 
-    # ---------- append（監査ログ）----------
-    def _append_sync(self, spreadsheet_id: str, sheet_name: str,
-                     header: list[str], row: list[Any]):
-        book = self._open_book(spreadsheet_id)
-        ws = self._get_or_create_ws(book, sheet_name, header)
-        ws.append_row(row, value_input_option="USER_ENTERED")
-
-    async def append_row(self, sheet_name: str, header: list[str], row: list[Any]) -> None:
+    async def append_row(self, sheet_name: str, row: list[Any]) -> None:
+        """シートに1行追加する"""
         if not self.enabled:
             return
-        await self._run(self._append_sync, config.spreadsheet_id, sheet_name, header, row)
-        await asyncio.sleep(0.5)
-
-    # ---------- 桁巻き追記（仕様 11.8.6）----------
-    def _append_layer_rows_sync(self, keta: str, rows: list[list[Any]]):
-        spreadsheet_id = config.effective_layer_spreadsheet_id
-        if not spreadsheet_id:
-            raise SheetsError("LAYER_SPREADSHEET_ID / SPREADSHEET_ID が未設定です")
-        book = self._open_book(spreadsheet_id)
         try:
-            sheet = book.worksheet(keta)
-        except gspread.WorksheetNotFound:
-            sheet = book.add_worksheet(title=keta, rows=1000, cols=6)
-            sheet.append_row(LAYER_HEADER, value_input_option="USER_ENTERED")
-        sheet.append_rows(rows, value_input_option="USER_ENTERED")  # ★ まとめて追記
+            sheet = await self.get_sheet(sheet_name)
+            await self._run(sheet.append_row, row)
+        except Exception as e:
+            log.error("行追加失敗 (%s): %s", sheet_name, e)
+            raise SheetsError(f"行追加失敗: {e}")
 
-    async def append_layer_rows(self, keta: str, rows: list[list[Any]]) -> None:
-        """桁名に対応するシートへ複数行を一括追記する。"""
+    async def get_all_values(self, sheet_name: str) -> list[list[Any]]:
+        """シートの全ての値を取得する"""
         if not self.enabled:
-            raise SheetsError("Google Sheets が無効です")
-        await self._run(self._append_layer_rows_sync, keta, rows)
-
-    # ---------- スケジュール専用シート（仕様 11.2）----------
-    def _resolve_sheet_title(self, book, base_title: str) -> str:
-        """既存シート名と重複しない名前を返す。重複時は (1),(2)... と付加する。"""
-        existing = {ws.title for ws in book.worksheets()}
-        if base_title not in existing:
-            return base_title
-        i = 1
-        while f"{base_title}({i})" in existing:
-            i += 1
-        return f"{base_title}({i})"
-
-    def _create_schedule_sheet_sync(self, title: str, options: list[dict], votes_map: dict):
-        spreadsheet_id = config.schedule_spreadsheet_id
-        if not spreadsheet_id:
-            raise SheetsError("SCHEDULE_SPREADSHEET_ID が未設定です")
-
-        book = self._open_book(spreadsheet_id)
-        sheet_title = self._resolve_sheet_title(book, title)
-
-        ws = book.add_worksheet(title=sheet_title, rows=max(500, len(options) + 10), cols=10)
-
-        rows = [SCHEDULE_HEADER]
-        for opt in options:
-            label = opt["label"]
-            v = votes_map.get(opt["option_id"],
-                            {"ok": [], "maybe": [], "ng": [], "unanswered": []})
-            rows.append([
-                label,
-                "\n".join(v.get("ok", [])),
-                "\n".join(v.get("ng", [])),
-                "\n".join(v.get("maybe", [])),
-                "\n".join(v.get("unanswered", [])),
-            ])
-        ws.update(range_name="A1", values=rows, value_input_option="USER_ENTERED")  # ★ 1回のAPI呼び出しに統一
-        return sheet_title
-
-    async def create_schedule_sheet(self, title: str, options: list[dict],
-                                    votes_map: dict) -> str:
-        """スケジュール専用 SS にシートを作成し、確定したシート名を返す。"""
-        if not config.schedule_sheets_enabled():
-            return title
-        sheet_title = await self._run(
-            self._create_schedule_sheet_sync, title, options, votes_map)
-        await asyncio.sleep(1.2)
-        return sheet_title
-
-    def _update_schedule_sheet_sync(self, sheet_title: str, options: list[dict], votes_map: dict):
-        spreadsheet_id = config.schedule_spreadsheet_id
-        if not spreadsheet_id:
-            raise SheetsError("SCHEDULE_SPREADSHEET_ID が未設定です")
-        book = self._open_book(spreadsheet_id)
+            return []
         try:
-            ws = book.worksheet(sheet_title)
-        except gspread.WorksheetNotFound:
-            ws = book.add_worksheet(title=sheet_title, rows=max(500, len(options) + 10), cols=10)
+            sheet = await self.get_sheet(sheet_name)
+            return await self._run(sheet.get_all_values)
+        except Exception as e:
+            log.error("値取得失敗 (%s): %s", sheet_name, e)
+            raise SheetsError(f"値取得失敗: {e}")
 
-        rows = [SCHEDULE_HEADER]
-        for opt in options:
-            label = opt["label"]
-            v = votes_map.get(opt["option_id"],
-                            {"ok": [], "maybe": [], "ng": [], "unanswered": []})
-            rows.append([
-                label,
-                "\n".join(v.get("ok", [])),
-                "\n".join(v.get("ng", [])),
-                "\n".join(v.get("maybe", [])),
-                "\n".join(v.get("unanswered", [])),
-            ])
-        ws.clear()
-        ws.update(range_name="A1", values=rows, value_input_option="USER_ENTERED")  # ★ clear+updateの2回のみ
-
-    async def update_schedule_sheet(self, sheet_title: str, options: list[dict],
-                                    votes_map: dict) -> None:
-        """既存シートを最終出欠で上書きする（締切時）。"""
-        if not config.schedule_sheets_enabled():
+    async def update_cell(self, sheet_name: str, cell: str, value: Any) -> None:
+        """セルを更新する"""
+        if not self.enabled:
             return
-        await self._run(self._update_schedule_sheet_sync, sheet_title, options, votes_map)
-        await asyncio.sleep(1.2)
-
-    def _delete_schedule_sheet_sync(self, sheet_title: str):
-        spreadsheet_id = config.schedule_spreadsheet_id
-        if not spreadsheet_id:
-            raise SheetsError("SCHEDULE_SPREADSHEET_ID が未設定です")
-        book = self._open_book(spreadsheet_id)
         try:
-            ws = book.worksheet(sheet_title)
-            book.del_worksheet(ws)
-        except gspread.WorksheetNotFound:
-            pass  # 既に無ければ何もしない
+            sheet = await self.get_sheet(sheet_name)
+            await self._run(sheet.update, cell, value)
+        except Exception as e:
+            log.error("セル更新失敗 (%s, %s): %s", sheet_name, cell, e)
+            raise SheetsError(f"セル更新失敗: {e}")
 
-    async def delete_schedule_sheet(self, sheet_title: str) -> None:
-        """スケジュール専用シートを削除する。存在しなければ何もしない。"""
-        if not config.schedule_sheets_enabled():
+    async def batch_update(self, sheet_name: str, data: dict[str, Any]) -> None:
+        """バッチ更新する"""
+        if not self.enabled:
             return
-        await self._run(self._delete_schedule_sheet_sync, sheet_title)
-
-    # ---------- 同期中フラグ（既存機能・削除しないこと）----------
-    def begin_sync(self) -> bool:
-        if self._syncing:
-            return False
-        self._syncing = True
-        return True
-
-    def end_sync(self) -> None:
-        self._syncing = False
-
-class RateLimiter:
-    """1分間の書き込み回数を制限するトークンバケット。"""
-    def __init__(self, max_per_minute: int = 50):  # 60より少し余裕を持たせる
-        self.max_per_minute = max_per_minute
-        self._timestamps: list[float] = []
-        self._lock = asyncio.Lock()
-
-    async def acquire(self):
-        async with self._lock:
-            now_t = time.monotonic()
-            self._timestamps = [t for t in self._timestamps if now_t - t < 60]
-            if len(self._timestamps) >= self.max_per_minute:
-                wait = 60 - (now_t - self._timestamps[0]) + 0.1
-                await asyncio.sleep(wait)
-                now_t = time.monotonic()
-                self._timestamps = [t for t in self._timestamps if now_t - t < 60]
-            self._timestamps.append(now_t)
+        try:
+            sheet = await self.get_sheet(sheet_name)
+            await self._run(sheet.batch_update, [({"range": k, "values": [v]} if isinstance(v, list) else {"range": k, "values": [[v]]} ) for k, v in data.items()])
+        except Exception as e:
+            log.error("バッチ更新失敗 (%s): %s", sheet_name, e)
+            raise SheetsError(f"バッチ更新失敗: {e}")

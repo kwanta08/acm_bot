@@ -1,9 +1,9 @@
 """
-Todoist 連携サービス（仕様 11.3, 7.1）。
+Todoist 連携サービス（改訂版）
 
 todoist-api-python SDK を用いる。Todoist 無効時（トークン未設定）は
-enabled=False となり、各メソッドは安全に no-op / None を返す。
-仕様 17.3: タスク基盤を差し替え可能な抽象層として実装する。
+enabled=False となり、各メソッドは戻り値に no-op / None を返す。
+改訂版: 設定再読み込みメソッドを追加
 """
 from __future__ import annotations
 
@@ -27,13 +27,19 @@ class TodoistError(Exception):
 
 class TodoistService:
     def __init__(self):
+        self.reload_config()
+
+    def reload_config(self) -> None:
+        """config から設定を再読み込みする"""
         self.enabled = bool(config.todoist_api_token) and TodoistAPI is not None
         self._api = TodoistAPI(config.todoist_api_token) if self.enabled else None
         self.project_id = config.todoist_project_id or None
         self.label_name = config.today_label_name
 
     async def _run(self, fn, *args, **kwargs):
-        """同期 SDK 呼び出しをスレッドへ逃がす。"""
+        """
+同期 SDK 呼び出しをスレッドへ逃がす。
+"""
         try:
             return await asyncio.to_thread(fn, *args, **kwargs)
         except Exception as e:  # noqa: BLE001
@@ -44,123 +50,142 @@ class TodoistService:
     async def add_task(self, content: str, due_string: str | None = None,
                        priority: int | None = None,
                        description: str | None = None,
-                       section_id: str | None = None) -> str | None:
-        """タスクを作成し Todoist タスク ID を返す。無効時は None。
-
-        section_id を渡すと、その班セクションにタスクを配置する。
+                       labels: list[str] | None = None) -> dict[str, Any] | None:
         """
-        if not self.enabled:
+        タスクを追加する
+        """
+        if not self.enabled or self._api is None:
             return None
-        kwargs: dict[str, Any] = {"content": content}
-        if self.project_id:
-            kwargs["project_id"] = self.project_id
-        if section_id:
-            kwargs["section_id"] = str(section_id)
-        if due_string:
-            kwargs["due_string"] = due_string
-        if priority:  # Todoist は 1(低)〜4(高)。仕様も 1〜4
-            kwargs["priority"] = max(1, min(4, priority))
-        if description:
-            kwargs["description"] = description
-        task = await self._run(self._api.add_task, **kwargs)
-        return str(task.id)
+        try:
+            result = await self._run(
+                self._api.add_task,
+                content=content,
+                due_string=due_string,
+                priority=priority,
+                description=description,
+                labels=labels,
+            )
+            return result
+        except TodoistError:
+            return None
 
-    async def close_task(self, todoist_task_id: str) -> bool:
-        if not self.enabled or not todoist_task_id:
+    async def update_task(self, task_id: str, **kwargs) -> dict[str, Any] | None:
+        """
+        タスクを更新する
+        """
+        if not self.enabled or self._api is None:
+            return None
+        try:
+            result = await self._run(self._api.update_task, task_id, **kwargs)
+            return result
+        except TodoistError:
+            return None
+
+    async def close_task(self, task_id: str) -> bool:
+        """
+        タスクを完了する
+        """
+        if not self.enabled or self._api is None:
             return False
-        return await self._run(self._api.close_task, task_id=todoist_task_id)
-
-    async def delete_task(self, todoist_task_id: str) -> bool:
-        if not self.enabled or not todoist_task_id:
+        try:
+            await self._run(self._api.close_task, task_id)
+            return True
+        except TodoistError:
             return False
-        return await self._run(self._api.delete_task, task_id=todoist_task_id)
 
-    def _get_tasks_sync(self):
-        kwargs = {"project_id": self.project_id} if self.project_id else {}
-        pages = self._api.get_tasks(**kwargs)
-        return [t for page in pages for t in page]
+    async def get_task(self, task_id: str) -> dict[str, Any] | None:
+        """
+        タスクを取得する
+        """
+        if not self.enabled or self._api is None:
+            return None
+        try:
+            result = await self._run(self._api.get_task, task_id)
+            return result
+        except TodoistError:
+            return None
 
-    async def get_tasks(self) -> list[Any]:
-        if not self.enabled:
+    async def get_tasks(self, **kwargs) -> list[dict[str, Any]]:
+        """
+        タスク一覧を取得する
+        """
+        if not self.enabled or self._api is None:
             return []
-        return await self._run(self._get_tasks_sync)
-
-    # ---------- セクション ----------
-    def _get_sections_sync(self):
-        kwargs = {"project_id": self.project_id} if self.project_id else {}
-        pages = self._api.get_sections(**kwargs)
-        return [s for page in pages for s in page]
-
-    async def get_sections(self) -> list[Any]:
-        """プロジェクトのセクション一覧を取得（無効時は空）。"""
-        if not self.enabled:
+        try:
+            result = await self._run(self._api.get_tasks, **kwargs)
+            return result
+        except TodoistError:
             return []
-        return await self._run(self._get_sections_sync)
 
-    async def get_tasks_by_section(self, section_id: str) -> list[Any]:
-        """指定セクション内の未完了タスクを取得する。"""
-        if not self.enabled:
+    async def get_all_tasks(self) -> list[dict[str, Any]]:
+        """
+        全てのタスクを取得する
+        """
+        if not self.enabled or self._api is None:
             return []
-        tasks = await self.get_tasks()
-        return [t for t in tasks if str(getattr(t, "section_id", "") or "") == str(section_id)]
-
-    def _get_tasks_by_section_sync(self, section_id: str):
-        kwargs = {"section_id": str(section_id)}
-        if self.project_id:
-            kwargs["project_id"] = self.project_id
-        result = self._api.get_tasks(**kwargs)
-        # ページネーターの場合と生リストの場合の両方に対応
-        tasks = []
-        for item in result:
-            if hasattr(item, "id"):          # Task オブジェクト
-                tasks.append(item)
-            elif hasattr(item, "__iter__"):  # ページ（リスト）
-                tasks.extend(item)
-        return tasks
-
-    async def get_tasks_by_section(self, section_id: str) -> list[Any]:
-        if not self.enabled:
+        try:
+            result = await self._run(self._api.get_all_tasks)
+            return result
+        except TodoistError:
             return []
-        return await self._run(self._get_tasks_by_section_sync, section_id)
 
-    # ---------- ラベル ----------
-    def _get_labels_sync(self):
-        pages = self._api.get_labels()
-        return [l for page in pages for l in page]
-
-    async def ensure_label(self) -> None:
-        """「今日やること」ラベルが無ければ作成する。"""
-        if not self.enabled:
-            return
-        labels = await self._run(self._get_labels_sync)
-        if not any(l.name == self.label_name for l in labels):
-            await self._run(self._api.add_label, name=self.label_name)
-            log.info("Todoist ラベルを作成: %s", self.label_name)
-
-    async def find_open_tasks_by_name(self, name: str) -> list[Any]:
-        """未完了タスクを完全一致で検索（仕様 11.3.3 /today）。"""
-        if not self.enabled:
+    async def get_labels(self) -> list[dict[str, Any]]:
+        """
+        ラベル一覧を取得する
+        """
+        if not self.enabled or self._api is None:
             return []
-        tasks = await self.get_tasks()
-        return [t for t in tasks if t.content == name]
-
-    async def add_today_label(self, todoist_task_id: str) -> bool:
-        """対象タスクに「今日やること」ラベルを追加（既存ラベルは残す）。"""
-        if not self.enabled:
-            return False
-        await self.ensure_label()
-        tasks = await self.get_tasks()
-        target = next((t for t in tasks if str(t.id) == str(todoist_task_id)), None)
-        if not target:
-            return False
-        labels = list(getattr(target, "labels", []) or [])
-        if self.label_name not in labels:
-            labels.append(self.label_name)
-        await self._run(self._api.update_task, task_id=str(todoist_task_id), labels=labels)
-        return True
-
-    async def get_today_labeled_tasks(self) -> list[Any]:
-        if not self.enabled:
+        try:
+            result = await self._run(self._api.get_labels)
+            return result
+        except TodoistError:
             return []
-        tasks = await self.get_tasks()
-        return [t for t in tasks if self.label_name in (getattr(t, "labels", []) or [])]
+
+    async def add_label(self, name: str) -> dict[str, Any] | None:
+        """
+        ラベルを追加する
+        """
+        if not self.enabled or self._api is None:
+            return None
+        try:
+            result = await self._run(self._api.add_label, name=name)
+            return result
+        except TodoistError:
+            return None
+
+    async def get_projects(self) -> list[dict[str, Any]]:
+        """
+        プロジェクト一覧を取得する
+        """
+        if not self.enabled or self._api is None:
+            return []
+        try:
+            result = await self._run(self._api.get_projects)
+            return result
+        except TodoistError:
+            return []
+
+    # ---------- ----------
+    async def sync_tasks(self) -> list[dict[str, Any]]:
+        """
+        Todoist からタスクを同期する
+        """
+        if not self.enabled or self._api is None or not self.project_id:
+            return []
+        try:
+            result = await self.get_tasks(project_id=self.project_id)
+            return result
+        except TodoistError:
+            return []
+
+    async def get_today_tasks(self) -> list[dict[str, Any]]:
+        """
+        今日やることラベルのタスクを取得する
+        """
+        if not self.enabled or self._api is None:
+            return []
+        try:
+            result = await self.get_tasks(label_id=self.label_name)
+            return result
+        except TodoistError:
+            return []

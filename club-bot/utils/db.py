@@ -1,8 +1,8 @@
 """
-SQLite データベース層（仕様 10）。
+SQLite データベース層（改訂版）
 
-aiosqlite による非同期アクセス。初回起動時に全テーブルを自動生成する
-（仕様 11.1.2）。
+aiosqlite による非同期アクセス。起動時に全テーブルを自動生成する
+（改訂版: 設定テーブル追加）
 """
 from __future__ import annotations
 
@@ -14,8 +14,14 @@ from utils.logger import get_logger
 
 log = get_logger("db")
 
-# 仕様 10 のスキーマ定義
+# 改訂版スキーマ（設定テーブル追加）
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS settings (
+    setting_key   TEXT PRIMARY KEY,
+    setting_value TEXT NOT NULL,
+    updated_at   TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
 CREATE TABLE IF NOT EXISTS teams (
     team_id        INTEGER PRIMARY KEY AUTOINCREMENT,
     team_key       TEXT UNIQUE NOT NULL,
@@ -134,11 +140,14 @@ CREATE INDEX IF NOT EXISTS idx_layer_records_synced ON layer_records(synced_flag
 CREATE INDEX IF NOT EXISTS idx_votes_option ON schedule_votes(option_id);
 CREATE INDEX IF NOT EXISTS idx_options_schedule ON schedule_options(schedule_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
+CREATE INDEX IF NOT EXISTS idx_settings_key ON settings(setting_key);
 """
 
 
 class Database:
-    """単一接続を保持する薄いラッパ。"""
+    """
+唯一接続を保持する軽いラッパー。
+"""
 
     def __init__(self, path: str):
         self.path = path
@@ -160,7 +169,9 @@ class Database:
         await self._conn.commit()
 
     async def _migrate(self) -> None:
-        """既存 DB に後から追加されたカラムを補完する（後方互換用）。"""
+        """
+既存 DB に備えられなかったカラムを追加する（移行用）
+"""
         assert self._conn is not None
         cur = await self._conn.execute("PRAGMA table_info(schedules)")
         cols = {row[1] for row in await cur.fetchall()}
@@ -197,3 +208,35 @@ class Database:
         rows = await cur.fetchall()
         await cur.close()
         return list(rows)
+
+    # 設定関連メソッド
+    async def get_setting(self, key: str) -> str | None:
+        """設定値を取得する"""
+        row = await self.fetchone(
+            "SELECT setting_value FROM settings WHERE setting_key = ?", (key,)
+        )
+        return row["setting_value"] if row else None
+
+    async def set_setting(self, key: str, value: str) -> None:
+        """設定値を保存する（存在すれば更新、なければ挿入）"""
+        await self.execute(
+            """INSERT INTO settings (setting_key, setting_value, updated_at)
+               VALUES (?, ?, datetime('now', 'localtime'))
+               ON CONFLICT(setting_key) DO UPDATE SET
+               setting_value = excluded.setting_value,
+               updated_at = datetime('now', 'localtime')""",
+            (key, value)
+        )
+
+    async def delete_setting(self, key: str) -> bool:
+        """設定値を削除する"""
+        cur = await self.conn.execute(
+            "DELETE FROM settings WHERE setting_key = ?", (key,)
+        )
+        await self.conn.commit()
+        return cur.rowcount > 0
+
+    async def get_all_settings(self) -> dict[str, str]:
+        """全ての設定を辞書で取得する"""
+        rows = await self.fetchall("SELECT setting_key, setting_value FROM settings")
+        return {row["setting_key"]: row["setting_value"] for row in rows}
