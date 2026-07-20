@@ -1,20 +1,12 @@
 """
-<<<<<<< HEAD
-鳥人間サークル統合運用 Discord Bot エントリーポイント（改訂版）
-
-- .env 読み込み・必須設定検証（欠落時は起動停止）
-- SQLite 初期化・初期チーム・初期メンバー投入
-=======
 鳥人間サークル統合運用 Discord Bot エントリーポイント（マルチテナント版）
 
 - .env 読み込み・必須設定検証（DISCORD_TOKEN のみ必須。GUILD_ID は後方互換用の任意指定）
 - SQLite 初期化・ギルドごとの初期チーム/初期設定投入
->>>>>>> 803617a (v4.0)
 - 各 Cog 読み込み
 - スラッシュコマンド同期（参加中の全ギルド）
 - on_guild_join による新規ギルド自動セットアップ
 - グローバルエラーハンドラ
-（改訂版: 設定をデータベースから読み込み、ボットコマンドでカスタマイズ可能に）
 """
 from __future__ import annotations
 
@@ -75,20 +67,6 @@ class ClubBot(commands.Bot):
         self._initial_guild_setup_done = False
 
     async def setup_hook(self) -> None:
-<<<<<<< HEAD
-        # DB 接続・スキーマ初期化
-        await self.db.connect()
-        
-        # データベースから設定を読み込む（環境変数が優先）
-        await config.load_from_db(self.db)
-        
-        # サービスの設定を再読み込み
-        self.todoist.reload_config()
-        self.sheets.reload_config()
-        
-        # 初期チーム投入
-        await self._seed_teams()
-=======
         # DB 接続・スキーマ初期化（旧 DB は guild_id 自動マイグレーション）
         await self.db.connect()
 
@@ -103,7 +81,6 @@ class ClubBot(commands.Bot):
         # レガシーギルド（GUILD_ID 指定時）の初期チーム投入
         if config.guild_id:
             await self._seed_teams(config.guild_id)
->>>>>>> 803617a (v4.0)
 
         # Cog 読み込み
         for cog in COGS:
@@ -128,16 +105,6 @@ class ClubBot(commands.Bot):
         # グローバルエラーハンドラ
         self.tree.error(self.on_app_command_error)
 
-<<<<<<< HEAD
-    async def _seed_teams(self) -> None:
-        """
-        初期チームを投入（改訂版 10.1）
-        """
-        repo = MemberRepository(self.db)
-        for key, name in INITIAL_TEAMS:
-            await repo.upsert_team(key, name)
-        log.info("初期チームを確認・投入しました（%d チーム）", len(INITIAL_TEAMS))
-=======
     async def _seed_teams(self, guild_id: int) -> None:
         """
         初期チームを投入（改訂版 10.1）。guild_id 単位で冪等。
@@ -147,7 +114,6 @@ class ClubBot(commands.Bot):
             await repo.upsert_team(guild_id, key, name)
         log.info("初期チームを確認・投入しました（guild=%s, %d チーム）",
                  guild_id, len(INITIAL_TEAMS))
->>>>>>> 803617a (v4.0)
 
     # ------------------------------------------------------------------
     # ギルド自動セットアップ
@@ -296,22 +262,9 @@ class ClubBot(commands.Bot):
         # 起動ログをチャンネルへ
         await self.log_to_channel(f"Bot を起動しました: {self.user}")
 
-<<<<<<< HEAD
-    async def log_to_channel(self, message: str) -> None:
-        """#bot-log チャンネルへログを投稿する（改訂版 11.1.2）"""
-        if not config.bot_log_channel_id:
-            return
-        channel = self.get_channel(config.bot_log_channel_id)
-        if channel is None:
-            try:
-                channel = await self.fetch_channel(config.bot_log_channel_id)
-            except Exception:
-                return
-=======
     async def on_guild_join(self, guild: discord.Guild) -> None:
         """新規ギルド参加時の自動セットアップ（招待するだけで利用開始できる）。"""
         log.info("新規ギルドに参加しました: %s (id=%s)", guild.name, guild.id)
->>>>>>> 803617a (v4.0)
         try:
             await self._ensure_guild_setup(guild)
         except Exception as e:  # noqa: BLE001

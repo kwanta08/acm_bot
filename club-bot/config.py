@@ -1,10 +1,4 @@
 """
-<<<<<<< HEAD
-設定読み込みモジュール（改訂版）
-
-.env を読み込み、必要項目の欠落を検証する。
-改訂版: 設定をデータベースからも読み込むようにし、ボットコマンドでカスタマイズ可能にする
-=======
 設定読み込みモジュール（マルチテナント版）
 
 .env を読み込み、必要項目の欠落を検証する。
@@ -16,7 +10,6 @@
   guild_id キーで解決する。config.for_guild(guild_id) がキャッシュ付きの
   GuildConfig を返す。解決順は「ギルド別 DB 設定 > 環境変数 > デフォルト」。
 - Google Sheets 関連の設定項目は従来どおりグローバル（変更なし）。
->>>>>>> 803617a (v4.0)
 """
 from __future__ import annotations
 
@@ -141,38 +134,24 @@ class GuildConfig:
 class Config:
     """
     設定クラス
-<<<<<<< HEAD
-    環境変数 > データベースの優先順で設定を読み込む
-    """
-    # Discord - 環境変数のみ（必須）
-=======
     環境変数 > データベース（レガシーギルド）の優先順でグローバル設定を読み込む。
     ギルド固有設定は for_guild() で解決する。
     """
     # Discord - 環境変数のみ（DISCORD_TOKEN は必須）
->>>>>>> 803617a (v4.0)
     discord_token: str = _get_str("DISCORD_TOKEN")
     # GUILD_ID は任意（後方互換のためのレガシーギルド ID。
     # 指定時はそのギルドの DB 設定をグローバル設定としても読み込み、
     # コマンド同期をこのギルドへ即時反映する）
     guild_id: int | None = _get_int("GUILD_ID")
 
-<<<<<<< HEAD
-    # チャンネルID - 環境変数 or データベース
-=======
     # チャンネルID - 環境変数 or データベース（ギルド別解決のフォールバック）
->>>>>>> 803617a (v4.0)
     bot_log_channel_id: int | None = _get_int("BOT_LOG_CHANNEL_ID")
     default_announce_channel_id: int | None = _get_int("DEFAULT_ANNOUNCE_CHANNEL_ID")
     default_schedule_channel_id: int | None = _get_int("DEFAULT_SCHEDULE_CHANNEL_ID")
     default_progress_channel_id: int | None = _get_int("DEFAULT_PROGRESS_CHANNEL_ID")
     default_task_channel_id: int | None = _get_int("DEFAULT_TASK_CHANNEL_ID")
 
-<<<<<<< HEAD
-    # ロールID - 環境変数 or データベース
-=======
     # ロールID - 環境変数 or データベース（ギルド別解決のフォールバック）
->>>>>>> 803617a (v4.0)
     exec_role_id: int | None = _get_int("EXEC_ROLE_ID")
     admin_role_id: int | None = _get_int("ADMIN_ROLE_ID")
     leader_role_ids: List[int] = field(default_factory=lambda: _get_int_list("LEADER_ROLE_IDS"))
@@ -181,21 +160,13 @@ class Config:
     secondary_team_role_ids: dict[str, int] = field(
         default_factory=lambda: _get_team_role_map("SECONDARY_TEAM_ROLE_IDS"))
 
-<<<<<<< HEAD
-    # Todoist - 環境変数 or データベース
-=======
     # Todoist - 環境変数 or データベース（グローバル）
->>>>>>> 803617a (v4.0)
     todoist_api_token: str = _get_str("TODOIST_API_TOKEN")
     todoist_project_id: str = _get_str("TODOIST_PROJECT_ID")
     today_label_name: str = _get_str("TODAY_LABEL_NAME", "今日やること")
     today_label_channel_id: int | None = _get_int("TODAY_LABEL_CHANNEL_ID")
 
-<<<<<<< HEAD
-    # Google Sheets - 環境変数 or データベース
-=======
     # Google Sheets - 環境変数 or データベース（グローバル・変更なし）
->>>>>>> 803617a (v4.0)
     google_credentials_path: str = _get_str("GOOGLE_CREDENTIALS_PATH", "./credentials.json")
     spreadsheet_id: str = _get_str("SPREADSHEET_ID")
     sheet_tasks: str = _get_str("SHEET_TASKS", "tasks")
@@ -209,18 +180,12 @@ class Config:
     tz: str = _get_str("TZ", "Asia/Tokyo")
     db_path: str = _get_str("DB_PATH", "./data/club.db")
 
-<<<<<<< HEAD
-    # データベース接続（設定読み込み用）
-    _db: "Database | None" = None
-
-=======
     # データベース接続（設定読み込み用。setup_hook で接続後に保持される）
     _db: "Database | None" = None
 
     # ギルド別設定キャッシュ（guild_id -> GuildConfig）
     _guild_cache: dict[int, GuildConfig] = field(default_factory=dict)
 
->>>>>>> 803617a (v4.0)
     @property
     def effective_layer_spreadsheet_id(self) -> str:
         """
@@ -242,10 +207,7 @@ class Config:
     def validate(self) -> list[str]:
         """
         必須設定の検証。欠落項目のリストを返す（空なら正常）
-<<<<<<< HEAD
-=======
         マルチテナント化により GUILD_ID は必須ではない。
->>>>>>> 803617a (v4.0)
         """
         missing: list[str] = []
         if not self.discord_token:
@@ -280,127 +242,6 @@ class Config:
         v = os.getenv("SCHEDULE_EMOJI_NG_ID")
         return int(v) if v else None
 
-<<<<<<< HEAD
-    async def load_from_db(self, db: "Database") -> None:
-        """
-        データベースから設定を読み込む（環境変数が優先）
-        """
-        from repositories.settings_repository import SettingsRepository
-        
-        repo = SettingsRepository(db)
-        
-        # 環境変数が設定されていない場合のみ、データベースから読み込む
-        if self.bot_log_channel_id is None:
-            val = await repo.get_int("BOT_LOG_CHANNEL_ID")
-            if val is not None:
-                self.bot_log_channel_id = val
-        
-        if self.default_announce_channel_id is None:
-            val = await repo.get_int("DEFAULT_ANNOUNCE_CHANNEL_ID")
-            if val is not None:
-                self.default_announce_channel_id = val
-        
-        if self.default_schedule_channel_id is None:
-            val = await repo.get_int("DEFAULT_SCHEDULE_CHANNEL_ID")
-            if val is not None:
-                self.default_schedule_channel_id = val
-        
-        if self.default_progress_channel_id is None:
-            val = await repo.get_int("DEFAULT_PROGRESS_CHANNEL_ID")
-            if val is not None:
-                self.default_progress_channel_id = val
-        
-        if self.default_task_channel_id is None:
-            val = await repo.get_int("DEFAULT_TASK_CHANNEL_ID")
-            if val is not None:
-                self.default_task_channel_id = val
-        
-        if self.exec_role_id is None:
-            val = await repo.get_int("EXEC_ROLE_ID")
-            if val is not None:
-                self.exec_role_id = val
-        
-        if self.admin_role_id is None:
-            val = await repo.get_int("ADMIN_ROLE_ID")
-            if val is not None:
-                self.admin_role_id = val
-        
-        if not self.leader_role_ids:
-            val = await repo.get_int_list("LEADER_ROLE_IDS")
-            if val:
-                self.leader_role_ids = val
-        
-        if not self.todoist_api_token:
-            val = await repo.get("TODOIST_API_TOKEN")
-            if val:
-                self.todoist_api_token = val
-        
-        if not self.todoist_project_id:
-            val = await repo.get("TODOIST_PROJECT_ID")
-            if val:
-                self.todoist_project_id = val
-        
-        if self.today_label_name == "今日やること":  # デフォルト値の場合
-            val = await repo.get("TODAY_LABEL_NAME")
-            if val:
-                self.today_label_name = val
-        
-        if self.today_label_channel_id is None:
-            val = await repo.get_int("TODAY_LABEL_CHANNEL_ID")
-            if val is not None:
-                self.today_label_channel_id = val
-        
-        if self.google_credentials_path == "./credentials.json":  # デフォルト値の場合
-            val = await repo.get("GOOGLE_CREDENTIALS_PATH")
-            if val:
-                self.google_credentials_path = val
-        
-        if not self.spreadsheet_id:
-            val = await repo.get("SPREADSHEET_ID")
-            if val:
-                self.spreadsheet_id = val
-        
-        if self.sheet_tasks == "tasks":  # デフォルト値の場合
-            val = await repo.get("SHEET_TASKS")
-            if val:
-                self.sheet_tasks = val
-        
-        if self.sheet_attendance == "attendance":  # デフォルト値の場合
-            val = await repo.get("SHEET_ATTENDANCE")
-            if val:
-                self.sheet_attendance = val
-        
-        if self.sheet_members == "members":  # デフォルト値の場合
-            val = await repo.get("SHEET_MEMBERS")
-            if val:
-                self.sheet_members = val
-        
-        if self.sheet_team_summary == "team_summary":  # デフォルト値の場合
-            val = await repo.get("SHEET_TEAM_SUMMARY")
-            if val:
-                self.sheet_team_summary = val
-        
-        if self.sheet_audit_log == "audit_log":  # デフォルト値の場合
-            val = await repo.get("SHEET_AUDIT_LOG")
-            if val:
-                self.sheet_audit_log = val
-        
-        if not self.layer_spreadsheet_id:
-            val = await repo.get("LAYER_SPREADSHEET_ID")
-            if val:
-                self.layer_spreadsheet_id = val
-        
-        if self.tz == "Asia/Tokyo":  # デフォルト値の場合
-            val = await repo.get("TZ")
-            if val:
-                self.tz = val
-        
-        if self.db_path == "./data/club.db":  # デフォルト値の場合
-            val = await repo.get("DB_PATH")
-            if val:
-                self.db_path = val
-
-=======
     # ------------------------------------------------------------------
     # ギルド別設定解決
     # ------------------------------------------------------------------
@@ -606,7 +447,6 @@ class Config:
         # レガシーギルドのグローバル値が変わった可能性があるためキャッシュを破棄
         self.clear_guild_cache()
 
->>>>>>> 803617a (v4.0)
 
 config = Config()
 

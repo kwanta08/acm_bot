@@ -1,11 +1,4 @@
 """
-<<<<<<< HEAD
-権限モジュール（改訂版）
-
-L1 一般メンバー / L2 班長 / L3 幹部 / L4 Bot管理者。
-ロール ID は config から取得する。L4 は L3,L2,L1 を内包する階層判定。
-（改訂版: is_admin チェックを追加）
-=======
 権限モジュール（マルチテナント版）
 
 L1 一般メンバー / L2 班長 / L3 幹部 / L4 Bot管理者。
@@ -14,7 +7,6 @@ L4 は L3,L2,L1 を内包する階層判定。
 
 また、コマンドがサーバー内で実行されたことを確認する ensure_guild() を提供する
 （DM 実行時はギルド ID を解決できないため拒否する）。
->>>>>>> 803617a (v4.0)
 """
 from __future__ import annotations
 
@@ -34,16 +26,10 @@ class Level(IntEnum):
     L4 = 4  # Bot 管理者
 
 
-<<<<<<< HEAD
-def get_level(member: discord.Member) -> Level:
-    """
-メンバーの権限レベルを判定する。最も高いものを返す。"""
-=======
 def get_level(member: discord.Member, gconf: GuildConfig) -> Level:
     """
     メンバーの権限レベルを判定する。最も高いものを返す。
     ロール ID はギルド別設定 gconf を参照する。"""
->>>>>>> 803617a (v4.0)
     if member.guild and member.id == member.guild.owner_id:
         return Level.L4
 
@@ -67,13 +53,8 @@ def has_level(member: discord.Member, gconf: GuildConfig, required: Level) -> bo
 
 class PermissionDenied(app_commands.CheckFailure):
     """
-<<<<<<< HEAD
-権限不足を表す例外（PERMISSION_DENIED）
-"""
-=======
     権限不足を表す例外（PERMISSION_DENIED）
     """
->>>>>>> 803617a (v4.0)
 
     def __init__(self, required: Level):
         self.required = required
@@ -87,14 +68,9 @@ async def _guild_config_for(interaction: discord.Interaction) -> GuildConfig:
 
 def require(level: Level):
     """
-<<<<<<< HEAD
-スラッシュコマンド用の権限チェックデコレータ。
-"""
-=======
     スラッシュコマンド用の権限チェックデコレータ。
     ギルド別設定のロール ID で判定する（DM からの実行は拒否）。
     """
->>>>>>> 803617a (v4.0)
 
     async def predicate(interaction: discord.Interaction) -> bool:
         member = interaction.user
@@ -113,13 +89,6 @@ async def is_admin(interaction: discord.Interaction) -> bool:
     管理者権限チェック（L4 以上）
     """
     member = interaction.user
-<<<<<<< HEAD
-    if not isinstance(member, discord.Member):
-        raise PermissionDenied(Level.L4)
-    if not has_level(member, Level.L4):
-        raise PermissionDenied(Level.L4)
-    return True
-=======
     if not isinstance(member, discord.Member) or interaction.guild is None:
         raise PermissionDenied(Level.L4)
     gconf = await _guild_config_for(interaction)
@@ -151,4 +120,3 @@ async def ensure_guild(interaction: discord.Interaction) -> int | None:
     except Exception:  # noqa: BLE001
         pass
     return None
->>>>>>> 803617a (v4.0)
