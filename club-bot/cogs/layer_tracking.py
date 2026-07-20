@@ -5,6 +5,10 @@ LayerTracking モジュール（仕様 11.8）。
 Google Sheets シートへ追記する。桁名はコマンドで登録管理し、
 /layer start では登録済みの桁名から autocomplete で選択する。
 進行中セッションは SQLite に永続化し、Bot 再起動後も復元できる。
+
+マルチテナント版: セッション・桁名・記録を interaction.guild.id で
+スコープする。services/layer_tracking_service.py は変更禁止のため、
+guild 固定プロキシ repo.for_guild(guild_id) を渡して利用する。
 """
 from __future__ import annotations
 
@@ -19,7 +23,7 @@ from services.sheets_service import SheetsError
 from utils.embeds import error_embed, info_embed, success_embed
 from utils.logger import get_logger
 from utils.parser import fmt_jp, now, to_iso
-from utils.permissions import Level, require
+from utils.permissions import Level, ensure_guild, require
 
 log = get_logger("layer")
 
@@ -29,14 +33,19 @@ class LayerTracking(commands.Cog):
         self.bot = bot
         self.session_repo = LayerSessionRepository(bot.db)
         self.keta_repo = LayerKetaRepository(bot.db)
-        self.svc = LayerTrackingService(self.session_repo, bot.sheets)
+
+    def _svc_for(self, guild_id: int) -> LayerTrackingService:
+        """ギルド固定スコープのリポジトリでサービスを構成する。"""
+        return LayerTrackingService(self.session_repo.for_guild(guild_id), self.bot.sheets)
 
     group = app_commands.Group(name="layer", description="桁巻き積層作業の記録")
 
     # ---------- 桁名 autocomplete ----------
     async def _keta_autocomplete(self, interaction: discord.Interaction,
                                  current: str) -> list[app_commands.Choice[str]]:
-        names = await self.keta_repo.list_active()
+        if interaction.guild is None:
+            return []
+        names = await self.keta_repo.list_active(interaction.guild.id)
         return [
             app_commands.Choice(name=n, value=n)
             for n in names if current.lower() in n.lower()
@@ -47,7 +56,10 @@ class LayerTracking(commands.Cog):
     @app_commands.describe(name="登録する桁名")
     @require(Level.L2)
     async def keta_add(self, interaction: discord.Interaction, name: str):
-        await self.keta_repo.add(name, str(interaction.user.id), to_iso(now()))
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        await self.keta_repo.add(guild_id, name, str(interaction.user.id), to_iso(now()))
         await interaction.response.send_message(
             embed=success_embed("桁名を登録しました", f"桁名: **{name}**",
                                 executor=interaction.user.display_name),
@@ -59,7 +71,10 @@ class LayerTracking(commands.Cog):
     @app_commands.autocomplete(name=_keta_autocomplete)
     @require(Level.L2)
     async def keta_remove(self, interaction: discord.Interaction, name: str):
-        ok = await self.keta_repo.deactivate(name)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        ok = await self.keta_repo.deactivate(guild_id, name)
         if not ok:
             await interaction.response.send_message(
                 embed=error_embed(f"桁名「{name}」は登録されていません。"), ephemeral=True)
@@ -74,7 +89,10 @@ class LayerTracking(commands.Cog):
     @require(Level.L1)
     async def keta_list(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        rows = await self.keta_repo.list_all()
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        rows = await self.keta_repo.list_all(guild_id)
         if not rows:
             await interaction.followup.send(
                 embed=info_embed("桁名一覧", "登録済みの桁名はありません。"), ephemeral=True)
@@ -90,17 +108,21 @@ class LayerTracking(commands.Cog):
     @app_commands.autocomplete(keta=_keta_autocomplete)
     @require(Level.L1)
     async def start(self, interaction: discord.Interaction, keta: str, layer_num: str):
-        if not await self.keta_repo.exists_active(keta):
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        if not await self.keta_repo.exists_active(guild_id, keta):
             await interaction.response.send_message(
                 embed=error_embed(
                     f"桁名「{keta}」は登録されていません。`/layer keta-add` で登録してください。"),
                 ephemeral=True)
             return
 
+        svc = self._svc_for(guild_id)
         user_id = str(interaction.user.id)
         # 二重開始チェック（仕様 11.8.5）
-        if await self.svc.has_active(user_id):
-            active = await self.session_repo.get_by_user(user_id)
+        if await svc.has_active(user_id):
+            active = await self.session_repo.get_by_user(guild_id, user_id)
             await interaction.response.send_message(
                 embed=error_embed(
                     f"既に進行中のセッションがあります（{active['keta']} {active['layer_num']}）。\n"
@@ -108,7 +130,7 @@ class LayerTracking(commands.Cog):
                 ephemeral=True)
             return
 
-        started = await self.svc.start(user_id, keta, layer_num)
+        started = await svc.start(user_id, keta, layer_num)
         embed = success_embed(
             "積層開始を記録しました",
             f"桁名: **{keta}**\n層番号: **{layer_num}**\n開始: {fmt_jp(started)}",
@@ -119,8 +141,12 @@ class LayerTracking(commands.Cog):
     @group.command(name="end", description="進行中の積層を終了し、対応シートへ記録します。")
     @require(Level.L1)
     async def end(self, interaction: discord.Interaction):
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        svc = self._svc_for(guild_id)
         user_id = str(interaction.user.id)
-        if not await self.svc.has_active(user_id):
+        if not await svc.has_active(user_id):
             await interaction.response.send_message(
                 embed=error_embed("進行中のセッションがありません。先に `/layer start` を実行してください。"),
                 ephemeral=True)
@@ -128,9 +154,10 @@ class LayerTracking(commands.Cog):
 
         await interaction.response.defer(ephemeral=True)
         try:
-            result = await self.svc.end(user_id, interaction.user.display_name)
+            result = await svc.end(user_id, interaction.user.display_name)
         except SheetsError as e:
-            await self.bot.log_to_channel(f"[Layer] Sheets 書き込み失敗 user={user_id}: {e}")
+            await self.bot.log_to_channel(
+                f"[Layer] Sheets 書き込み失敗 user={user_id}: {e}", guild_id=guild_id)
             await interaction.followup.send(
                 embed=error_embed(
                     "Sheets への書き込みに失敗しました。記録は保存済みです。"
@@ -150,7 +177,11 @@ class LayerTracking(commands.Cog):
     @require(Level.L1)
     async def status(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        sessions = await self.svc.list_active()
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        svc = self._svc_for(guild_id)
+        sessions = await svc.list_active()
         if not sessions:
             await interaction.followup.send(
                 embed=info_embed("進行中の積層作業", "現在、進行中の作業はありません。"),
@@ -175,16 +206,20 @@ class LayerTracking(commands.Cog):
     @require(Level.L2)
     async def sync_cmd(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
         if not self.bot.sheets.enabled:
             await interaction.followup.send(
                 embed=info_embed("Google Sheets 無効",
                                  "credentials.json と SPREADSHEET_ID を設定すると有効化されます。"),
                 ephemeral=True)
             return
+        svc = self._svc_for(guild_id)
         try:
-            n = await self.svc.sync_unsynced_records()
+            n = await svc.sync_unsynced_records()
         except SheetsError as e:
-            await self.bot.log_to_channel(f"[Layer] sync 失敗: {e}")
+            await self.bot.log_to_channel(f"[Layer] sync 失敗: {e}", guild_id=guild_id)
             await interaction.followup.send(
                 embed=error_embed("同期に失敗しました。時間をおいて再試行してください。"),
                 ephemeral=True)

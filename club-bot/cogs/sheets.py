@@ -3,6 +3,11 @@ Sheets モジュール（仕様 11.7）。
 
 Google Sheets への同期。全行置換が基本、監査ログのみ append。
 同期中フラグで二重書き込みを防止する。
+
+マルチテナント版: 各同期処理は guild_id を受け取り、そのギルドのデータのみ
+同期する。スプレッドシート自体はグローバル1冊のため、複数ギルドで Sheets
+連携を有効化すると同一シートへの上書き競合が起きる点に注意（実質
+レガシー単一ギルド向け機能。docs/MULTI_TENANT_MIGRATION.md 参照）。
 """
 from __future__ import annotations
 
@@ -18,7 +23,7 @@ from services.sheets_service import SheetsError
 from utils.embeds import error_embed, info_embed, success_embed
 from utils.logger import get_logger
 from utils.parser import fmt_jp, fmt_sheet, from_iso, now
-from utils.permissions import Level, require
+from utils.permissions import Level, ensure_guild, require
 
 log = get_logger("sheets")
 
@@ -49,6 +54,9 @@ class Sheets(commands.Cog):
     @require(Level.L3)
     async def sync_all(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
         if not self.bot.sheets.enabled:
             await interaction.followup.send(embed=self._disabled_embed(), ephemeral=True)
             return
@@ -57,12 +65,12 @@ class Sheets(commands.Cog):
                 embed=info_embed("同期中", "別の同期が実行中です。"), ephemeral=True)
             return
         try:
-            t = await self.sync_tasks()
-            m = await self.sync_members()
-            a = await self.sync_all_attendance()
-            s = await self.sync_all_schedule_sheets()   # ★ 追加
+            t = await self.sync_tasks(guild_id)
+            m = await self.sync_members(guild_id)
+            a = await self.sync_all_attendance(guild_id)
+            s = await self.sync_all_schedule_sheets(guild_id)
         except SheetsError as e:
-            await self.bot.log_to_channel(f"[Sheets] sync-all 失敗: {e}")
+            await self.bot.log_to_channel(f"[Sheets] sync-all 失敗: {e}", guild_id=guild_id)
             await interaction.followup.send(
                 embed=error_embed("同期に失敗しました。時間をおいて再試行してください。"),
                 ephemeral=True)
@@ -80,11 +88,14 @@ class Sheets(commands.Cog):
     @require(Level.L2)
     async def sync_tasks_cmd(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
         if not self.bot.sheets.enabled:
             await interaction.followup.send(embed=self._disabled_embed(), ephemeral=True)
             return
         try:
-            n = await self.sync_tasks()
+            n = await self.sync_tasks(guild_id)
         except SheetsError:
             await interaction.followup.send(
                 embed=error_embed("同期に失敗しました。"), ephemeral=True)
@@ -98,11 +109,14 @@ class Sheets(commands.Cog):
     @require(Level.L2)
     async def sync_members_cmd(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
         if not self.bot.sheets.enabled:
             await interaction.followup.send(embed=self._disabled_embed(), ephemeral=True)
             return
         try:
-            n = await self.sync_members()
+            n = await self.sync_members(guild_id)
         except SheetsError:
             await interaction.followup.send(
                 embed=error_embed("同期に失敗しました。"), ephemeral=True)
@@ -116,11 +130,14 @@ class Sheets(commands.Cog):
     @require(Level.L2)
     async def sync_attendance_cmd(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
         if not self.bot.sheets.enabled:
             await interaction.followup.send(embed=self._disabled_embed(), ephemeral=True)
             return
         try:
-            n = await self.sync_all_attendance()
+            n = await self.sync_all_attendance(guild_id)
         except SheetsError:
             await interaction.followup.send(
                 embed=error_embed("同期に失敗しました。"), ephemeral=True)
@@ -134,11 +151,14 @@ class Sheets(commands.Cog):
     @require(Level.L2)
     async def sync_schedules_cmd(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
         if not self.bot.sheets.enabled or not config.schedule_sheets_enabled():
             await interaction.followup.send(embed=self._disabled_embed(), ephemeral=True)
             return
         try:
-            n = await self.sync_all_schedule_sheets()
+            n = await self.sync_all_schedule_sheets(guild_id)
         except SheetsError:
             await interaction.followup.send(
                 embed=error_embed("同期に失敗しました。"), ephemeral=True)
@@ -147,16 +167,19 @@ class Sheets(commands.Cog):
             embed=success_embed("日程調整シート同期完了", f"{n} 件のシートを更新しました",
                                 executor=interaction.user.display_name),
             ephemeral=True)
-    
+
     @group.command(name="sync-layers", description="未反映の桁巻き記録をシートへ再送信します。")
     @require(Level.L2)
     async def sync_layers_cmd(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
         if not self.bot.sheets.enabled:
             await interaction.followup.send(embed=self._disabled_embed(), ephemeral=True)
             return
         try:
-            n = await self.sync_layer_records()
+            n = await self.sync_layer_records(guild_id)
         except SheetsError:
             await interaction.followup.send(
                 embed=error_embed("同期に失敗しました。"), ephemeral=True)
@@ -167,13 +190,13 @@ class Sheets(commands.Cog):
             ephemeral=True)
 
 
-    async def sync_layer_records(self) -> int:
+    async def sync_layer_records(self, guild_id: int) -> int:
         """synced_flag=0 の記録をすべてシートへ再送信する。"""
         from repositories.layer_session_repository import LayerSessionRepository
         repo = LayerSessionRepository(self.bot.db)
-        guild = self.bot.get_guild(config.guild_id) if config.guild_id else None
+        guild = self.bot.get_guild(guild_id)
 
-        unsynced = await repo.list_unsynced()
+        unsynced = await repo.list_unsynced(guild_id)
         count = 0
         for rec in unsynced:
             name = rec["user_id"]
@@ -185,7 +208,7 @@ class Sheets(commands.Cog):
                 fmt_jp(from_iso(rec["started_at"])), fmt_jp(from_iso(rec["ended_at"])),
                 rec["minutes"]]
             await self.bot.sheets.append_layer_row(rec["keta"], row)
-            await repo.mark_synced(rec["record_id"])
+            await repo.mark_synced(guild_id, rec["record_id"])
             count += 1
         return count
 
@@ -213,11 +236,11 @@ class Sheets(commands.Cog):
     # ====================================================================
     # 同期ロジック（他 Cog / Reminders から呼ばれる）
     # ====================================================================
-    async def sync_tasks(self) -> int:
+    async def sync_tasks(self, guild_id: int) -> int:
         if not self.bot.sheets.enabled:
             return 0
-        tasks = await self.task_repo.list_all_for_export()
-        guild = self.bot.get_guild(config.guild_id) if config.guild_id else None
+        tasks = await self.task_repo.list_all_for_export(guild_id)
+        guild = self.bot.get_guild(guild_id)
         rows = []
         for t in tasks:
             assignee = ""
@@ -234,10 +257,10 @@ class Sheets(commands.Cog):
             ])
         return await self.bot.sheets.replace_all(config.sheet_tasks, TASK_HEADER, rows)
 
-    async def sync_members(self) -> int:
+    async def sync_members(self, guild_id: int) -> int:
         if not self.bot.sheets.enabled:
             return 0
-        members = await self.member_repo.list_members()
+        members = await self.member_repo.list_members(guild_id)
         rows = []
         for m in members:
             rows.append([
@@ -251,31 +274,32 @@ class Sheets(commands.Cog):
             ])
         return await self.bot.sheets.replace_all(config.sheet_members, MEM_HEADER, rows)
 
-    async def sync_all_attendance(self) -> int:
+    async def sync_all_attendance(self, guild_id: int) -> int:
         """全 schedule の出欠結果を1シートに展開する。"""
         if not self.bot.sheets.enabled:
             return 0
-        rows = await self._build_attendance_rows(None)
+        rows = await self._build_attendance_rows(guild_id, None)
         return await self.bot.sheets.replace_all(config.sheet_attendance, ATT_HEADER, rows)
 
-    async def sync_attendance_for(self, schedule_id: str) -> int:
+    async def sync_attendance_for(self, guild_id: int, schedule_id: str) -> int:
         """締切時に呼ばれる。全件再構築（全行置換のため）。"""
-        return await self.sync_all_attendance()
+        return await self.sync_all_attendance(guild_id)
 
-    async def _build_attendance_rows(self, only_schedule_id: str | None) -> list[list]:
-        guild = self.bot.get_guild(config.guild_id) if config.guild_id else None
-        schedules = await self.schedule_repo.list_open_schedules()
+    async def _build_attendance_rows(self, guild_id: int,
+                                     only_schedule_id: str | None) -> list[list]:
+        guild = self.bot.get_guild(guild_id)
         # クローズ済みも含めるため全件取得
-        closed = await self.bot.db.fetchall("SELECT * FROM schedules")
+        closed = await self.bot.db.fetchall(
+            "SELECT * FROM schedules WHERE guild_id = ?", (guild_id,))
         all_sched = {dict(r)["schedule_id"]: dict(r) for r in closed}
         rows = []
         agg_time = fmt_sheet(now())
         for sid, s in all_sched.items():
             if only_schedule_id and sid != only_schedule_id:
                 continue
-            options = await self.schedule_repo.list_options(sid)
+            options = await self.schedule_repo.list_options(guild_id, sid)
             for opt in options:
-                votes = await self.schedule_repo.list_votes(opt["option_id"])
+                votes = await self.schedule_repo.list_votes(guild_id, opt["option_id"])
                 for v in votes:
                     name = v["user_id"]
                     if guild:
@@ -287,21 +311,22 @@ class Sheets(commands.Cog):
                         fmt_jp(from_iso(s["deadline"])), agg_time,
                     ])
         return rows
-    
-    async def sync_all_schedule_sheets(self) -> int:
+
+    async def sync_all_schedule_sheets(self, guild_id: int) -> int:
         """sheet_title が設定済みの全スケジュールを最新状態でシートへ反映する。"""
         if not self.bot.sheets.enabled or not config.schedule_sheets_enabled():
             return 0
         rows = await self.bot.db.fetchall(
-            "SELECT * FROM schedules WHERE sheet_title IS NOT NULL")
-        guild = self.bot.get_guild(config.guild_id) if config.guild_id else None
+            "SELECT * FROM schedules WHERE guild_id = ? AND sheet_title IS NOT NULL",
+            (guild_id,))
+        guild = self.bot.get_guild(guild_id)
         count = 0
         for row in rows:
             schedule = dict(row)
-            options = await self.schedule_repo.list_options(schedule["schedule_id"])
+            options = await self.schedule_repo.list_options(guild_id, schedule["schedule_id"])
             votes_map = {}
             for opt in options:
-                votes = await self.schedule_repo.list_votes(opt["option_id"])
+                votes = await self.schedule_repo.list_votes(guild_id, opt["option_id"])
                 votes_map[opt["option_id"]] = {
                     "ok": [self._display_name(guild, v["user_id"])
                         for v in votes if v["status"] == "ok"],

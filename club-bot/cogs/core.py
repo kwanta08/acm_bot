@@ -51,6 +51,7 @@ class Core(commands.Cog):
             f"**Google Sheets**: {sheets_ok}\n"
             f"**WebSocket 遅延**: {round(bot.latency * 1000)} ms\n"
             f"**タイムゾーン**: {config.tz}\n"
+            f"**参加ギルド数**: {len(bot.guilds)}\n"
             f"**読み込み済み Cog**: {len(bot.cogs)}"
         )
         embed = info_embed("ヘルスチェック", desc, executor=interaction.user.display_name)

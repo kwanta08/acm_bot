@@ -4,6 +4,10 @@ Schedule モジュール（仕様 11.2）。
 日程調整・出欠投票。候補日ごとに1メッセージを投稿し状態を投票する。
 1候補1ユーザー1状態。状態変更時は旧リアクションを自動除去する。
 Bot 再起動後も on_raw_reaction_add/remove で処理可能。
+
+マルチテナント版: 全データを interaction.guild.id（または payload.guild_id）
+でスコープする。services/schedule_service.py には変更を加えないため、
+Embed 生成には guild 固定プロキシ repo.for_guild(guild_id) を渡す。
 """
 from __future__ import annotations
 
@@ -18,7 +22,7 @@ from services.schedule_service import build_emoji_maps, _resolve_name as _resolv
 from utils.embeds import error_embed, info_embed, schedule_embed, success_embed
 from utils.logger import get_logger
 from utils.parser import InvalidDatetimeError, fmt_jp, from_iso, parse_datetime, parse_deadline, to_iso
-from utils.permissions import Level, require
+from utils.permissions import Level, ensure_guild, require
 
 log = get_logger("schedule")
 
@@ -48,6 +52,9 @@ class Schedule(commands.Cog):
                      target_role: discord.Role | None = None,
                      channel: discord.TextChannel | None = None):
         await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
 
         # 日時パース
         deadline_dt = parse_deadline(deadline)
@@ -73,10 +80,11 @@ class Schedule(commands.Cog):
                 return
             parsed_options.append((label, start))
 
-        # 投稿先決定
+        # 投稿先決定（ギルド別設定を参照）
+        gconf = await config.for_guild(guild_id)
         target_channel = channel or (
-            self.bot.get_channel(config.default_schedule_channel_id)
-            if config.default_schedule_channel_id else interaction.channel)
+            self.bot.get_channel(gconf.default_schedule_channel_id)
+            if gconf.default_schedule_channel_id else interaction.channel)
         if target_channel is None:
             await interaction.followup.send(
                 embed=error_embed("投稿先チャンネルが特定できません。channel を指定してください。"),
@@ -85,6 +93,7 @@ class Schedule(commands.Cog):
 
         schedule_id = svc.new_schedule_id()
         await self.repo.create_schedule(
+            guild_id,
             schedule_id=schedule_id, title=title, description=description, place=place,
             target_role_id=str(target_role.id) if target_role else None,
             deadline_iso=to_iso(deadline_dt),
@@ -92,7 +101,8 @@ class Schedule(commands.Cog):
             channel_id=str(target_channel.id),
         )
 
-        schedule = await self.repo.get_schedule(schedule_id)
+        schedule = await self.repo.get_schedule(guild_id, schedule_id)
+        scoped_repo = self.repo.for_guild(guild_id)
 
         # 候補ごとに1メッセージ投稿（仕様 11.2.3）
         emoji_maps = build_emoji_maps(self.bot, interaction.guild)
@@ -100,12 +110,13 @@ class Schedule(commands.Cog):
 
         for label, start in parsed_options:
             option_id = svc.new_option_id()
-            await self.repo.add_option(option_id, schedule_id, label, to_iso(start), None, None)
+            await self.repo.add_option(guild_id, option_id, schedule_id, label,
+                                       to_iso(start), None, None)
             opt = {"option_id": option_id, "label": label}
-            embed = await svc.build_option_embed(self.repo, self.bot, schedule, opt,
+            embed = await svc.build_option_embed(scoped_repo, self.bot, schedule, opt,
                                                  interaction.guild)
             msg = await target_channel.send(embed=embed)
-            await self.repo.set_option_message(option_id, str(msg.id))
+            await self.repo.set_option_message(guild_id, option_id, str(msg.id))
             for emoji in all_emojis:
                 await msg.add_reaction(emoji)
 
@@ -113,14 +124,14 @@ class Schedule(commands.Cog):
         sheet_status = "未実行"
         if self.bot.sheets.enabled and config.schedule_sheets_enabled():
             try:
-                saved_opts = await self.repo.list_options(schedule_id)
+                saved_opts = await self.repo.list_options(guild_id, schedule_id)
                 votes_map = {
                     opt["option_id"]: {"ok": [], "maybe": [], "ng": [], "unanswered": []}
                     for opt in saved_opts
                 }
                 actual_title = await self.bot.sheets.create_schedule_sheet(
                     title, saved_opts, votes_map)
-                await self.repo.set_schedule_sheet_title(schedule_id, actual_title)
+                await self.repo.set_schedule_sheet_title(guild_id, schedule_id, actual_title)
                 sheet_status = f"作成済み（{actual_title}）"
             except Exception as e:
                 log.exception("スケジュールシート初期化失敗")
@@ -141,7 +152,10 @@ class Schedule(commands.Cog):
     @require(Level.L1)
     async def list_cmd(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        schedules = await self.repo.list_open_schedules()
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        schedules = await self.repo.list_open_schedules(guild_id)
         if not schedules:
             await interaction.followup.send(
                 embed=info_embed("開催中の日程調整", "現在、開催中の投票はありません。"),
@@ -161,14 +175,18 @@ class Schedule(commands.Cog):
     @require(Level.L1)
     async def status(self, interaction: discord.Interaction, schedule_id: str):
         await interaction.response.defer(ephemeral=True)
-        schedule = await self.repo.get_schedule(schedule_id)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        schedule = await self.repo.get_schedule(guild_id, schedule_id)
         if not schedule:
             await interaction.followup.send(
                 embed=error_embed("指定 ID の投票が見つかりません。"), ephemeral=True)
             return
-        options = await self.repo.list_options(schedule_id)
+        scoped_repo = self.repo.for_guild(guild_id)
+        options = await self.repo.list_options(guild_id, schedule_id)
         for opt in options:
-            embed = await svc.build_option_embed(self.repo, self.bot, schedule, opt,
+            embed = await svc.build_option_embed(scoped_repo, self.bot, schedule, opt,
                                                  interaction.guild)
             await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -176,7 +194,10 @@ class Schedule(commands.Cog):
     @require(Level.L1)
     async def list_closed_cmd(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        schedules = await self.repo.list_closed_schedules()
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        schedules = await self.repo.list_closed_schedules(guild_id)
         if not schedules:
             await interaction.followup.send(
                 embed=info_embed("締切済みの日程調整", "締切済みの投票はありません。"),
@@ -197,7 +218,10 @@ class Schedule(commands.Cog):
     @require(Level.L2)
     async def close(self, interaction: discord.Interaction, schedule_id: str):
         await interaction.response.defer(ephemeral=True)
-        schedule = await self.repo.get_schedule(schedule_id)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        schedule = await self.repo.get_schedule(guild_id, schedule_id)
         if not schedule:
             await interaction.followup.send(
                 embed=error_embed("指定 ID の投票が見つかりません。"), ephemeral=True)
@@ -214,7 +238,10 @@ class Schedule(commands.Cog):
     @require(Level.L2)
     async def remind(self, interaction: discord.Interaction, schedule_id: str):
         await interaction.response.defer(ephemeral=True)
-        schedule = await self.repo.get_schedule(schedule_id)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        schedule = await self.repo.get_schedule(guild_id, schedule_id)
         if not schedule:
             await interaction.followup.send(
                 embed=error_embed("指定 ID の投票が見つかりません。"), ephemeral=True)
@@ -231,14 +258,17 @@ class Schedule(commands.Cog):
     @require(Level.L3)
     async def delete(self, interaction: discord.Interaction, schedule_id: str):
         await interaction.response.defer(ephemeral=True)
-        schedule = await self.repo.get_schedule(schedule_id)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        schedule = await self.repo.get_schedule(guild_id, schedule_id)
         if not schedule:
             await interaction.followup.send(
                 embed=error_embed("指定 ID の投票が見つかりません。"), ephemeral=True)
             return
 
         # Discord上の候補メッセージを削除
-        options = await self.repo.list_options(schedule_id)
+        options = await self.repo.list_options(guild_id, schedule_id)
         channel = self.bot.get_channel(int(schedule["channel_id"]))
         deleted_msgs = 0
         for opt in options:
@@ -261,7 +291,7 @@ class Schedule(commands.Cog):
                 log.warning("スケジュールシート削除失敗: %s", e)
 
         # DBから削除（外部キーCASCADEでoptions/votesも削除される）
-        await self.repo.delete_schedule(schedule_id)
+        await self.repo.delete_schedule(guild_id, schedule_id)
 
         detail = f"ID: `{schedule_id}`\nDiscordメッセージ削除: {deleted_msgs} 件"
         detail += f"\nシート削除: {'成功' if sheet_deleted else '対象なし/失敗'}"
@@ -276,7 +306,10 @@ class Schedule(commands.Cog):
     @require(Level.L2)
     async def edit_deadline(self, interaction: discord.Interaction, schedule_id: str, deadline: str):
         await interaction.response.defer(ephemeral=True)
-        schedule = await self.repo.get_schedule(schedule_id)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        schedule = await self.repo.get_schedule(guild_id, schedule_id)
         if not schedule:
             await interaction.followup.send(
                 embed=error_embed("指定 ID の投票が見つかりません。"), ephemeral=True)
@@ -299,13 +332,14 @@ class Schedule(commands.Cog):
             return
 
         old_deadline_str = fmt_jp(from_iso(schedule["deadline"]))
-        await self.repo.update_deadline(schedule_id, to_iso(new_deadline_dt))
+        await self.repo.update_deadline(guild_id, schedule_id, to_iso(new_deadline_dt))
 
         # 更新後のスケジュール情報でEmbedを再取得
-        updated_schedule = await self.repo.get_schedule(schedule_id)
+        updated_schedule = await self.repo.get_schedule(guild_id, schedule_id)
 
         # 各候補メッセージの締切表示を更新
-        options = await self.repo.list_options(schedule_id)
+        scoped_repo = self.repo.for_guild(guild_id)
+        options = await self.repo.list_options(guild_id, schedule_id)
         channel = self.bot.get_channel(int(schedule["channel_id"]))
         updated_msgs = 0
         if channel:
@@ -315,7 +349,7 @@ class Schedule(commands.Cog):
                 try:
                     msg = await channel.fetch_message(int(opt["message_id"]))
                     embed = await svc.build_option_embed(
-                        self.repo, self.bot, updated_schedule, opt, interaction.guild)
+                        scoped_repo, self.bot, updated_schedule, opt, interaction.guild)
                     await msg.edit(embed=embed)
                     updated_msgs += 1
                 except (discord.NotFound, discord.Forbidden, discord.HTTPException):
@@ -337,7 +371,7 @@ class Schedule(commands.Cog):
                 f"変更後: {fmt_jp(new_deadline_dt)}\n更新メッセージ: {updated_msgs} 件",
                 executor=interaction.user.display_name),
             ephemeral=True)
-    
+
 
     # ====================================================================
     # リアクション処理（raw イベント。Bot 再起動後も動作）
@@ -353,8 +387,11 @@ class Schedule(commands.Cog):
     async def _handle_reaction(self, payload: discord.RawReactionActionEvent, added: bool):
         if self.bot.user and payload.user_id == self.bot.user.id:
             return
+        if not payload.guild_id:
+            return  # DM リアクションは対象外
 
-        guild = self.bot.get_guild(payload.guild_id) if payload.guild_id else None
+        guild_id = payload.guild_id
+        guild = self.bot.get_guild(guild_id)
         emoji_maps = build_emoji_maps(self.bot, guild)
         emoji_to_status = emoji_maps["emoji_to_status"]
         status_to_emoji = emoji_maps["status_to_emoji"]
@@ -363,10 +400,10 @@ class Schedule(commands.Cog):
         if emoji_key not in emoji_to_status:
             return
 
-        option = await self.repo.get_option_by_message(str(payload.message_id))
+        option = await self.repo.get_option_by_message(guild_id, str(payload.message_id))
         if not option:
             return
-        schedule = await self.repo.get_schedule(option["schedule_id"])
+        schedule = await self.repo.get_schedule(guild_id, option["schedule_id"])
         if not schedule or schedule["closed_flag"]:
             return
 
@@ -374,14 +411,14 @@ class Schedule(commands.Cog):
         status = emoji_to_status[emoji_key]
 
         if added:
-            await self.repo.set_vote(option["option_id"], user_id, status)
+            await self.repo.set_vote(guild_id, option["option_id"], user_id, status)
             await self._remove_other_reactions(payload, keep_status=status,
                                                status_to_emoji=status_to_emoji)
         else:
-            votes = await self.repo.list_votes(option["option_id"])
+            votes = await self.repo.list_votes(guild_id, option["option_id"])
             current = next((v for v in votes if v["user_id"] == user_id), None)
             if current and current["status"] == status:
-                await self.repo.remove_vote(option["option_id"], user_id)
+                await self.repo.remove_vote(guild_id, option["option_id"], user_id)
 
         await self._refresh_option_message(payload, schedule, option)
         await self._sync_schedule_sheet(schedule, guild)
@@ -426,7 +463,9 @@ class Schedule(commands.Cog):
         except discord.NotFound:
             return
         guild = getattr(channel, "guild", None)
-        embed = await svc.build_option_embed(self.repo, self.bot, schedule, option, guild)
+        guild_id = schedule.get("guild_id") or (guild.id if guild else 0)
+        embed = await svc.build_option_embed(
+            self.repo.for_guild(guild_id), self.bot, schedule, option, guild)
         try:
             await message.edit(embed=embed)
         except discord.HTTPException:
@@ -440,11 +479,12 @@ class Schedule(commands.Cog):
         if not schedule.get("sheet_title"):
             return
 
+        guild_id = schedule["guild_id"]
         try:
-            options = await self.repo.list_options(schedule["schedule_id"])
+            options = await self.repo.list_options(guild_id, schedule["schedule_id"])
             votes_map = {}
             for opt in options:
-                votes = await self.repo.list_votes(opt["option_id"])
+                votes = await self.repo.list_votes(guild_id, opt["option_id"])
                 votes_map[opt["option_id"]] = {
                     "ok": [await _resolve_display_name(self.bot, guild, v["user_id"])
                            for v in votes if v["status"] == "ok"],
@@ -464,14 +504,15 @@ class Schedule(commands.Cog):
     # ====================================================================
     async def notify_unanswered(self, schedule: dict) -> int:
         """未回答者へ DM 通知。DM 不可ならチャンネルでメンション（仕様 11.2.5）。"""
-        guild = self.bot.get_guild(config.guild_id) if config.guild_id else None
+        guild_id = schedule["guild_id"]
+        guild = self.bot.get_guild(guild_id)
         if not guild or not schedule.get("target_role_id"):
             return 0
         role = guild.get_role(int(schedule["target_role_id"]))
         if not role:
             return 0
 
-        answered = await self.repo.list_voters_for_schedule(schedule["schedule_id"])
+        answered = await self.repo.list_voters_for_schedule(guild_id, schedule["schedule_id"])
         targets = [m for m in role.members if not m.bot and str(m.id) not in answered]
 
         deadline = fmt_jp(from_iso(schedule["deadline"]))
@@ -494,9 +535,11 @@ class Schedule(commands.Cog):
 
     async def finalize_schedule(self, schedule: dict):
         """締切処理: クローズ→結果要約投稿（仕様 11.2.5）。"""
-        await self.repo.close_schedule(schedule["schedule_id"])
-        guild = self.bot.get_guild(config.guild_id) if config.guild_id else None
-        embed = await svc.build_summary_embed(self.repo, self.bot, schedule, guild)
+        guild_id = schedule["guild_id"]
+        await self.repo.close_schedule(guild_id, schedule["schedule_id"])
+        guild = self.bot.get_guild(guild_id)
+        embed = await svc.build_summary_embed(
+            self.repo.for_guild(guild_id), self.bot, schedule, guild)
         channel = self.bot.get_channel(int(schedule["channel_id"]))
         if channel:
             try:

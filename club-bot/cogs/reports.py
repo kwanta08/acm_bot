@@ -3,24 +3,24 @@ Reports モジュール（仕様 11.6）。
 
 週次サマリー、CSV エクスポート、監査ログ閲覧。
 出力例: 期限超過タスク一覧、月次出欠率、支援依頼頻度（11.6.2）。
+マルチテナント版: 全集計を interaction.guild.id でスコープする。
 """
 from __future__ import annotations
 
 import csv
 import io
-import os
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import INITIAL_TEAMS, config
+from config import INITIAL_TEAMS
 from repositories.schedule_repository import ScheduleRepository
 from repositories.task_repository import TaskRepository
 from utils.embeds import error_embed, info_embed, success_embed
 from utils.logger import get_logger
 from utils.parser import fmt_jp, from_iso, now
-from utils.permissions import Level, require
+from utils.permissions import Level, ensure_guild, require
 
 log = get_logger("reports")
 
@@ -40,10 +40,13 @@ class Reports(commands.Cog):
     @require(Level.L2)
     async def weekly(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
         today = now().date().isoformat()
-        overdue = await self.task_repo.list_overdue(today)
-        open_tasks = await self.task_repo.list_tasks(status="open")
-        schedules = await self.schedule_repo.list_open_schedules()
+        overdue = await self.task_repo.list_overdue(guild_id, today)
+        open_tasks = await self.task_repo.list_tasks(guild_id, status="open")
+        schedules = await self.schedule_repo.list_open_schedules(guild_id)
 
         embed = info_embed("週次サマリー")
         embed.add_field(name="未完了タスク", value=str(len(open_tasks)), inline=True)
@@ -65,7 +68,10 @@ class Reports(commands.Cog):
     @require(Level.L2)
     async def export_tasks(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        tasks = await self.task_repo.list_all_for_export()
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        tasks = await self.task_repo.list_all_for_export(guild_id)
         guild = interaction.guild
         buf = io.StringIO()
         writer = csv.writer(buf)
@@ -96,8 +102,13 @@ class Reports(commands.Cog):
     async def audit(self, interaction: discord.Interaction,
                     limit: app_commands.Range[int, 1, 25] = 10):
         await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
         rows = await self.bot.db.fetchall(
-            "SELECT * FROM reminders_log ORDER BY reminder_id DESC LIMIT ?", (limit,))
+            "SELECT * FROM reminders_log WHERE guild_id = ?"
+            " ORDER BY reminder_id DESC LIMIT ?",
+            (guild_id, limit))
         embed = info_embed("監査・通知ログ")
         if not rows:
             embed.description = "ログがありません。"
@@ -115,7 +126,11 @@ class Reports(commands.Cog):
     @require(Level.L2)
     async def attendance_rate(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
-        all_sched = await self.bot.db.fetchall("SELECT * FROM schedules")
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        all_sched = await self.bot.db.fetchall(
+            "SELECT * FROM schedules WHERE guild_id = ?", (guild_id,))
         embed = info_embed("出欠率一覧")
         if not all_sched:
             embed.description = "集計対象の投票がありません。"
@@ -123,11 +138,11 @@ class Reports(commands.Cog):
             return
         for r in all_sched[:25]:
             s = dict(r)
-            options = await self.schedule_repo.list_options(s["schedule_id"])
+            options = await self.schedule_repo.list_options(guild_id, s["schedule_id"])
             total_yes = 0
             total_votes = 0
             for opt in options:
-                votes = await self.schedule_repo.list_votes(opt["option_id"])
+                votes = await self.schedule_repo.list_votes(guild_id, opt["option_id"])
                 total_votes += len(votes)
                 total_yes += sum(1 for v in votes if v["status"] == "yes")
             rate = f"{(total_yes / total_votes * 100):.0f}%" if total_votes else "—"

@@ -1,67 +1,78 @@
-"""members / teams テーブルの CRUD（仕様 10.1, 10.2）。"""
+"""members / teams テーブルの CRUD（仕様 10.1, 10.2）。
+
+マルチテナント版: 全メソッドが guild_id を必須引数に取り、
+他ギルドのデータが混ざらないことを保証する。
+"""
 from __future__ import annotations
 
 import json
 from typing import Any
 
+from repositories.base import BaseRepository
 from utils.db import Database
 from utils.parser import now, to_iso
 
 
-class MemberRepository:
+class MemberRepository(BaseRepository):
     def __init__(self, db: Database):
-        self.db = db
+        super().__init__(db)
 
     # ---------- teams ----------
-    async def upsert_team(self, team_key: str, team_name: str,
+    async def upsert_team(self, guild_id: int, team_key: str, team_name: str,
                           leader_role_id: str | None = None,
                           channel_id: str | None = None) -> None:
         await self.db.execute(
             """
-            INSERT INTO teams (team_key, team_name, leader_role_id, channel_id, active_flag)
-            VALUES (?, ?, ?, ?, 1)
-            ON CONFLICT(team_key) DO UPDATE SET
+            INSERT INTO teams (guild_id, team_key, team_name, leader_role_id, channel_id, active_flag)
+            VALUES (?, ?, ?, ?, ?, 1)
+            ON CONFLICT(guild_id, team_key) DO UPDATE SET
                 team_name = excluded.team_name,
                 leader_role_id = COALESCE(excluded.leader_role_id, teams.leader_role_id),
                 channel_id = COALESCE(excluded.channel_id, teams.channel_id)
             """,
-            (team_key, team_name, leader_role_id, channel_id),
+            (guild_id, team_key, team_name, leader_role_id, channel_id),
         )
 
-    async def list_teams(self, active_only: bool = True) -> list[dict[str, Any]]:
-        sql = "SELECT * FROM teams"
+    async def list_teams(self, guild_id: int, active_only: bool = True) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM teams WHERE guild_id = ?"
+        params: tuple = (guild_id,)
         if active_only:
-            sql += " WHERE active_flag = 1"
+            sql += " AND active_flag = 1"
         sql += " ORDER BY team_id"
-        rows = await self.db.fetchall(sql)
+        rows = await self.db.fetchall(sql, params)
         return [dict(r) for r in rows]
 
-    async def get_team(self, team_key: str) -> dict[str, Any] | None:
-        row = await self.db.fetchone("SELECT * FROM teams WHERE team_key = ?", (team_key,))
+    async def get_team(self, guild_id: int, team_key: str) -> dict[str, Any] | None:
+        row = await self.db.fetchone(
+            "SELECT * FROM teams WHERE guild_id = ? AND team_key = ?",
+            (guild_id, team_key))
         return dict(row) if row else None
 
     # ---------- members ----------
-    async def upsert_member(self, user_id: str, display_name: str,
+    async def upsert_member(self, guild_id: int, user_id: str, display_name: str,
                             primary_team: str | None = None) -> None:
-        existing = await self.get_member(user_id)
+        existing = await self.get_member(guild_id, user_id)
         if existing:
             await self.db.execute(
-                "UPDATE members SET display_name = ?, primary_team = COALESCE(?, primary_team) WHERE user_id = ?",
-                (display_name, primary_team, user_id),
+                "UPDATE members SET display_name = ?, primary_team = COALESCE(?, primary_team)"
+                " WHERE guild_id = ? AND user_id = ?",
+                (display_name, primary_team, guild_id, user_id),
             )
         else:
             await self.db.execute(
                 """
-                INSERT INTO members (user_id, display_name, primary_team, secondary_teams,
+                INSERT INTO members (guild_id, user_id, display_name, primary_team, secondary_teams,
                                      is_leader, skills, joined_at, active_flag)
-                VALUES (?, ?, ?, ?, 0, ?, ?, 1)
+                VALUES (?, ?, ?, ?, ?, 0, ?, ?, 1)
                 """,
-                (user_id, display_name, primary_team, json.dumps([]),
+                (guild_id, user_id, display_name, primary_team, json.dumps([]),
                  json.dumps([]), to_iso(now())),
             )
 
-    async def get_member(self, user_id: str) -> dict[str, Any] | None:
-        row = await self.db.fetchone("SELECT * FROM members WHERE user_id = ?", (user_id,))
+    async def get_member(self, guild_id: int, user_id: str) -> dict[str, Any] | None:
+        row = await self.db.fetchone(
+            "SELECT * FROM members WHERE guild_id = ? AND user_id = ?",
+            (guild_id, user_id))
         if not row:
             return None
         d = dict(row)
@@ -69,12 +80,12 @@ class MemberRepository:
         d["skills"] = json.loads(d.get("skills") or "[]")
         return d
 
-    async def list_members(self, active_only: bool = True) -> list[dict[str, Any]]:
-        sql = "SELECT * FROM members"
+    async def list_members(self, guild_id: int, active_only: bool = True) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM members WHERE guild_id = ?"
         if active_only:
-            sql += " WHERE active_flag = 1"
+            sql += " AND active_flag = 1"
         sql += " ORDER BY display_name"
-        rows = await self.db.fetchall(sql)
+        rows = await self.db.fetchall(sql, (guild_id,))
         out = []
         for r in rows:
             d = dict(r)
@@ -83,44 +94,46 @@ class MemberRepository:
             out.append(d)
         return out
 
-    async def set_primary_team(self, user_id: str, team_key: str) -> None:
+    async def set_primary_team(self, guild_id: int, user_id: str, team_key: str) -> None:
         await self.db.execute(
-            "UPDATE members SET primary_team = ? WHERE user_id = ?", (team_key, user_id))
-        
-    async def set_secondary_teams(self, user_id: str, team_keys: list[str]) -> None:
-        await self.db.execute(
-            "UPDATE members SET secondary_teams = ? WHERE user_id = ?",
-            (json.dumps(team_keys, ensure_ascii=False), user_id),)
+            "UPDATE members SET primary_team = ? WHERE guild_id = ? AND user_id = ?",
+            (team_key, guild_id, user_id))
 
-    async def set_leader(self, user_id: str, is_leader: bool) -> None:
+    async def set_secondary_teams(self, guild_id: int, user_id: str, team_keys: list[str]) -> None:
         await self.db.execute(
-            "UPDATE members SET is_leader = ? WHERE user_id = ?",
-            (1 if is_leader else 0, user_id))
+            "UPDATE members SET secondary_teams = ? WHERE guild_id = ? AND user_id = ?",
+            (json.dumps(team_keys, ensure_ascii=False), guild_id, user_id),)
 
-    async def add_skill(self, user_id: str, skill: str) -> bool:
-        m = await self.get_member(user_id)
+    async def set_leader(self, guild_id: int, user_id: str, is_leader: bool) -> None:
+        await self.db.execute(
+            "UPDATE members SET is_leader = ? WHERE guild_id = ? AND user_id = ?",
+            (1 if is_leader else 0, guild_id, user_id))
+
+    async def add_skill(self, guild_id: int, user_id: str, skill: str) -> bool:
+        m = await self.get_member(guild_id, user_id)
         if not m:
             return False
         skills = set(m["skills"])
         skills.add(skill)
         await self.db.execute(
-            "UPDATE members SET skills = ? WHERE user_id = ?",
-            (json.dumps(sorted(skills), ensure_ascii=False), user_id))
+            "UPDATE members SET skills = ? WHERE guild_id = ? AND user_id = ?",
+            (json.dumps(sorted(skills), ensure_ascii=False), guild_id, user_id))
         return True
 
-    async def remove_skill(self, user_id: str, skill: str) -> bool:
-        m = await self.get_member(user_id)
+    async def remove_skill(self, guild_id: int, user_id: str, skill: str) -> bool:
+        m = await self.get_member(guild_id, user_id)
         if not m:
             return False
         skills = [s for s in m["skills"] if s != skill]
         await self.db.execute(
-            "UPDATE members SET skills = ? WHERE user_id = ?",
-            (json.dumps(skills, ensure_ascii=False), user_id))
+            "UPDATE members SET skills = ? WHERE guild_id = ? AND user_id = ?",
+            (json.dumps(skills, ensure_ascii=False), guild_id, user_id))
         return True
 
-    async def search_support(self, team_key: str | None, skill: str | None) -> list[dict[str, Any]]:
+    async def search_support(self, guild_id: int, team_key: str | None,
+                             skill: str | None) -> list[dict[str, Any]]:
         """班・技能タグで支援候補を検索する（仕様 11.4.4）。"""
-        members = await self.list_members()
+        members = await self.list_members(guild_id)
         out = []
         for m in members:
             if team_key:
