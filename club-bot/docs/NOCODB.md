@@ -143,6 +143,26 @@ $ cat backup_YYYYMMDD.sql | docker compose -f deploy/docker-compose.nocodb.yml \
 - 日次で cron に登録するのが簡単（systemd タイマーでも可）
 - bot 停止中に復元するのが安全（整合性のため）
 
+## 5.5 開発者向け: PostgreSQL ライブテスト
+
+`tests/test_db_postgres.py` のライブテストは **必ずテスト専用 DB** を対象にする。
+Compose 初回起動時に `deploy/initdb/02-create-test-db.sql` がテスト専用 DB
+`clubbot_test` を作成する（業務 DB `clubdb` とは別）。
+
+```bash
+# テスト専用 DB を指定して実行（本番 clubdb は絶対に指定しない）
+$ export CLUB_TEST_PG_DSN=postgresql://clubbot:<パスワード>@127.0.0.1:5432/clubbot_test
+$ venv/bin/python -m pytest tests/test_db_postgres.py -xvv
+```
+
+- 安全装置: 接続先の DB 名に `test` が含まれない場合、テストは自動的に
+  スキップされる（スキーマ作成より前に判定。本番 `clubdb` には一切触れない）。
+- テストは作成した行を終了時に削除する。スキーマごと初期化したい場合は
+  クリーンアップスクリプトを使う（DB 名に `test` を含まない場合は拒否）:
+  ```bash
+  $ venv/bin/python scripts/cleanup_test_pg.py
+  ```
+
 ## 6. 利用者の権限設計
 
 | ロール | 対象者 | 権限 |

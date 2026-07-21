@@ -20,14 +20,40 @@ from utils.db import (  # noqa: E402
     VIEW_DDL_PG, Database, to_pg_ddl, to_pg_view_ddl,
 )
 
-PG_DSN = os.getenv("CLUB_TEST_PG_DSN")
-
 G1 = 100000000000000001
 G2 = 200000000000000002
 
 
 def run(coro):
     return asyncio.run(coro)
+
+
+async def _current_db_name(dsn: str) -> str:
+    """接続先のデータベース名を返す（スキーマ作成より前の安全確認用）。"""
+    import asyncpg
+    con = await asyncpg.connect(dsn)
+    try:
+        return await con.fetchval("SELECT current_database()")
+    finally:
+        await con.close()
+
+
+def _guarded_dsn() -> str:
+    """CLUB_TEST_PG_DSN がテスト専用 DB を指す場合だけ返す。
+
+    本番の clubdb 等を誤って初期化・変更しないよう、接続先の
+    データベース名に "test" を含む場合に限定する
+    （スキーマ作成より前にチェックする）。
+    """
+    dsn = os.getenv("CLUB_TEST_PG_DSN")
+    if not dsn:
+        pytest.skip("CLUB_TEST_PG_DSN 未設定（テスト専用 DB の DSN を指定してください）")
+    db_name = run(_current_db_name(dsn))
+    if "test" not in db_name.lower():
+        pytest.skip(
+            "安全のためライブテストはテスト専用 DB でのみ実行します"
+            f"（接続先: {db_name}。clubbot_test など test を含む DB を指定してください）")
+    return dsn
 
 
 # ---------------------------------------------------------------------
@@ -108,17 +134,15 @@ def test_driver_name():
 
 
 # ---------------------------------------------------------------------
-# ライブ PG 結合テスト（CLUB_TEST_PG_DSN がある場合のみ）
+# ライブ PG 結合テスト（CLUB_TEST_PG_DSN がテスト専用 DB を指す場合のみ）
 # ---------------------------------------------------------------------
-pytestmark_live = pytest.mark.skipif(not PG_DSN, reason="CLUB_TEST_PG_DSN 未設定")
-
-
-@pytestmark_live
 def test_pg_live_schema_and_crud():
+    dsn = _guarded_dsn()
+
     async def _main():
         from repositories.member_repository import MemberRepository
         from repositories.task_repository import TaskRepository
-        db = Database("./unused.db", database_url=PG_DSN)
+        db = Database("./unused.db", database_url=dsn)
         await db.connect()
         try:
             # スキーマバージョン
@@ -147,11 +171,12 @@ def test_pg_live_schema_and_crud():
     run(_main())
 
 
-@pytestmark_live
 def test_pg_live_sequence_fix():
     """明示 ID 挿入後もシーケンスが修復され PK 衝突しないこと。"""
+    dsn = _guarded_dsn()
+
     async def _main():
-        db = Database("./unused.db", database_url=PG_DSN)
+        db = Database("./unused.db", database_url=dsn)
         await db.connect()
         try:
             # 明示 ID で大きな値を挿入（SQLite 移行を再現）
@@ -187,7 +212,7 @@ if __name__ == "__main__":
     print("test_prepare_sqlite_passthrough: OK")
     test_driver_name()
     print("test_driver_name: OK")
-    if PG_DSN:
+    if os.getenv("CLUB_TEST_PG_DSN"):
         test_pg_live_schema_and_crud()
         print("test_pg_live_schema_and_crud: OK")
         test_pg_live_sequence_fix()
