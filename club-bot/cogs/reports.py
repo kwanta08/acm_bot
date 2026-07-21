@@ -14,17 +14,16 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import INITIAL_TEAMS
+from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.schedule_repository import ScheduleRepository
 from repositories.task_repository import TaskRepository
-from utils.embeds import error_embed, info_embed, success_embed
+from services import team_service
+from utils.embeds import info_embed, success_embed
 from utils.logger import get_logger
 from utils.parser import fmt_jp, from_iso, now
 from utils.permissions import Level, ensure_guild, require
 
 log = get_logger("reports")
-
-TEAM_NAME = {key: name for key, name in INITIAL_TEAMS}
 
 
 class Reports(commands.Cog):
@@ -32,6 +31,7 @@ class Reports(commands.Cog):
         self.bot = bot
         self.task_repo = TaskRepository(bot.db)
         self.schedule_repo = ScheduleRepository(bot.db)
+        self.log_repo = RemindersLogRepository(bot.db)
 
     group = app_commands.Group(name="report", description="集計・エクスポート・監査")
 
@@ -54,12 +54,13 @@ class Reports(commands.Cog):
         embed.add_field(name="開催中の投票", value=str(len(schedules)), inline=True)
 
         # 班別タスク集計
+        team_names = await team_service.team_name_map(self.bot.db, guild_id)
         by_team: dict[str, int] = {}
         for t in open_tasks:
             key = t.get("team_key") or "未分類"
             by_team[key] = by_team.get(key, 0) + 1
         if by_team:
-            lines = [f"{TEAM_NAME.get(k, k)}: {v}" for k, v in sorted(by_team.items())]
+            lines = [f"{team_names.get(k, k)}: {v}" for k, v in sorted(by_team.items())]
             embed.add_field(name="班別未完了タスク", value="\n".join(lines), inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -72,6 +73,7 @@ class Reports(commands.Cog):
         if guild_id is None:
             return
         tasks = await self.task_repo.list_all_for_export(guild_id)
+        team_names = await team_service.team_name_map(self.bot.db, guild_id)
         guild = interaction.guild
         buf = io.StringIO()
         writer = csv.writer(buf)
@@ -85,7 +87,7 @@ class Reports(commands.Cog):
                 assignee = m.display_name if m else t["assignee_id"]
             writer.writerow([
                 t["local_task_id"], t.get("todoist_task_id") or "", t["title"], assignee,
-                TEAM_NAME.get(t.get("team_key"), t.get("team_key") or ""),
+                team_names.get(t.get("team_key"), t.get("team_key") or ""),
                 t.get("due_date") or "", t.get("priority") or "", t["status"],
                 t["created_by"], t["created_at"], t.get("completed_at") or "",
             ])
@@ -105,10 +107,7 @@ class Reports(commands.Cog):
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
             return
-        rows = await self.bot.db.fetchall(
-            "SELECT * FROM reminders_log WHERE guild_id = ?"
-            " ORDER BY reminder_id DESC LIMIT ?",
-            (guild_id, limit))
+        rows = await self.log_repo.list_recent(guild_id, limit)
         embed = info_embed("監査・通知ログ")
         if not rows:
             embed.description = "ログがありません。"
@@ -129,26 +128,24 @@ class Reports(commands.Cog):
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
             return
-        all_sched = await self.bot.db.fetchall(
-            "SELECT * FROM schedules WHERE guild_id = ?", (guild_id,))
+        all_sched = await self.schedule_repo.list_all(guild_id)
         embed = info_embed("出欠率一覧")
         if not all_sched:
             embed.description = "集計対象の投票がありません。"
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
-        for r in all_sched[:25]:
-            s = dict(r)
+        for s in all_sched[:25]:
             options = await self.schedule_repo.list_options(guild_id, s["schedule_id"])
-            total_yes = 0
+            total_ok = 0
             total_votes = 0
             for opt in options:
                 votes = await self.schedule_repo.list_votes(guild_id, opt["option_id"])
                 total_votes += len(votes)
-                total_yes += sum(1 for v in votes if v["status"] == "yes")
-            rate = f"{(total_yes / total_votes * 100):.0f}%" if total_votes else "—"
+                total_ok += sum(1 for v in votes if v["status"] == "ok")
+            rate = f"{(total_ok / total_votes * 100):.0f}%" if total_votes else "—"
             embed.add_field(
                 name=s["title"],
-                value=f"参加率(yes/総票): {rate}（yes {total_yes} / 票 {total_votes}）",
+                value=f"参加率(ok/総票): {rate}（ok {total_ok} / 票 {total_votes}）",
                 inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
 

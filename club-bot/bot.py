@@ -2,11 +2,14 @@
 鳥人間サークル統合運用 Discord Bot エントリーポイント（マルチテナント版）
 
 - .env 読み込み・必須設定検証（DISCORD_TOKEN のみ必須。GUILD_ID は後方互換用の任意指定）
-- SQLite 初期化・ギルドごとの初期チーム/初期設定投入
+- SQLite 初期化・ギルドごとの初期設定投入
 - 各 Cog 読み込み
 - スラッシュコマンド同期（参加中の全ギルド）
 - on_guild_join による新規ギルド自動セットアップ
 - グローバルエラーハンドラ
+
+班（teams）・技能タグ（skill_tags）は固定の初期値を投入せず、
+新規ギルドは空の状態で開始する。管理者が /team-add /skill-add で登録する。
 """
 from __future__ import annotations
 
@@ -17,11 +20,11 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import INITIAL_TEAMS, config
-from repositories.member_repository import MemberRepository
+from config import config
+from repositories.guild_repository import GuildRepository
 from repositories.settings_repository import SettingsRepository
-from services.sheets_service import SheetsService
-from services.todoist_service import TodoistService
+from services.todoist_service import TodoistServiceManager
+from utils import crypto
 from utils.db import Database
 from utils.embeds import error_embed
 from utils.logger import get_logger, setup_logging
@@ -37,9 +40,10 @@ COGS = [
     "cogs.members",
     "cogs.reminders",
     "cogs.reports",
-    "cogs.sheets",
     "cogs.layer_tracking",
-    "cogs.settings",  # 設定管理コグを追加
+    "cogs.settings",      # 設定管理コグを追加
+    "cogs.teams",         # 班・技能タグ管理コグ
+    "cogs.todoist_admin",  # Todoist トークン管理コグ
 ]
 
 # on_guild_join / 起動時の自動セットアップで投入するギルド別デフォルト設定
@@ -61,9 +65,8 @@ class ClubBot(commands.Bot):
         intents.dm_messages = True        # Direct Messages
         super().__init__(command_prefix="!club ", intents=intents, help_command=None)
 
-        self.db = Database(config.db_path)
-        self.todoist = TodoistService()
-        self.sheets = SheetsService()
+        self.db = Database(config.db_path, database_url=config.database_url)
+        self.todoist_manager = TodoistServiceManager(self.db)
         self._initial_guild_setup_done = False
 
     async def setup_hook(self) -> None:
@@ -74,13 +77,18 @@ class ClubBot(commands.Bot):
         # GUILD_ID 指定時はそのギルドの設定をグローバル設定としても読み込む）
         await config.load_from_db(self.db)
 
-        # サービスの設定を再読み込み
-        self.todoist.reload_config()
-        self.sheets.reload_config()
-
-        # レガシーギルド（GUILD_ID 指定時）の初期チーム投入
-        if config.guild_id:
-            await self._seed_teams(config.guild_id)
+        # 暗号鍵チェック（Todoist トークン管理の前提）。
+        # 未設定/不正でも Bot 自体は動作を継続するが、トークンの登録・利用は
+        # 安全に拒否される（復号不可のため）。
+        if crypto.is_encryption_ready():
+            log.info("ENCRYPTION_KEY を検証しました（Todoist トークン管理: 有効）")
+        else:
+            log.error(
+                "ENCRYPTION_KEY が未設定または不正です。"
+                "Todoist トークンの登録・利用はできません。"
+                ".env に Fernet 鍵を設定してください（生成: "
+                "python -c \"from cryptography.fernet import Fernet; "
+                "print(Fernet.generate_key().decode())\"）")
 
         # Cog 読み込み
         for cog in COGS:
@@ -105,16 +113,6 @@ class ClubBot(commands.Bot):
         # グローバルエラーハンドラ
         self.tree.error(self.on_app_command_error)
 
-    async def _seed_teams(self, guild_id: int) -> None:
-        """
-        初期チームを投入（改訂版 10.1）。guild_id 単位で冪等。
-        """
-        repo = MemberRepository(self.db)
-        for key, name in INITIAL_TEAMS:
-            await repo.upsert_team(guild_id, key, name)
-        log.info("初期チームを確認・投入しました（guild=%s, %d チーム）",
-                 guild_id, len(INITIAL_TEAMS))
-
     # ------------------------------------------------------------------
     # ギルド自動セットアップ
     # ------------------------------------------------------------------
@@ -122,15 +120,22 @@ class ClubBot(commands.Bot):
         """
         ギルドの初期セットアップを冪等に行う。
 
-        (a) settings にギルド用デフォルト設定を INSERT（未存在時のみ）
-        (b) INITIAL_TEAMS を guild_id 付きで作成
-        (c) 初回のみ: ロール（幹部/Bot管理者/各班リーダー/各班）と
-            bot-log チャンネルを自動作成し、ID を settings に保存
-            （権限不足・API 失敗時はログに残して続行）
+        (a) guilds 台帳へ登録し、settings にギルド用デフォルト設定を INSERT（未存在時のみ）
+        (b) 初回のみ: ロール（幹部/Bot管理者）と bot-log チャンネルを自動作成し、
+            ID を settings に保存（権限不足・API 失敗時はログに残して続行）
+
+        班・技能タグの初期値は投入しない（新規ギルドは空で開始。
+        管理者が /team-add /skill-add で登録する）。
         """
         repo = SettingsRepository(self.db)
 
-        # (a) デフォルト設定（存在しないキーのみ。ID 系は env フォールバックを
+        # (a) ギルド台帳への登録（冪等。既存なら名称のみ更新）
+        try:
+            await GuildRepository(self.db).ensure(guild.id, guild.name)
+        except Exception as e:  # noqa: BLE001
+            log.warning("ギルド台帳への登録に失敗 (guild=%s): %s", guild.id, e)
+
+        # デフォルト設定（存在しないキーのみ。ID 系は env フォールバックを
         #     活かすため空値は入れない）
         try:
             await repo.set_if_absent(guild.id, "GUILD_NAME", guild.name)
@@ -139,13 +144,7 @@ class ClubBot(commands.Bot):
         except Exception as e:  # noqa: BLE001
             log.warning("ギルド初期設定の保存に失敗 (guild=%s): %s", guild.id, e)
 
-        # (b) 初期チーム（冪等）
-        try:
-            await self._seed_teams(guild.id)
-        except Exception as e:  # noqa: BLE001
-            log.warning("初期チーム投入に失敗 (guild=%s): %s", guild.id, e)
-
-        # (c) ロール・ログチャンネルの自動作成（初回のみ）
+        # (b) ロール・ログチャンネルの自動作成（初回のみ）
         try:
             done = await repo.get(guild.id, AUTO_SETUP_DONE_KEY)
         except Exception as e:  # noqa: BLE001
@@ -176,7 +175,11 @@ class ClubBot(commands.Bot):
 
     async def _auto_create_roles(self, guild: discord.Guild,
                                  repo: SettingsRepository) -> None:
-        """幹部/Bot管理者/各班リーダー/各班ロールを作成し ID を settings に保存する。"""
+        """幹部/Bot管理者ロールを作成し ID を settings に保存する。
+
+        班ロールは自動作成しない（班は管理者が /team-add で登録し、
+        既存ロールとの紐付けは /team-role で行う）。
+        """
         async def create_role(name: str) -> discord.Role | None:
             try:
                 role = await guild.create_role(name=name, mentionable=True,
@@ -194,29 +197,6 @@ class ClubBot(commands.Bot):
         role = await create_role(ADMIN_ROLE_NAME)
         if role is not None:
             await repo.set_if_absent(guild.id, "ADMIN_ROLE_ID", str(role.id))
-
-        leader_ids: list[str] = []
-        primary_map: list[str] = []
-        member_repo = MemberRepository(self.db)
-        for team_key, team_name in INITIAL_TEAMS:
-            leader = await create_role(f"{team_name}班リーダー")
-            if leader is not None:
-                leader_ids.append(str(leader.id))
-                # teams テーブルの leader_role_id も更新（冪等 upsert）
-                try:
-                    await member_repo.upsert_team(guild.id, team_key, team_name,
-                                                  leader_role_id=str(leader.id))
-                except Exception as e:  # noqa: BLE001
-                    log.warning("班リーダーロール ID の保存に失敗 (guild=%s, %s): %s",
-                                guild.id, team_key, e)
-            member_role = await create_role(f"{team_name}班")
-            if member_role is not None:
-                primary_map.append(f"{team_key}:{member_role.id}")
-
-        if leader_ids:
-            await repo.set_if_absent(guild.id, "LEADER_ROLE_IDS", ",".join(leader_ids))
-        if primary_map:
-            await repo.set_if_absent(guild.id, "PRIMARY_TEAM_ROLE_IDS", ",".join(primary_map))
 
     async def _auto_create_log_channel(self, guild: discord.Guild,
                                        repo: SettingsRepository) -> None:

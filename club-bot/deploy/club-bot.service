@@ -17,6 +17,9 @@ WorkingDirectory=/home/ubuntu/club-bot/app
 ExecStart=/home/ubuntu/club-bot/venv/bin/python bot.py
 Restart=always
 RestartSec=10
+# .env に DISCORD_TOKEN / ENCRYPTION_KEY / TZ / DB_PATH を設定する。
+# 本番（NocoDB 構成）では .env に DATABASE_URL=postgresql://... を追加すると
+# PostgreSQL に接続する（未設定なら DB_PATH の SQLite を使用）。
 EnvironmentFile=/home/ubuntu/club-bot/.env
 StandardOutput=append:/home/ubuntu/club-bot/logs/bot.log
 StandardError=append:/home/ubuntu/club-bot/logs/bot.err

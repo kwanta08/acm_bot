@@ -13,6 +13,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import config
+from repositories.todoist_config_repository import TodoistConfigRepository
+from utils import crypto
 from utils.embeds import info_embed, success_embed
 from utils.logger import get_logger
 
@@ -41,14 +43,19 @@ class Core(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         bot = self.bot
 
-        db_ok = "✅" if bot.db._conn is not None else "❌"
-        todoist_ok = "✅ 有効" if bot.todoist.enabled else "⚪ 無効（トークン未設定）"
-        sheets_ok = "✅ 有効" if bot.sheets.enabled else "⚪ 無効（credentials未設定）"
+        db_ok = "✅" if await bot.db.is_healthy() else "❌"
+        # Todoist はギルド別設定。当該ギルドの登録有無と暗号鍵の状態を示す
+        if interaction.guild is not None:
+            cfg = await TodoistConfigRepository(bot.db).get(interaction.guild.id)
+            todoist_ok = "✅ 登録済み" if cfg else "⚪ 未登録（/todoist-setup）"
+        else:
+            todoist_ok = "⚪ ギルド外のため不明"
+        enc_ok = "✅" if crypto.is_encryption_ready() else "❌ 未設定/不正"
 
         desc = (
-            f"**SQLite**: {db_ok}\n"
-            f"**Todoist**: {todoist_ok}\n"
-            f"**Google Sheets**: {sheets_ok}\n"
+            f"**DB（{bot.db.driver_name}）**: {db_ok}\n"
+            f"**Todoist（このサーバー）**: {todoist_ok}\n"
+            f"**暗号鍵（ENCRYPTION_KEY）**: {enc_ok}\n"
             f"**WebSocket 遅延**: {round(bot.latency * 1000)} ms\n"
             f"**タイムゾーン**: {config.tz}\n"
             f"**参加ギルド数**: {len(bot.guilds)}\n"

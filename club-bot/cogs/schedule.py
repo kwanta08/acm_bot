@@ -18,7 +18,7 @@ from discord.ext import commands
 from config import config
 from repositories.schedule_repository import ScheduleRepository
 from services import schedule_service as svc
-from services.schedule_service import build_emoji_maps, _resolve_name as _resolve_display_name
+from services.schedule_service import build_emoji_maps
 from utils.embeds import error_embed, info_embed, schedule_embed, success_embed
 from utils.logger import get_logger
 from utils.parser import InvalidDatetimeError, fmt_jp, from_iso, parse_datetime, parse_deadline, to_iso
@@ -120,30 +120,10 @@ class Schedule(commands.Cog):
             for emoji in all_emojis:
                 await msg.add_reaction(emoji)
 
-        # シート作成（候補がすべてDB保存された後に行う）
-        sheet_status = "未実行"
-        if self.bot.sheets.enabled and config.schedule_sheets_enabled():
-            try:
-                saved_opts = await self.repo.list_options(guild_id, schedule_id)
-                votes_map = {
-                    opt["option_id"]: {"ok": [], "maybe": [], "ng": [], "unanswered": []}
-                    for opt in saved_opts
-                }
-                actual_title = await self.bot.sheets.create_schedule_sheet(
-                    title, saved_opts, votes_map)
-                await self.repo.set_schedule_sheet_title(guild_id, schedule_id, actual_title)
-                sheet_status = f"作成済み（{actual_title}）"
-            except Exception as e:
-                log.exception("スケジュールシート初期化失敗")
-                sheet_status = f"失敗（{e}）"
-        else:
-            sheet_status = "無効（未設定）"
-
         await interaction.followup.send(
             embed=success_embed("日程調整を作成しました",
                                 f"ID: `{schedule_id}`\n候補数: {len(parsed_options)}\n"
-                                f"締切: {fmt_jp(deadline_dt)}\n投稿先: {target_channel.mention}\n"
-                                f"シート: {sheet_status}",
+                                f"締切: {fmt_jp(deadline_dt)}\n投稿先: {target_channel.mention}",
                                 executor=interaction.user.display_name),
             ephemeral=True)
 
@@ -205,10 +185,9 @@ class Schedule(commands.Cog):
             return
         embed = schedule_embed("締切済みの日程調整一覧")
         for s in schedules:
-            sheet_info = f" / シート: {s['sheet_title']}" if s.get("sheet_title") else ""
             embed.add_field(
                 name=f"{s['title']}（`{s['schedule_id']}`）",
-                value=f"締切: {fmt_jp(from_iso(s['deadline']))}{sheet_info}",
+                value=f"締切: {fmt_jp(from_iso(s['deadline']))}",
                 inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -281,20 +260,10 @@ class Schedule(commands.Cog):
             except (discord.NotFound, discord.Forbidden, discord.HTTPException):
                 pass
 
-        # スプレッドシートを削除
-        sheet_deleted = False
-        if schedule.get("sheet_title") and self.bot.sheets.enabled:
-            try:
-                await self.bot.sheets.delete_schedule_sheet(schedule["sheet_title"])
-                sheet_deleted = True
-            except Exception as e:
-                log.warning("スケジュールシート削除失敗: %s", e)
-
         # DBから削除（外部キーCASCADEでoptions/votesも削除される）
         await self.repo.delete_schedule(guild_id, schedule_id)
 
         detail = f"ID: `{schedule_id}`\nDiscordメッセージ削除: {deleted_msgs} 件"
-        detail += f"\nシート削除: {'成功' if sheet_deleted else '対象なし/失敗'}"
 
         await interaction.followup.send(
             embed=success_embed("削除しました", detail,
@@ -421,7 +390,6 @@ class Schedule(commands.Cog):
                 await self.repo.remove_vote(guild_id, option["option_id"], user_id)
 
         await self._refresh_option_message(payload, schedule, option)
-        await self._sync_schedule_sheet(schedule, guild)
 
     async def _remove_other_reactions(self, payload: discord.RawReactionActionEvent,
                                       keep_status: str,
@@ -471,34 +439,6 @@ class Schedule(commands.Cog):
         except discord.HTTPException:
             pass
 
-    # 投票ごとのシート反映用
-    async def _sync_schedule_sheet(self, schedule: dict, guild: discord.Guild | None):
-        """現在の投票状況をスプレッドシートへ反映する。"""
-        if not self.bot.sheets.enabled or not config.schedule_sheets_enabled():
-            return
-        if not schedule.get("sheet_title"):
-            return
-
-        guild_id = schedule["guild_id"]
-        try:
-            options = await self.repo.list_options(guild_id, schedule["schedule_id"])
-            votes_map = {}
-            for opt in options:
-                votes = await self.repo.list_votes(guild_id, opt["option_id"])
-                votes_map[opt["option_id"]] = {
-                    "ok": [await _resolve_display_name(self.bot, guild, v["user_id"])
-                           for v in votes if v["status"] == "ok"],
-                    "maybe": [await _resolve_display_name(self.bot, guild, v["user_id"])
-                              for v in votes if v["status"] == "maybe"],
-                    "ng": [await _resolve_display_name(self.bot, guild, v["user_id"])
-                           for v in votes if v["status"] == "ng"],
-                    "unanswered": [],
-                }
-            await self.bot.sheets.update_schedule_sheet(
-                schedule["sheet_title"], options, votes_map)
-        except Exception as e:
-            log.warning("スケジュール Sheets 同期失敗: %s", e)
-
     # ====================================================================
     # 締切・通知ヘルパー（Reminders から呼ばれる）
     # ====================================================================
@@ -546,8 +486,6 @@ class Schedule(commands.Cog):
                 await channel.send(embed=embed)
             except discord.HTTPException:
                 pass
-
-        await self._sync_schedule_sheet(schedule, guild)
 
 
 async def setup(bot: commands.Bot):

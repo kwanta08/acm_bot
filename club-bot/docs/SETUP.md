@@ -28,7 +28,7 @@
 ## 全体の流れ（所要 1〜2 時間）
 
 1. **【準備A】** Discord Bot を作ってトークンと各種 ID を用意する
-2. **【準備B】**（任意）Todoist / Google Sheets の連携情報を用意する
+2. **【準備B】**（任意）Todoist の連携情報・NocoDB の準備をする
 3. **【STEP1】** さくらのVPSを契約して Ubuntu を用意する
 4. **【STEP2】** VPSに接続して、初期設定（更新・作業ユーザー作成）
 5. **【STEP3】** Bot のファイルを配置し、`.env` を設定する
@@ -36,7 +36,7 @@
 7. **【STEP5】** systemd で 24 時間常駐させる
 8. **【STEP6】** バックアップと日常メンテ
 
-> Todoist / Google Sheets は未設定でも Bot は動きます（その機能だけOFFになります）。
+> Todoist は未設定でも Bot は動きます（その機能だけOFFになります）。
 > まずは Discord だけで動かし、後から追加でも大丈夫です。
 
 ---
@@ -92,23 +92,43 @@ Discord アプリの「**ユーザー設定 → 詳細設定 → 開発者モー
 
 ---
 
-# 【準備B】Todoist / Google Sheets（任意）
+# 【準備B】Todoist / NocoDB（任意）
 
 ## B-1. Todoist（タスク連携）
 
-1. [Todoist の開発者設定](https://todoist.com/app/settings/integrations/developer) で **API トークン**をコピー → `TODOIST_API_TOKEN`。
-2. タスクを入れたいプロジェクトの ID を `TODOIST_PROJECT_ID` に設定（未設定なら「インボックス」に入ります）。
-3. `TODAY_LABEL_NAME` は既定で「今日やること」。初回に `/task sync` を実行すると自動で作られます。
+Todoist の API トークンは **`.env` には書きません**。セキュリティのため、
+暗号化して DB に保存する方式になっています。
 
-## B-2. Google Sheets（表計算連携）
+1. 暗号鍵を生成して `.env` の `ENCRYPTION_KEY` に設定します（全サーバー共通で1つ）。
+   ```bash
+   $ python3 -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   ```
+   表示された文字列を `.env` の `ENCRYPTION_KEY=` の右に書きます。
+   **この鍵はバックアップして安全に保管してください**（紛失すると保存済み
+   トークンを復号できなくなります）。
+2. [Todoist の開発者設定](https://todoist.com/app/settings/integrations/developer) で
+   **API トークン**をコピーします。
+3. Discord で各サーバーの管理者が `/todoist-setup` を実行します（サーバーごとに登録）。
+   - 管理者にだけ見えるメッセージとボタンが表示されるので、
+     ボタンを押して開いたフォーム（Modal）にトークンを入力します。
+   - Modal の入力値はチャンネルの履歴に残りません。
+   - トークンは Fernet で暗号化して DB に保存され、画面・ログには表示されません。
+4. 登録状況は `/todoist-status`、削除は `/todoist-remove` で行えます。
+5. 「今日やること」ラベルは `/task sync` 実行時に自動で作られます。
 
-1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作成。
-2. 「**Google Sheets API**」と「**Google Drive API**」を有効化。
-3. 「**サービスアカウント**」を作成し、**JSONキー**をダウンロード → 後で `credentials.json` という名前でVPSに置きます。
-4. 記録先のスプレッドシートを作り、その**共有設定**で、JSON内に書かれている
-   サービスアカウントのメール（`〜@〜.iam.gserviceaccount.com`）を「**編集者**」として追加。
-5. スプレッドシートURLの `/d/` と `/edit` の間の文字列が ID（→ `SPREADSHEET_ID`）。
-6. 桁巻き記録を別ブックにするなら `LAYER_SPREADSHEET_ID` を設定（同じブックなら空欄でOK）。
+## B-2. NocoDB（記録の閲覧 UI・任意）
+
+本番では記録の正本を **PostgreSQL** とし、表形式の Web UI として NocoDB を
+Docker Compose で起動します（bot と NocoDB が同じ PostgreSQL 業務 DB に接続。
+NocoDB が止まっても Bot は動きます）。
+
+手順は [`NOCODB.md`](NOCODB.md) を参照してください
+（`deploy/docker-compose.nocodb.yml` で PostgreSQL と NocoDB を起動し、
+`.env` の `DATABASE_URL` で Bot を接続します）。
+
+> 以前のバージョンで使っていた Google Sheets 連携は廃止されました。
+> 旧 Sheets のデータを移す場合は `scripts/migrate_sheets_to_db.py` を使います
+> （[`NOCODB.md`](NOCODB.md) 8章）。
 
 ---
 
@@ -277,34 +297,26 @@ $ nano ~/club-bot/.env
 ```
 
 `nano` はかんたんなテキストエディタです。矢印キーで移動し、値を書き込みます。
-**最低限、次の2つを埋めれば起動できます。**
+**最低限、次の3つを埋めれば起動できます。**
 
 ```
 DISCORD_TOKEN=（準備Aで控えたトークン）
 GUILD_ID=（準備Aで控えたサーバーID）
+ENCRYPTION_KEY=（準備B-1 で生成した暗号鍵）
 ```
 
-余裕があれば、チャンネルID・ロールID・Todoist・Sheets の項目も埋めます。
+余裕があれば、チャンネルID・ロールID の項目も埋めます。
+Todoist は `.env` ではなく、起動後に Discord 上で `/todoist-setup` を使って登録します（準備B-1）。
 VPSでは**絶対パス**で書くのが安全です。おすすめの書き方：
 
 ```
 DB_PATH=/home/ubuntu/club-bot/app/data/club.db
-GOOGLE_CREDENTIALS_PATH=/home/ubuntu/club-bot/credentials.json
 TZ=Asia/Tokyo
 ```
 
 書き終えたら **Ctrl+O → Enter（保存）→ Ctrl+X（終了）**。
 
-## 3-5.（Sheetsを使う場合のみ）credentials.json を置く
-
-準備B-2 でダウンロードした JSON を、`~/club-bot/credentials.json` に置きます。
-方法A（scp）を使うなら手元PCで：
-
-```bash
-$ scp あなたのkey.json ubuntu@xxx.xxx.xxx.xxx:~/club-bot/credentials.json
-```
-
-## 3-6. ログ用フォルダを作る
+## 3-5. ログ用フォルダを作る
 
 ```bash
 $ mkdir -p ~/club-bot/logs
@@ -392,13 +404,13 @@ $ sudo cp ~/club-bot/app/deploy/club-bot.logrotate /etc/logrotate.d/club-bot
 
 # 【STEP6】バックアップと日常メンテ
 
-- **データのバックアップ**：`~/club-bot/app/data/club.db` を定期的にコピー保管。
-  かんたんな例（毎日手動 or cron で）：
-  ```bash
-  $ cp ~/club-bot/app/data/club.db ~/club-bot/backup_$(date +%Y%m%d).db
-  ```
+- **データのバックアップ**：
+  - SQLite 運用: `~/club-bot/app/data/club.db` を定期的にコピー保管。
+    ```bash
+    $ cp ~/club-bot/app/data/club.db ~/club-bot/backup_$(date +%Y%m%d).db
+    ```
+  - PostgreSQL 運用: `pg_dump` で定期的に取得（手順は [`NOCODB.md`](NOCODB.md) 5章）。
 - **タスクの控え**：週1回 Discord で `/report export-tasks` を実行して CSV を保存。
-- **Sheets連携ON時**：毎日 04:00 に自動で同期されます（何もしなくてOK）。
 - **状態チェック**：Discord で `/health`、サーバーで `sudo systemctl status club-bot`。
 
 ---
@@ -411,8 +423,7 @@ $ sudo cp ~/club-bot/app/deploy/club-bot.logrotate /etc/logrotate.d/club-bot
 | スラッシュコマンドが Discord に出ない | 招待時に `applications.commands` を付けたか / `GUILD_ID` が正しいか / 数分待つ |
 | メンバー一覧が取れない | Developer Portal で **SERVER MEMBERS INTENT** が ON か |
 | 投票のリアクションが反映されない | Bot に **Manage Messages** 権限があるか / **MESSAGE CONTENT INTENT** が ON か |
-| `/health` で Sheets が「無効」 | `credentials.json` のパス、スプレッドシートの共有（サービスアカウントを編集者に）を確認 |
-| `/health` で Todoist が「無効」 | `.env` の `TODOIST_API_TOKEN` を確認し、`restart` したか |
+| `/health` で Todoist が「未登録」 | そのサーバーで `/todoist-setup` を実行したか。`ENCRYPTION_KEY` が `.env` に正しく設定されているか |
 | `sudo systemctl status` が failed | `journalctl -u club-bot -e` で赤いエラー行を確認。多くは `.env` かパスのミス |
 | SSHで接続できない | IPアドレス/ユーザー名/パスワード、さくらの「パケットフィルタ」でSSH(22)が許可されているか |
 | `pip install` が失敗する | `sudo apt install python3-venv python3-pip -y` を先に実行したか |

@@ -93,7 +93,7 @@ def parse_deadline(text: str) -> datetime:
     except ValueError:
         pass
 
-    raise InvalidDatetimeError(f"Invalid datetime format: {text}")
+    raise InvalidDatetimeError()
 
 
 def now() -> datetime:
@@ -114,8 +114,3 @@ def from_iso(text: str) -> datetime:
 def fmt_jp(dt: datetime) -> str:
     """日本語表示用フォーマット。"""
     return dt.astimezone(TZ).strftime("%Y/%m/%d %H:%M")
-
-
-def fmt_sheet(dt: datetime) -> str:
-    """Sheets 書き込み用フォーマット（仕様 11.8.4）。"""
-    return dt.astimezone(TZ).strftime("%Y/%m/%d %H:%M:%S")

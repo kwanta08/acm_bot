@@ -1,13 +1,13 @@
 """
 LayerTracking モジュール（仕様 11.8）。
 
-桁巻き積層作業を /layer start / end の2コマンドで記録し、桁ごとの
-Google Sheets シートへ追記する。桁名はコマンドで登録管理し、
-/layer start では登録済みの桁名から autocomplete で選択する。
-進行中セッションは SQLite に永続化し、Bot 再起動後も復元できる。
+桁巻き積層作業を /layer start / end の2コマンドで記録する。
+桁名はコマンドで登録管理し、/layer start では登録済みの桁名から
+autocomplete で選択する。進行中セッションと完了記録は SQLite（正本）に
+永続化され、参照は DB（NocoDB）から行う（Google Sheets 連携は廃止）。
 
 マルチテナント版: セッション・桁名・記録を interaction.guild.id で
-スコープする。services/layer_tracking_service.py は変更禁止のため、
+スコープする。services/layer_tracking_service.py には
 guild 固定プロキシ repo.for_guild(guild_id) を渡して利用する。
 """
 from __future__ import annotations
@@ -19,7 +19,6 @@ from discord.ext import commands
 from repositories.layer_keta_repository import LayerKetaRepository
 from repositories.layer_session_repository import LayerSessionRepository
 from services.layer_tracking_service import LayerTrackingService
-from services.sheets_service import SheetsError
 from utils.embeds import error_embed, info_embed, success_embed
 from utils.logger import get_logger
 from utils.parser import fmt_jp, now, to_iso
@@ -36,7 +35,7 @@ class LayerTracking(commands.Cog):
 
     def _svc_for(self, guild_id: int) -> LayerTrackingService:
         """ギルド固定スコープのリポジトリでサービスを構成する。"""
-        return LayerTrackingService(self.session_repo.for_guild(guild_id), self.bot.sheets)
+        return LayerTrackingService(self.session_repo.for_guild(guild_id))
 
     group = app_commands.Group(name="layer", description="桁巻き積層作業の記録")
 
@@ -138,7 +137,7 @@ class LayerTracking(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     # ---------- end ----------
-    @group.command(name="end", description="進行中の積層を終了し、対応シートへ記録します。")
+    @group.command(name="end", description="進行中の積層を終了し、記録を保存します。")
     @require(Level.L1)
     async def end(self, interaction: discord.Interaction):
         guild_id = await ensure_guild(interaction)
@@ -153,17 +152,7 @@ class LayerTracking(commands.Cog):
             return
 
         await interaction.response.defer(ephemeral=True)
-        try:
-            result = await svc.end(user_id, interaction.user.display_name)
-        except SheetsError as e:
-            await self.bot.log_to_channel(
-                f"[Layer] Sheets 書き込み失敗 user={user_id}: {e}", guild_id=guild_id)
-            await interaction.followup.send(
-                embed=error_embed(
-                    "Sheets への書き込みに失敗しました。記録は保存済みです。"
-                    "`/layer sync` で後から再送信できます。"),
-                ephemeral=True)
-            return
+        result = await svc.end(user_id, interaction.user.display_name)
 
         embed = success_embed(
             "積層を記録しました",
@@ -200,34 +189,6 @@ class LayerTracking(commands.Cog):
                 value=f"桁: {s['keta']} / {s['layer_num']} / 経過 {s['elapsed_min']} 分",
                 inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
-
-    # ---------- sync ----------
-    @group.command(name="sync", description="未反映の桁巻き記録をシートへ再送信します。")
-    @require(Level.L2)
-    async def sync_cmd(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        guild_id = await ensure_guild(interaction)
-        if guild_id is None:
-            return
-        if not self.bot.sheets.enabled:
-            await interaction.followup.send(
-                embed=info_embed("Google Sheets 無効",
-                                 "credentials.json と SPREADSHEET_ID を設定すると有効化されます。"),
-                ephemeral=True)
-            return
-        svc = self._svc_for(guild_id)
-        try:
-            n = await svc.sync_unsynced_records()
-        except SheetsError as e:
-            await self.bot.log_to_channel(f"[Layer] sync 失敗: {e}", guild_id=guild_id)
-            await interaction.followup.send(
-                embed=error_embed("同期に失敗しました。時間をおいて再試行してください。"),
-                ephemeral=True)
-            return
-        await interaction.followup.send(
-            embed=success_embed("桁巻き記録シート同期完了", f"{n} 件を再送信しました",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
 
 
 async def setup(bot: commands.Bot):

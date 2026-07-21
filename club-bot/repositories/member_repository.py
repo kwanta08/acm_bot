@@ -21,17 +21,56 @@ class MemberRepository(BaseRepository):
     async def upsert_team(self, guild_id: int, team_key: str, team_name: str,
                           leader_role_id: str | None = None,
                           channel_id: str | None = None) -> None:
+        """班を登録・更新する。無効化済みの同名班は再有効化される。"""
+        now_iso = to_iso(now())
         await self.db.execute(
             """
-            INSERT INTO teams (guild_id, team_key, team_name, leader_role_id, channel_id, active_flag)
-            VALUES (?, ?, ?, ?, ?, 1)
+            INSERT INTO teams (guild_id, team_key, team_name, leader_role_id, channel_id,
+                               active_flag, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 1, ?, ?)
             ON CONFLICT(guild_id, team_key) DO UPDATE SET
                 team_name = excluded.team_name,
                 leader_role_id = COALESCE(excluded.leader_role_id, teams.leader_role_id),
-                channel_id = COALESCE(excluded.channel_id, teams.channel_id)
+                channel_id = COALESCE(excluded.channel_id, teams.channel_id),
+                active_flag = 1,
+                updated_at = excluded.updated_at
             """,
-            (guild_id, team_key, team_name, leader_role_id, channel_id),
+            (guild_id, team_key, team_name, leader_role_id, channel_id, now_iso, now_iso),
         )
+
+    async def deactivate_team(self, guild_id: int, team_key: str) -> bool:
+        """班を無効化する（論理削除。メンバーの所属情報は保持）。対象が無ければ False。"""
+        cur = await self.db.execute(
+            "UPDATE teams SET active_flag = 0, updated_at = ?"
+            " WHERE guild_id = ? AND team_key = ? AND active_flag = 1",
+            (to_iso(now()), guild_id, team_key))
+        return cur.rowcount > 0
+
+    async def set_team_roles(self, guild_id: int, team_key: str, *,
+                             member_role_id: str | None = None,
+                             secondary_role_id: str | None = None) -> bool:
+        """班のロール紐付けを更新する。指定した種別のみ更新。対象班が無ければ False。"""
+        sets: list[str] = ["updated_at = ?"]
+        params: list = [to_iso(now())]
+        if member_role_id is not None:
+            sets.append("member_role_id = ?")
+            params.append(member_role_id)
+        if secondary_role_id is not None:
+            sets.append("secondary_role_id = ?")
+            params.append(secondary_role_id)
+        params.extend([guild_id, team_key])
+        cur = await self.db.execute(
+            f"UPDATE teams SET {', '.join(sets)} WHERE guild_id = ? AND team_key = ?",
+            tuple(params))
+        return cur.rowcount > 0
+
+    async def count_primary_members(self, guild_id: int, team_key: str) -> int:
+        """主所属が指定班のアクティブメンバー数（班の無効化前の確認用）。"""
+        row = await self.db.fetchone(
+            "SELECT COUNT(*) AS c FROM members"
+            " WHERE guild_id = ? AND primary_team = ? AND active_flag = 1",
+            (guild_id, team_key))
+        return int(row["c"]) if row else 0
 
     async def list_teams(self, guild_id: int, active_only: bool = True) -> list[dict[str, Any]]:
         sql = "SELECT * FROM teams WHERE guild_id = ?"

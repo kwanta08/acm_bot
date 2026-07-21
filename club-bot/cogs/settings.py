@@ -36,7 +36,7 @@ class Settings(commands.Cog):
     async def _after_change(self, guild_id: int) -> None:
         """設定変更後の反映処理: ギルド別キャッシュ破棄 + グローバル再読込。"""
         config.invalidate_guild(guild_id)
-        # レガシーギルドのグローバル設定（Todoist/Sheets 等）を再読込
+        # レガシーギルドのグローバル設定を再読込
         await config.load_from_db(self.db)
 
     @app_commands.command(name="settings_list", description="全ての設定を表示します")
@@ -60,8 +60,6 @@ class Settings(commands.Cog):
             categories = {
                 "チャンネル": [],
                 "ロール": [],
-                "Todoist": [],
-                "Google Sheets": [],
                 "共通": [],
                 "その他": []
             }
@@ -75,14 +73,6 @@ class Settings(commands.Cog):
                 "EXEC_ROLE_ID", "ADMIN_ROLE_ID", "LEADER_ROLE_IDS",
                 "PRIMARY_TEAM_ROLE_IDS", "SECONDARY_TEAM_ROLE_IDS"
             }
-            todoist_keys = {
-                "TODOIST_API_TOKEN", "TODOIST_PROJECT_ID", "TODAY_LABEL_NAME"
-            }
-            sheets_keys = {
-                "GOOGLE_CREDENTIALS_PATH", "SPREADSHEET_ID", "LAYER_SPREADSHEET_ID",
-                "SHEET_TASKS", "SHEET_ATTENDANCE", "SHEET_MEMBERS",
-                "SHEET_TEAM_SUMMARY", "SHEET_AUDIT_LOG"
-            }
             common_keys = {"TZ", "DB_PATH"}
 
             for key, value in settings.items():
@@ -90,12 +80,16 @@ class Settings(commands.Cog):
                     categories["チャンネル"].append((key, value))
                 elif key in role_keys:
                     categories["ロール"].append((key, value))
-                elif key in todoist_keys:
-                    categories["Todoist"].append((key, value))
-                elif key in sheets_keys:
-                    categories["Google Sheets"].append((key, value))
                 elif key in common_keys:
                     categories["共通"].append((key, value))
+                elif key.startswith("TODOIST_"):
+                    # レガシーの平文 Todoist 設定は表示しない
+                    # （/todoist-setup での暗号化登録に置き換わった）
+                    categories["その他"].append((key, "（廃止: /todoist-setup で再登録してください）"))
+                elif key.startswith("SHEET_") or key in (
+                        "SPREADSHEET_ID", "LAYER_SPREADSHEET_ID", "GOOGLE_CREDENTIALS_PATH"):
+                    # Google Sheets 連携は廃止（NocoDB 移行）
+                    categories["その他"].append((key, "（廃止: Sheets 連携は廃止されました）"))
                 else:
                     categories["その他"].append((key, value))
 
@@ -135,7 +129,13 @@ class Settings(commands.Cog):
         try:
             value = await self.settings_repo.get(guild_id, setting_key)
 
-            if value is None:
+            if setting_key.startswith("TODOIST_"):
+                # レガシーの平文 Todoist 設定は値を表示しない
+                embed = info_embed(
+                    setting_key,
+                    "このキーは廃止されました。`/todoist-setup` / `/todoist-status` "
+                    "を使用してください（値は表示されません）")
+            elif value is None:
                 # 環境変数をチェック
                 import os
                 env_value = os.getenv(setting_key)
@@ -302,78 +302,6 @@ class Settings(commands.Cog):
         except Exception as e:
             log.exception("ロール設定エラー: %s", e)
             embed = error_embed(f"ロール `{role_type}` の設定に失敗しました")
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-    @app_commands.command(name="set_sheets", description="Google Sheets 設定をします")
-    @app_commands.describe(
-        setting_type="設定タイプ",
-        value="設定値"
-    )
-    @app_commands.choices(setting_type=[
-        app_commands.Choice(name="スプレッドシートID", value="SPREADSHEET_ID"),
-        app_commands.Choice(name="層塗りシートID", value="LAYER_SPREADSHEET_ID"),
-        app_commands.Choice(name="タスクシート名", value="SHEET_TASKS"),
-        app_commands.Choice(name="出席シート名", value="SHEET_ATTENDANCE"),
-        app_commands.Choice(name="メンバーシート名", value="SHEET_MEMBERS"),
-        app_commands.Choice(name="チームサマリシート名", value="SHEET_TEAM_SUMMARY"),
-        app_commands.Choice(name="監査ログシート名", value="SHEET_AUDIT_LOG"),
-    ])
-    @app_commands.check(is_admin)
-    async def set_sheets(self, interaction: discord.Interaction, setting_type: str, value: str):
-        """Google Sheets 設定をするショートカット"""
-        await interaction.response.defer(ephemeral=True)
-        guild_id = await ensure_guild(interaction)
-        if guild_id is None:
-            return
-
-        try:
-            await self.settings_repo.set(guild_id, setting_type, value)
-            embed = success_embed(
-                "Sheets 設定完了",
-                f"**{setting_type}** = `{value}`\nを保存しました"
-            )
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-            # 設定を更新
-            await self._after_change(guild_id)
-
-        except Exception as e:
-            log.exception("Sheets 設定エラー: %s", e)
-            embed = error_embed(f"Sheets 設定 `{setting_type}` に失敗しました")
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-    @app_commands.command(name="set_todoist", description="Todoist 設定をします")
-    @app_commands.describe(
-        setting_type="設定タイプ",
-        value="設定値"
-    )
-    @app_commands.choices(setting_type=[
-        app_commands.Choice(name="APIトークン", value="TODOIST_API_TOKEN"),
-        app_commands.Choice(name="プロジェクトID", value="TODOIST_PROJECT_ID"),
-        app_commands.Choice(name="今日やることラベル名", value="TODAY_LABEL_NAME"),
-    ])
-    @app_commands.check(is_admin)
-    async def set_todoist(self, interaction: discord.Interaction, setting_type: str, value: str):
-        """Todoist 設定をするショートカット"""
-        await interaction.response.defer(ephemeral=True)
-        guild_id = await ensure_guild(interaction)
-        if guild_id is None:
-            return
-
-        try:
-            await self.settings_repo.set(guild_id, setting_type, value)
-            embed = success_embed(
-                "Todoist 設定完了",
-                f"**{setting_type}** = `{value}`\nを保存しました"
-            )
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-            # 設定を更新
-            await self._after_change(guild_id)
-
-        except Exception as e:
-            log.exception("Todoist 設定エラー: %s", e)
-            embed = error_embed(f"Todoist 設定 `{setting_type}` に失敗しました")
             await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="set_common", description="共通設定をします")

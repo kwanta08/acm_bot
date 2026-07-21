@@ -9,7 +9,7 @@
 - チャンネル ID・ロール ID などのギルド固有情報は settings テーブルから
   guild_id キーで解決する。config.for_guild(guild_id) がキャッシュ付きの
   GuildConfig を返す。解決順は「ギルド別 DB 設定 > 環境変数 > デフォルト」。
-- Google Sheets 関連の設定項目は従来どおりグローバル（変更なし）。
+- Google Sheets 連携は廃止（NocoDB 移行）。記録の正本は SQLite。
 """
 from __future__ import annotations
 
@@ -160,45 +160,31 @@ class Config:
     secondary_team_role_ids: dict[str, int] = field(
         default_factory=lambda: _get_team_role_map("SECONDARY_TEAM_ROLE_IDS"))
 
-    # Todoist - 環境変数 or データベース（グローバル）
-    todoist_api_token: str = _get_str("TODOIST_API_TOKEN")
-    todoist_project_id: str = _get_str("TODOIST_PROJECT_ID")
-    today_label_name: str = _get_str("TODAY_LABEL_NAME", "今日やること")
+    # Todoist - ギルド別管理（todoist_configs テーブル + /todoist-setup）。
+    # トークン・プロジェクトIDは環境変数・settings からは読まない
+    # （平文保存を廃止。/todoist-setup で暗号化して DB 登録する）。
+    # today_label_channel_id は通知先チャンネルの設定（ギルド別解決のフォールバック）
     today_label_channel_id: int | None = _get_int("TODAY_LABEL_CHANNEL_ID")
 
-    # Google Sheets - 環境変数 or データベース（グローバル・変更なし）
-    google_credentials_path: str = _get_str("GOOGLE_CREDENTIALS_PATH", "./credentials.json")
-    spreadsheet_id: str = _get_str("SPREADSHEET_ID")
-    sheet_tasks: str = _get_str("SHEET_TASKS", "tasks")
-    sheet_attendance: str = _get_str("SHEET_ATTENDANCE", "attendance")
-    sheet_members: str = _get_str("SHEET_MEMBERS", "members")
-    sheet_team_summary: str = _get_str("SHEET_TEAM_SUMMARY", "team_summary")
-    sheet_audit_log: str = _get_str("SHEET_AUDIT_LOG", "audit_log")
-    layer_spreadsheet_id: str = _get_str("LAYER_SPREADSHEET_ID")
+    # Google Sheets 連携は廃止（NocoDB 移行）。記録の正本は SQLite で、
+    # 外部参照は NocoDB が同じ DB に接続して行う。
+    # 旧 Sheets 関連の環境変数・設定項目（SPREADSHEET_ID, SHEET_*,
+    # GOOGLE_CREDENTIALS_PATH 等）は移行スクリプト
+    # （scripts/migrate_sheets_to_db.py）でのみ使用する。
 
     # 共通 - 環境変数 or デフォルト
     tz: str = _get_str("TZ", "Asia/Tokyo")
+    # SQLite のパス（ローカル開発・テスト用。デフォルト: ./data/club.db）
     db_path: str = _get_str("DB_PATH", "./data/club.db")
+    # PostgreSQL 接続 URL（本番の NocoDB 構成用。
+    # 設定時は PostgreSQL に接続し、db_path の SQLite は使わない）
+    database_url: str = _get_str("DATABASE_URL")
 
     # データベース接続（設定読み込み用。setup_hook で接続後に保持される）
     _db: "Database | None" = None
 
     # ギルド別設定キャッシュ（guild_id -> GuildConfig）
     _guild_cache: dict[int, GuildConfig] = field(default_factory=dict)
-
-    @property
-    def effective_layer_spreadsheet_id(self) -> str:
-        """
-        層塗り記録用ブック ID 未指定なら運用台帳ブックを流用する
-        """
-        return self.layer_spreadsheet_id or self.spreadsheet_id
-
-    @property
-    def schedule_spreadsheet_id(self) -> str | None:
-        return os.getenv("SCHEDULE_SPREADSHEET_ID") or None
-
-    def schedule_sheets_enabled(self) -> bool:
-        return bool(self.google_credentials_path and self.schedule_spreadsheet_id)
 
     @property
     def today_channel_id(self) -> int | None:
@@ -219,12 +205,6 @@ class Config:
         実際に読み込んだ .env の絶対パス。OS 環境変数のみの場合は空。
         """
         return _loaded_env_path or ""
-
-    def sheets_enabled(self) -> bool:
-        return bool(self.spreadsheet_id) and os.path.exists(self.google_credentials_path)
-
-    def todoist_enabled(self) -> bool:
-        return bool(self.todoist_api_token)
 
     # リアクション絵文字ID
     @property
@@ -374,65 +354,10 @@ class Config:
             if val:
                 self.leader_role_ids = val
 
-        if not self.todoist_api_token:
-            val = await repo.get(gid, "TODOIST_API_TOKEN")
-            if val:
-                self.todoist_api_token = val
-
-        if not self.todoist_project_id:
-            val = await repo.get(gid, "TODOIST_PROJECT_ID")
-            if val:
-                self.todoist_project_id = val
-
-        if self.today_label_name == "今日やること":  # デフォルト値の場合
-            val = await repo.get(gid, "TODAY_LABEL_NAME")
-            if val:
-                self.today_label_name = val
-
         if self.today_label_channel_id is None:
             val = await repo.get_int(gid, "TODAY_LABEL_CHANNEL_ID")
             if val is not None:
                 self.today_label_channel_id = val
-
-        if self.google_credentials_path == "./credentials.json":  # デフォルト値の場合
-            val = await repo.get(gid, "GOOGLE_CREDENTIALS_PATH")
-            if val:
-                self.google_credentials_path = val
-
-        if not self.spreadsheet_id:
-            val = await repo.get(gid, "SPREADSHEET_ID")
-            if val:
-                self.spreadsheet_id = val
-
-        if self.sheet_tasks == "tasks":  # デフォルト値の場合
-            val = await repo.get(gid, "SHEET_TASKS")
-            if val:
-                self.sheet_tasks = val
-
-        if self.sheet_attendance == "attendance":  # デフォルト値の場合
-            val = await repo.get(gid, "SHEET_ATTENDANCE")
-            if val:
-                self.sheet_attendance = val
-
-        if self.sheet_members == "members":  # デフォルト値の場合
-            val = await repo.get(gid, "SHEET_MEMBERS")
-            if val:
-                self.sheet_members = val
-
-        if self.sheet_team_summary == "team_summary":  # デフォルト値の場合
-            val = await repo.get(gid, "SHEET_TEAM_SUMMARY")
-            if val:
-                self.sheet_team_summary = val
-
-        if self.sheet_audit_log == "audit_log":  # デフォルト値の場合
-            val = await repo.get(gid, "SHEET_AUDIT_LOG")
-            if val:
-                self.sheet_audit_log = val
-
-        if not self.layer_spreadsheet_id:
-            val = await repo.get(gid, "LAYER_SPREADSHEET_ID")
-            if val:
-                self.layer_spreadsheet_id = val
 
         if self.tz == "Asia/Tokyo":  # デフォルト値の場合
             val = await repo.get(gid, "TZ")
@@ -458,20 +383,7 @@ COLOR_ERROR = 0xE74C3C     # 赤
 COLOR_INFO = 0x95A5A6      # 情報（灰）
 COLOR_SUCCESS = 0x2ECC71   # 成功（緑）
 
-# 初期チーム（改訂版 10.1）
-INITIAL_TEAMS = [
-    ("design", "設計"),
-    ("wing", "翼"),
-    ("cfrp", "CFRP"),
-    ("drive", "駆動"),
-    ("propeller", "プロペラ"),
-    ("electronics", "電装"),
-    ("fairing", "フェアリング"),
-    ("pilot", "パイロット"),
-]
-
-# 技能タグ（改訂版 11.4.3）
-SKILL_TAGS = [
-    "CAD", "解析", "木工", "CFRP積層", "はんだ",
-    "回路設計", "加工", "写真記録", "試験整備",
-]
+# 班（teams）と技能タグ（skill_tags）は config.py の固定配列ではなく、
+# DB（teams / skill_tags テーブル）でギルド単位に管理する。
+# 参照は services/team_service.py、登録・変更は /team-add /skill-add 等の
+# 管理コマンド（cogs/teams.py）で行う。新規ギルドは空の状態で開始する。

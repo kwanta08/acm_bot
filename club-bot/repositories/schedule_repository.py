@@ -144,16 +144,16 @@ class ScheduleRepository(BaseRepository):
             (guild_id, guild_id, schedule_id))
         return {r["user_id"] for r in rows}
 
-    async def set_schedule_sheet_title(self, guild_id: int, schedule_id: str,
-                                       sheet_title: str) -> None:
-        await self.db.execute(
-            "UPDATE schedules SET sheet_title = ? WHERE guild_id = ? AND schedule_id = ?",
-            (sheet_title, guild_id, schedule_id),
-        )
-
     async def list_closed_schedules(self, guild_id: int) -> list[dict[str, Any]]:
         rows = await self.db.fetchall(
             "SELECT * FROM schedules WHERE guild_id = ? AND closed_flag = 1 ORDER BY deadline DESC",
+            (guild_id,))
+        return [dict(r) for r in rows]
+
+    async def list_all(self, guild_id: int) -> list[dict[str, Any]]:
+        """クローズ済みも含む全スケジュールを返す（集計用）。"""
+        rows = await self.db.fetchall(
+            "SELECT * FROM schedules WHERE guild_id = ? ORDER BY deadline DESC",
             (guild_id,))
         return [dict(r) for r in rows]
 

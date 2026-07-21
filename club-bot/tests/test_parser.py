@@ -7,7 +7,7 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.parser import parse_datetime, InvalidDatetimeError  # noqa: E402
+from utils.parser import parse_datetime, parse_deadline, InvalidDatetimeError  # noqa: E402
 
 
 def test_valid_formats():
@@ -25,7 +25,27 @@ def test_invalid_raises():
             pass
 
 
+def test_parse_deadline_valid():
+    assert parse_deadline("2026-07-02 23:59").minute == 59
+    # 日付のみは 23:59 補完
+    d = parse_deadline("2026-07-02")
+    assert d.hour == 23 and d.minute == 59
+
+
+def test_parse_deadline_invalid_raises_invalid_datetime_error():
+    # 過去に TypeError になっていたバグの回帰テスト:
+    # 不正入力では InvalidDatetimeError が上がること
+    for bad in ["", "abc", "2026/07/02", "07-02 23:59"]:
+        try:
+            parse_deadline(bad)
+            assert False, f"{bad} は例外になるべき"
+        except InvalidDatetimeError:
+            pass
+
+
 if __name__ == "__main__":
     test_valid_formats()
     test_invalid_raises()
+    test_parse_deadline_valid()
+    test_parse_deadline_invalid_raises_invalid_datetime_error()
     print("test_parser: OK")

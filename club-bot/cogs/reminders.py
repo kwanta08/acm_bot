@@ -8,7 +8,6 @@ Reminders モジュール（仕様 11.5）。
   - Task 7日以内期限通知: 毎日08:00
   - Task 今日やること通知: 毎日08:00
   - Task 超過通知: 毎日21:00
-  - Sheets 定期同期: 毎日04:00
 通知失敗の扱い（11.5.2）: DM 失敗→チャンネル、API 障害→#bot-log、多重送信防止。
 
 マルチテナント版: 各ループは「参加中の全ギルド」を対象にギルドごと処理する。
@@ -24,6 +23,7 @@ from discord.ext import commands, tasks
 
 from config import config
 from repositories.member_repository import MemberRepository
+from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.schedule_repository import ScheduleRepository
 from repositories.section_repository import SectionRepository
 from repositories.task_repository import TaskRepository
@@ -86,19 +86,18 @@ class Reminders(commands.Cog):
         self.task_repo = TaskRepository(bot.db)
         self.member_repo = MemberRepository(bot.db)
         self.section_repo = SectionRepository(bot.db)
+        self.log_repo = RemindersLogRepository(bot.db)
 
     async def cog_load(self):
         # 起動時にループを開始
         self.schedule_tick.start()
         self.daily_morning.start()
         self.daily_night.start()
-        self.daily_sheets_sync.start()
 
     async def cog_unload(self):
         self.schedule_tick.cancel()
         self.daily_morning.cancel()
         self.daily_night.cancel()
-        self.daily_sheets_sync.cancel()
 
     # ---------- 5分ごと: 締切前催促 + 自動締切 ----------
     @tasks.loop(minutes=5)
@@ -196,31 +195,6 @@ class Reminders(commands.Cog):
     async def _before_night(self):
         await self.bot.wait_until_ready()
 
-    # ---------- 毎日 04:00: Sheets 定期同期 ----------
-    @tasks.loop(time=time(hour=4, minute=0, tzinfo=TZ))
-    async def daily_sheets_sync(self):
-        if not self.bot.sheets.enabled:
-            return
-        sheets_cog = self.bot.get_cog("Sheets")
-        if not sheets_cog:
-            return
-        if not self.bot.sheets.begin_sync():
-            return
-        try:
-            for guild in list(self.bot.guilds):
-                await sheets_cog.sync_tasks(guild.id)
-                await sheets_cog.sync_members(guild.id)
-                await sheets_cog.sync_all_attendance(guild.id)
-            log.info("定期 Sheets 同期 完了")
-        except Exception as e:  # noqa: BLE001
-            await self.bot.log_to_channel(f"[Reminder] Sheets 定期同期失敗: {e}")
-        finally:
-            self.bot.sheets.end_sync()
-
-    @daily_sheets_sync.before_loop
-    async def _before_sheets(self):
-        await self.bot.wait_until_ready()
-
     async def _notify_due_within_7days(self, guild_id: int):
         today = now().date()
         until_date = today + timedelta(days=7)
@@ -243,17 +217,18 @@ class Reminders(commands.Cog):
         )
 
     async def _notify_today_label(self, guild_id: int):
-        if not self.bot.todoist.enabled:
+        svc = await self.bot.todoist_manager.for_guild(guild_id)
+        if not svc.enabled:
             return
         try:
-            tasks_ = await self.bot.todoist.get_today_labeled_tasks()
+            tasks_ = await svc.get_today_labeled_tasks()
         except Exception as e:  # noqa: BLE001
             log.warning("今日やること取得失敗 (guild=%s): %s", guild_id, e)
             return
         channel = await self._today_channel(guild_id)
         if not channel or not tasks_:
             return
-        embed = task_embed(f"【{config.today_label_name}】本日のタスク")
+        embed = task_embed(f"【{svc.label_name}】本日のタスク")
         for t in tasks_[:25]:
             due = getattr(getattr(t, "due", None), "string", None) or "期限なし"
             embed.add_field(name=t.content, value=f"期限: {due}", inline=False)
@@ -263,7 +238,8 @@ class Reminders(commands.Cog):
 
     # ---------- Todoist セクション別通知 ----------
     async def push_section_tasks(self, guild_id: int) -> int:
-        if not self.bot.todoist.enabled:
+        svc = await self.bot.todoist_manager.for_guild(guild_id)
+        if not svc.enabled:
             return 0
         links = await self.section_repo.list_links(guild_id)
         linked_section_ids: set[str] = {l["section_id"] for l in links}
@@ -281,7 +257,7 @@ class Reminders(commands.Cog):
             section_name = link.get("section_name") or section_id
 
             try:
-                sec_tasks = await self.bot.todoist.get_tasks_by_section(section_id)
+                sec_tasks = await svc.get_tasks_by_section(section_id)
             except Exception as e:  # noqa: BLE001
                 log.warning("セクション %s のタスク取得失敗: %s", section_id, e)
                 continue
@@ -330,7 +306,7 @@ class Reminders(commands.Cog):
 
         unlinked_items = []
         try:
-            all_sections = await self.bot.todoist.get_sections()
+            all_sections = await svc.get_sections()
         except Exception as e:  # noqa: BLE001
             log.warning("全セクション取得失敗: %s", e)
             all_sections = []
@@ -340,7 +316,7 @@ class Reminders(commands.Cog):
             if sid in linked_section_ids:
                 continue
             try:
-                sec_tasks = await self.bot.todoist.get_tasks_by_section(sid)
+                sec_tasks = await svc.get_tasks_by_section(sid)
             except Exception as e:  # noqa: BLE001
                 log.warning("未紐付けセクション %s のタスク取得失敗: %s", sid, e)
                 continue
@@ -359,7 +335,7 @@ class Reminders(commands.Cog):
                 })
 
         try:
-            no_section_tasks = await self.bot.todoist.get_tasks_without_section()
+            no_section_tasks = await svc.get_tasks_without_section()
         except Exception as e:  # noqa: BLE001
             log.warning("セクションなしタスク取得失敗: %s", e)
             no_section_tasks = []
@@ -500,16 +476,8 @@ class Reminders(commands.Cog):
                             target_user_id: str | None, channel_id: str | None,
                             status: str, error: str | None = None):
         try:
-            await self.bot.db.execute(
-                """
-                INSERT INTO reminders_log
-                    (guild_id, reminder_type, target_id, target_user_id, sent_channel_id, sent_at,
-                     status, error_message)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (guild_id, rtype, target_id, target_user_id, channel_id, to_iso(now()),
-                 status, error),
-            )
+            await self.log_repo.add(guild_id, rtype, target_id, target_user_id,
+                                    channel_id, status, error)
         except Exception as e:  # noqa: BLE001
             log.warning("reminders_log 記録失敗: %s", e)
 

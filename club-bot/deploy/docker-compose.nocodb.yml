@@ -1,0 +1,63 @@
+# NocoDB + PostgreSQL 起動用 Docker Compose 定義（本番構成）
+#
+# 構成:
+#   - postgres   : 業務 DB（bot が読み書きする正本）と NocoDB メタ DB を
+#                  別データベースとして収容（クラスタは共有、DB は分離）
+#   - nocodb     : 閲覧・編集 UI。業務 DB には NocoDB の UI から
+#                  PostgreSQL 接続を追加する（bot は NocoDB API に依存しない）
+#   - bot        : systemd で動かし、DATABASE_URL で 127.0.0.1:5432 の
+#                  業務 DB に接続する（この Compose には含めない）
+#
+# 使い方:
+#   1. deploy/.env を作成（値はコミットしない。deploy/.env.example 参照）:
+#        POSTGRES_USER=clubbot
+#        POSTGRES_PASSWORD=<強固なパスワード>
+#        POSTGRES_DB=clubdb
+#        NOCODB_JWT_SECRET=<openssl rand -hex 32 の結果>
+#   2. 起動:
+#        cd deploy && docker compose -f docker-compose.nocodb.yml up -d
+#   3. bot 側の .env に DATABASE_URL を設定して bot を起動:
+#        DATABASE_URL=postgresql://clubbot:<パスワード>@127.0.0.1:5432/clubdb
+#   4. NocoDB の UI（SSH トンネル経由 http://localhost:8080）で
+#      「Connect to Data Source」→ PostgreSQL →
+#      host=postgres, port=5432, db=clubdb, user/password=上記 を接続
+#
+# 注意:
+#   - ポートはどちらも 127.0.0.1 にバインド（外部公開しない）
+#   - bot 業務 DB（clubdb）と NocoDB メタ DB（nocodb_meta）は別データベース
+#   - SQLite（data/club.db）はローカル開発・テスト専用であり、
+#     本番の NocoDB 接続先としては使用しない
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?deploy/.env を設定してください}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?deploy/.env を設定してください}
+      POSTGRES_DB: ${POSTGRES_DB:?deploy/.env を設定してください}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  nocodb:
+    image: nocodb/nocodb:latest
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      # NocoDB 自身のメタデータ DB（業務 DB とは別データベース）
+      NC_DB: "pg://postgres:5432?u=${POSTGRES_USER}&p=${POSTGRES_PASSWORD}&d=nocodb_meta"
+      NC_AUTH_JWT_SECRET: ${NOCODB_JWT_SECRET:?deploy/.env を設定してください}
+
+volumes:
+  pgdata:
