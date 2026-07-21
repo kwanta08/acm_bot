@@ -15,7 +15,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest  # noqa: E402
 
-from utils.db import SCHEMA_VERSION, TABLE_DDL, TABLE_DDL_PG, Database, to_pg_ddl  # noqa: E402
+from utils.db import (  # noqa: E402
+    INDEX_DDL, SCHEMA_META_DDL, SCHEMA_VERSION, TABLE_DDL, TABLE_DDL_PG,
+    VIEW_DDL_PG, Database, to_pg_ddl, to_pg_view_ddl,
+)
 
 PG_DSN = os.getenv("CLUB_TEST_PG_DSN")
 
@@ -51,6 +54,32 @@ def test_to_pg_ddl_preserves_constraints():
     assert "UNIQUE (guild_id, option_id, user_id)" in ddl
     assert "ON DELETE CASCADE" in ddl
     assert "CHECK (guild_id >= 0)" in ddl
+
+
+def test_to_pg_view_ddl_uses_or_replace():
+    """回帰テスト: PostgreSQL は CREATE VIEW IF NOT EXISTS をサポートしない
+    （syntax error at or near "NOT"）。CREATE OR REPLACE VIEW への変換を検証する。"""
+    # 変換後のビュー DDL に IF NOT EXISTS が残っていないこと
+    assert "IF NOT EXISTS" not in VIEW_DDL_PG
+    assert "CREATE OR REPLACE VIEW v_todoist_status" in VIEW_DDL_PG
+    assert "CREATE OR REPLACE VIEW v_attendance" in VIEW_DDL_PG
+    assert "CREATE OR REPLACE VIEW v_team_summary" in VIEW_DDL_PG
+    # ビュー本体（SELECT 部分）は変わらないこと
+    assert "FROM schedule_votes" in VIEW_DDL_PG
+    assert "GROUP BY t.guild_id, t.team_key, t.team_name" in VIEW_DDL_PG
+
+
+def test_pg_ddl_no_unsupported_constructs():
+    """PostgreSQL へ送信する全 DDL（テーブル・メタ・インデックス・ビュー）に
+    PG 非対応の構文が残っていないことを検証する。"""
+    all_pg_ddl = list(TABLE_DDL_PG.values()) + [SCHEMA_META_DDL, INDEX_DDL, VIEW_DDL_PG]
+    for ddl in all_pg_ddl:
+        assert "AUTOINCREMENT" not in ddl
+        assert "datetime(" not in ddl
+        # CREATE VIEW IF NOT EXISTS は PG 非対応（TABLE/INDEX の IF NOT EXISTS は有効）
+        assert "CREATE VIEW IF NOT EXISTS" not in ddl
+    # CREATE OR REPLACE VIEW は連続実行しても冪等
+    assert to_pg_view_ddl(VIEW_DDL_PG) == VIEW_DDL_PG
 
 
 # ---------------------------------------------------------------------
@@ -148,6 +177,10 @@ if __name__ == "__main__":
     print("test_to_pg_ddl_autoincrement_and_guild_id: OK")
     test_to_pg_ddl_preserves_constraints()
     print("test_to_pg_ddl_preserves_constraints: OK")
+    test_to_pg_view_ddl_uses_or_replace()
+    print("test_to_pg_view_ddl_uses_or_replace: OK")
+    test_pg_ddl_no_unsupported_constructs()
+    print("test_pg_ddl_no_unsupported_constructs: OK")
     test_prepare_converts_placeholders()
     print("test_prepare_converts_placeholders: OK")
     test_prepare_sqlite_passthrough()
