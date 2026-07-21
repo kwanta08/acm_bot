@@ -16,8 +16,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest  # noqa: E402
 
 from utils.db import (  # noqa: E402
-    INDEX_DDL, SCHEMA_META_DDL, SCHEMA_VERSION, TABLE_DDL, TABLE_DDL_PG,
-    VIEW_DDL_PG, Database, to_pg_ddl, to_pg_view_ddl,
+    INDEX_DDL, POSTGRES_VIEW_DDL, SCHEMA_META_DDL, SCHEMA_VERSION,
+    SQLITE_VIEW_DDL, TABLE_DDL, TABLE_DDL_PG, Database, to_pg_ddl,
 )
 
 G1 = 100000000000000001
@@ -82,30 +82,71 @@ def test_to_pg_ddl_preserves_constraints():
     assert "CHECK (guild_id >= 0)" in ddl
 
 
-def test_to_pg_view_ddl_uses_or_replace():
-    """回帰テスト: PostgreSQL は CREATE VIEW IF NOT EXISTS をサポートしない
-    （syntax error at or near "NOT"）。CREATE OR REPLACE VIEW への変換を検証する。"""
-    # 変換後のビュー DDL に IF NOT EXISTS が残っていないこと
-    assert "IF NOT EXISTS" not in VIEW_DDL_PG
-    assert "CREATE OR REPLACE VIEW v_todoist_status" in VIEW_DDL_PG
-    assert "CREATE OR REPLACE VIEW v_attendance" in VIEW_DDL_PG
-    assert "CREATE OR REPLACE VIEW v_team_summary" in VIEW_DDL_PG
-    # ビュー本体（SELECT 部分）は変わらないこと
-    assert "FROM schedule_votes" in VIEW_DDL_PG
-    assert "GROUP BY t.guild_id, t.team_key, t.team_name" in VIEW_DDL_PG
+def test_view_ddl_separation():
+    """ビュー DDL は SQLite / PostgreSQL で共用せず分離されていること。
+
+    回帰テスト: PostgreSQL は CREATE VIEW IF NOT EXISTS をサポートしない
+    （syntax error at or near "NOT"）、SQLite は CREATE OR REPLACE VIEW を
+    サポートしない。両ドライバでビュー初期化が冪等である定義になっているか
+    確認する。
+    """
+    views = ("v_todoist_status", "v_attendance", "v_team_summary")
+
+    # PostgreSQL 用: CREATE OR REPLACE VIEW（冪等）。IF NOT EXISTS は渡さない
+    assert "IF NOT EXISTS" not in POSTGRES_VIEW_DDL
+    for v in views:
+        assert f"CREATE OR REPLACE VIEW {v}" in POSTGRES_VIEW_DDL
+
+    # SQLite 用: DROP VIEW IF EXISTS + CREATE VIEW の再作成方式（冪等）。
+    # SQLite 非対応の CREATE OR REPLACE VIEW は使わない
+    assert "CREATE OR REPLACE VIEW" not in SQLITE_VIEW_DDL
+    assert "CREATE VIEW IF NOT EXISTS" not in SQLITE_VIEW_DDL
+    for v in views:
+        assert f"DROP VIEW IF EXISTS {v}" in SQLITE_VIEW_DDL
+        assert f"CREATE VIEW {v}" in SQLITE_VIEW_DDL
+
+    # ビュー本体（SELECT 部）は両者で同一
+    for body_sql in ("FROM schedule_votes", "GROUP BY t.guild_id, t.team_key, t.team_name"):
+        assert body_sql in POSTGRES_VIEW_DDL
+        assert body_sql in SQLITE_VIEW_DDL
+
+
+def test_sqlite_view_init_idempotent():
+    """SQLite でビュー初期化（DROP+CREATE）を2回実行しても冪等であること。"""
+    import tempfile
+
+    async def _main():
+        fd, path = tempfile.mkstemp(suffix=".db")
+        os.close(fd)
+        os.unlink(path)
+        db = Database(path)
+        await db.connect()
+        try:
+            # connect 時に1回作成済み。もう1回実行しても壊れないこと
+            await db._executescript(SQLITE_VIEW_DDL)
+            for v in ("v_todoist_status", "v_attendance", "v_team_summary"):
+                rows = await db.fetchall(
+                    "SELECT name FROM sqlite_master WHERE type='view' AND name = ?",
+                    (v,))
+                assert rows, f"{v} がありません"
+            # ビューが実際に読めること
+            await db.fetchall("SELECT * FROM v_attendance LIMIT 0")
+            await db.fetchall("SELECT * FROM v_team_summary LIMIT 0")
+        finally:
+            await db.close()
+    run(_main())
 
 
 def test_pg_ddl_no_unsupported_constructs():
     """PostgreSQL へ送信する全 DDL（テーブル・メタ・インデックス・ビュー）に
     PG 非対応の構文が残っていないことを検証する。"""
-    all_pg_ddl = list(TABLE_DDL_PG.values()) + [SCHEMA_META_DDL, INDEX_DDL, VIEW_DDL_PG]
+    all_pg_ddl = list(TABLE_DDL_PG.values()) + [SCHEMA_META_DDL, INDEX_DDL,
+                                                POSTGRES_VIEW_DDL]
     for ddl in all_pg_ddl:
         assert "AUTOINCREMENT" not in ddl
         assert "datetime(" not in ddl
         # CREATE VIEW IF NOT EXISTS は PG 非対応（TABLE/INDEX の IF NOT EXISTS は有効）
         assert "CREATE VIEW IF NOT EXISTS" not in ddl
-    # CREATE OR REPLACE VIEW は連続実行しても冪等
-    assert to_pg_view_ddl(VIEW_DDL_PG) == VIEW_DDL_PG
 
 
 # ---------------------------------------------------------------------
@@ -163,6 +204,12 @@ def test_pg_live_schema_and_crud():
             # rowcount
             assert await members.deactivate_team(G1, "wing") is True
             assert await members.deactivate_team(G1, "wing") is False
+            # ビュー初期化の冪等性（CREATE OR REPLACE VIEW を再実行しても壊れない）
+            await db._executescript(POSTGRES_VIEW_DDL)
+            views = await db.fetchall(
+                "SELECT table_name FROM information_schema.views"
+                " WHERE table_name IN ('v_todoist_status', 'v_attendance', 'v_team_summary')")
+            assert len(views) == 3
         finally:
             # 後片付け（テストデータ削除）
             await db.execute("DELETE FROM tasks WHERE guild_id IN (?, ?)", (G1, G2))
@@ -202,8 +249,10 @@ if __name__ == "__main__":
     print("test_to_pg_ddl_autoincrement_and_guild_id: OK")
     test_to_pg_ddl_preserves_constraints()
     print("test_to_pg_ddl_preserves_constraints: OK")
-    test_to_pg_view_ddl_uses_or_replace()
-    print("test_to_pg_view_ddl_uses_or_replace: OK")
+    test_view_ddl_separation()
+    print("test_view_ddl_separation: OK")
+    test_sqlite_view_init_idempotent()
+    print("test_sqlite_view_init_idempotent: OK")
     test_pg_ddl_no_unsupported_constructs()
     print("test_pg_ddl_no_unsupported_constructs: OK")
     test_prepare_converts_placeholders()

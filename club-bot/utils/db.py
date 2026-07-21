@@ -268,15 +268,27 @@ CREATE INDEX IF NOT EXISTS idx_audit_log_guild ON audit_log(guild_id, audit_id);
 CREATE INDEX IF NOT EXISTS idx_skill_tags_guild ON skill_tags(guild_id, active_flag);
 """
 
-# ビュー（NocoDB 等の外部 UI 向け。機密列を含まない安全な参照用）
-VIEW_DDL = """
-CREATE VIEW IF NOT EXISTS v_todoist_status AS
+# ---------------------------------------------------------------------------
+# ビュー定義（NocoDB 等の外部 UI 向け。機密列を含まない安全な参照用）
+#
+# ビュー本体（SELECT 文）を1箇所に集約し、実行用 DDL はドライバ別に生成する:
+#   SQLITE_VIEW_DDL   : DROP VIEW IF EXISTS + CREATE VIEW の安全な再作成方式
+#                       （SQLite は CREATE OR REPLACE VIEW をサポートしない）
+#   POSTGRES_VIEW_DDL : CREATE OR REPLACE VIEW
+#                       （PostgreSQL は CREATE VIEW IF NOT EXISTS をサポートしない）
+# 実行は両ドライバとも複数文をネイティブに処理する
+# （aiosqlite executescript / asyncpg execute）ため、split(';') による
+# 文字列分割は行わない。
+# ---------------------------------------------------------------------------
+_VIEW_BODIES: dict[str, str] = {
+    # Todoist 連携状態（暗号文を含まない）
+    "v_todoist_status": """
 SELECT guild_id, project_id, today_label_name, enabled_flag, updated_at
-FROM todoist_configs;
-
--- 出欠一覧（旧 Google Sheets の attendance シート相当。
--- 正本は schedule_votes / schedule_options / schedules）
-CREATE VIEW IF NOT EXISTS v_attendance AS
+FROM todoist_configs
+""",
+    # 出欠一覧（旧 Google Sheets の attendance シート相当。
+    # 正本は schedule_votes / schedule_options / schedules）
+    "v_attendance": """
 SELECT s.guild_id,
        s.schedule_id,
        s.title       AS event_title,
@@ -289,10 +301,10 @@ FROM schedule_votes v
 JOIN schedule_options o
   ON o.guild_id = v.guild_id AND o.option_id = v.option_id
 JOIN schedules s
-  ON s.guild_id = o.guild_id AND s.schedule_id = o.schedule_id;
-
--- 班サマリ（旧 Google Sheets の team_summary シート相当。正本は teams / members）
-CREATE VIEW IF NOT EXISTS v_team_summary AS
+  ON s.guild_id = o.guild_id AND s.schedule_id = o.schedule_id
+""",
+    # 班サマリ（旧 Google Sheets の team_summary シート相当。正本は teams / members）
+    "v_team_summary": """
 SELECT t.guild_id,
        t.team_key,
        t.team_name,
@@ -304,8 +316,19 @@ LEFT JOIN members m
  AND m.primary_team = t.team_key
  AND m.active_flag = 1
 WHERE t.active_flag = 1
-GROUP BY t.guild_id, t.team_key, t.team_name;
-"""
+GROUP BY t.guild_id, t.team_key, t.team_name
+""",
+}
+
+SQLITE_VIEW_DDL = "\n".join(
+    f"DROP VIEW IF EXISTS {name};\nCREATE VIEW {name} AS{body};"
+    for name, body in _VIEW_BODIES.items()
+)
+
+POSTGRES_VIEW_DDL = "\n".join(
+    f"CREATE OR REPLACE VIEW {name} AS{body};"
+    for name, body in _VIEW_BODIES.items()
+)
 
 # スキーマバージョン（SQLite: PRAGMA user_version / PostgreSQL: schema_meta）。
 # 1: guild_id 導入済みの初期マルチテナントスキーマ（旧版は user_version=0 として扱う）
@@ -363,20 +386,6 @@ def to_pg_ddl(sqlite_ddl: str) -> str:
 
 
 TABLE_DDL_PG: dict[str, str] = {name: to_pg_ddl(ddl) for name, ddl in TABLE_DDL.items()}
-
-
-def to_pg_view_ddl(sqlite_view_ddl: str) -> str:
-    """SQLite 用ビュー定義を PostgreSQL 用に変換する。
-
-    PostgreSQL は CREATE VIEW IF NOT EXISTS をサポートしない
-    （syntax error at or near "NOT" になる）ため、
-    CREATE OR REPLACE VIEW に変換する。
-    """
-    return sqlite_view_ddl.replace("CREATE VIEW IF NOT EXISTS",
-                                   "CREATE OR REPLACE VIEW")
-
-
-VIEW_DDL_PG = to_pg_view_ddl(VIEW_DDL)
 
 
 def legacy_guild_id() -> int:
@@ -443,7 +452,7 @@ class Database:
         await self._migrate()
         # インデックスは guild_id カラムの存在が確定した後に作成する
         await self._conn.executescript(INDEX_DDL)
-        await self._conn.executescript(VIEW_DDL)
+        await self._conn.executescript(SQLITE_VIEW_DDL)
         await self._conn.commit()
         log.info("SQLite に接続しました: %s", self.path)
 
@@ -461,7 +470,7 @@ class Database:
                     await self._pg_exec_ddl(con, f"table:{name}", ddl)
                 await self._pg_exec_ddl(con, "table:schema_meta", SCHEMA_META_DDL)
                 await self._pg_exec_ddl(con, "indexes", INDEX_DDL)
-                await self._pg_exec_ddl(con, "views", VIEW_DDL_PG)
+                await self._pg_exec_ddl(con, "views", POSTGRES_VIEW_DDL)
         except Exception:
             await self.close()
             raise
@@ -670,15 +679,16 @@ class Database:
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
 
     async def _migrate_v5_views(self) -> None:
-        """v5: 表示用ビューを最新定義で作り直す（冪等）。"""
+        """v5: 表示用ビューを最新定義で作り直す（冪等）。
+
+        PostgreSQL は CREATE OR REPLACE VIEW、SQLite は
+        DROP VIEW IF EXISTS + CREATE VIEW の再作成方式
+        （DDL 内に DROP を含む）で最新化する。
+        """
         if self._is_pg:
-            # PostgreSQL は CREATE VIEW IF NOT EXISTS をサポートしないため
-            # CREATE OR REPLACE VIEW で最新化する（DROP 不要）
-            await self._executescript(VIEW_DDL_PG)
+            await self._executescript(POSTGRES_VIEW_DDL)
             return
-        for view in ("v_todoist_status", "v_attendance", "v_team_summary"):
-            await self.execute(f"DROP VIEW IF EXISTS {view}")
-        await self._executescript(VIEW_DDL)
+        await self._executescript(SQLITE_VIEW_DDL)
 
     async def _migrate_v2_guild_foundation(self) -> None:
         """
