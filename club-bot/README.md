@@ -115,3 +115,7 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 - Google Sheets 連携は廃止されました。記録の正本は PostgreSQL（ローカル開発は
   SQLite）で、閲覧・編集 UI には NocoDB を利用します（[`docs/NOCODB.md`](docs/NOCODB.md)）。
   旧 Sheets のデータは `scripts/migrate_sheets_to_db.py` で取り込めます。
+
+## License
+
+MIT License — 詳細は [LICENSE](../LICENSE) を参照してください。
