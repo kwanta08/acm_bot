@@ -45,6 +45,8 @@ ROLE_SETTINGS: list[tuple[str, str]] = [
     ("EXEC_ROLE_ID", "実行役ロール"),
 ]
 ALL_SETUP_KEYS: set[str] = {k for k, _ in CHANNEL_SETTINGS + ROLE_SETTINGS}
+# セレクト以外（Modal 入力）で設定できるキー
+EXTRA_SETUP_KEYS: set[str] = {"CLUB_NAME"}
 _CHANNEL_KEYS: set[str] = {k for k, _ in CHANNEL_SETTINGS}
 _ROLE_KEYS: set[str] = {k for k, _ in ROLE_SETTINGS}
 
@@ -81,6 +83,9 @@ def build_setup_embed(gconf: GuildConfig) -> discord.Embed:
     未設定項目には「未設定」を明示する。
     """
     lines: list[str] = []
+    # サークル名は任意設定（未設定時は汎用表現にフォールバックするため
+    # 未設定カウントには含めない）
+    lines.append(f"**サークル名**: {gconf.club_name_or_default}")
     missing = 0
     for key, label in CHANNEL_SETTINGS + ROLE_SETTINGS:
         value = getattr(gconf, key.lower())
@@ -99,6 +104,65 @@ def build_setup_embed(gconf: GuildConfig) -> discord.Embed:
     summary += "\n「班を一括作成」ボタンで、班と対応ロールをまとめて登録できます。"
     embed = info_embed("セットアップ状況", "\n".join(lines) + "\n\n" + summary)
     return embed
+
+
+class ClubNameModal(discord.ui.Modal, title="サークル名の設定"):
+    """サークル名を入力してギルド別設定に保存する Modal。"""
+
+    name_input = discord.ui.TextInput(
+        label="サークル名",
+        placeholder="例: ○○大学 鳥人間サークル",
+        required=True,
+        max_length=50,
+    )
+
+    def __init__(self, cog: "SetupWizard", guild_id: int, owner_id: int,
+                 current: str | None):
+        super().__init__()
+        self.cog = cog
+        self.guild_id = guild_id
+        self.owner_id = owner_id
+        if current:
+            self.name_input.default = current
+
+    async def on_submit(self, interaction: discord.Interaction):
+        # コマンド実行者と同一であることを検証
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                embed=error_embed("この操作はコマンドの実行者のみ可能です。"),
+                ephemeral=True)
+            return
+        name = (self.name_input.value or "").strip()
+        if not name:
+            await interaction.response.send_message(
+                embed=error_embed("サークル名を入力してください。"),
+                ephemeral=True)
+            return
+
+        await self.cog.save_setting(self.guild_id, "CLUB_NAME", name)
+        log.info("/setup でサークル名を保存 (guild=%s)", self.guild_id)
+        await interaction.response.send_message(
+            embed=success_embed(
+                "サークル名を設定しました",
+                f"**{name}**\n週次レポート等のタイトルに表示されます。",
+                executor=interaction.user.display_name),
+            ephemeral=True)
+
+    async def on_error(self, interaction: discord.Interaction,
+                       error: Exception) -> None:
+        log.warning("サークル名設定 Modal でエラー (guild=%s): %s",
+                    self.guild_id, type(error).__name__)
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    embed=error_embed("保存に失敗しました。時間をおいて再試行してください。"),
+                    ephemeral=True)
+            else:
+                await interaction.response.send_message(
+                    embed=error_embed("保存に失敗しました。時間をおいて再試行してください。"),
+                    ephemeral=True)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 class TeamBulkCreateModal(discord.ui.Modal, title="班の一括作成"):
@@ -213,8 +277,16 @@ class SetupWizardView(discord.ui.View):
             return False
         return True
 
+    @discord.ui.button(label="サークル名を設定", style=discord.ButtonStyle.secondary,
+                       row=3)
+    async def open_club_name_modal(self, interaction: discord.Interaction,
+                                   button: discord.ui.Button):
+        gconf = await config.for_guild(self.guild_id, db=self.cog.db)
+        await interaction.response.send_modal(
+            ClubNameModal(self.cog, self.guild_id, self.owner_id, gconf.club_name))
+
     @discord.ui.button(label="班を一括作成", style=discord.ButtonStyle.primary,
-                       row=1)
+                       row=3)
     async def open_team_modal(self, interaction: discord.Interaction,
                               button: discord.ui.Button):
         await interaction.response.send_modal(
@@ -325,7 +397,7 @@ class SetupWizard(commands.Cog):
         ギルド別 settings に値を保存し、解決キャッシュを更新する。
         /setup で扱わないキーは拒否する。
         """
-        if key not in ALL_SETUP_KEYS:
+        if key not in ALL_SETUP_KEYS | EXTRA_SETUP_KEYS:
             raise ValueError(f"/setup では設定できないキーです: {key}")
         await self.settings_repo.set(guild_id, key, value)
         config.invalidate_guild(guild_id)

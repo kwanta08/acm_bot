@@ -125,9 +125,17 @@ class GuildConfig:
     primary_team_role_ids: dict[str, int] = field(default_factory=dict)
     secondary_team_role_ids: dict[str, int] = field(default_factory=dict)
 
+    # サークル名（未設定時は汎用表現にフォールバック）
+    club_name: str | None = None
+
     @property
     def today_channel_id(self) -> int | None:
         return self.today_label_channel_id or self.default_task_channel_id
+
+    @property
+    def club_name_or_default(self) -> str:
+        """表示用のサークル名。未設定時は汎用表現「サークル」。"""
+        return self.club_name or "サークル"
 
 
 @dataclass
@@ -274,6 +282,10 @@ class Config:
             leader_ids = await repo.get_int_list(guild_id, "LEADER_ROLE_IDS")
             if leader_ids:
                 gc.leader_role_ids = leader_ids
+
+            club_name = await repo.get(guild_id, "CLUB_NAME")
+            if club_name:
+                gc.club_name = club_name
 
             for key, attr in (
                 ("PRIMARY_TEAM_ROLE_IDS", "primary_team_role_ids"),

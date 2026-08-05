@@ -14,6 +14,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from config import config
 from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.schedule_repository import ScheduleRepository
 from repositories.task_repository import TaskRepository
@@ -48,7 +49,8 @@ class Reports(commands.Cog):
         open_tasks = await self.task_repo.list_tasks(guild_id, status="open")
         schedules = await self.schedule_repo.list_open_schedules(guild_id)
 
-        embed = info_embed("週次サマリー")
+        gconf = await config.for_guild(guild_id, db=self.bot.db)
+        embed = info_embed(f"{gconf.club_name_or_default} 週次サマリー")
         embed.add_field(name="未完了タスク", value=str(len(open_tasks)), inline=True)
         embed.add_field(name="期限超過", value=str(len(overdue)), inline=True)
         embed.add_field(name="開催中の投票", value=str(len(schedules)), inline=True)

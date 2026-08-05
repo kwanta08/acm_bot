@@ -224,3 +224,46 @@ def test_zero_teams_commands_helpers_work():
     finally:
         run(db.close())
         _cleanup_config()
+
+
+# ------------------------------------------------------------------
+# サークル名（CLUB_NAME）
+# ------------------------------------------------------------------
+
+def test_club_name_fallback():
+    """未設定時は汎用表現「サークル」にフォールバックすること。"""
+    gconf = GuildConfig(guild_id=G1)
+    assert gconf.club_name is None
+    assert gconf.club_name_or_default == "サークル"
+
+    gconf_named = GuildConfig(guild_id=G1, club_name="テストサークル")
+    assert gconf_named.club_name_or_default == "テストサークル"
+
+
+def test_club_name_saved_and_resolved_per_guild():
+    """CLUB_NAME がギルド別に保存され config.for_guild で解決されること。"""
+    db = run(_make_db())
+    try:
+        cog = _make_cog(db)
+        run(cog.save_setting(G1, "CLUB_NAME", "ギルド1サークル"))
+
+        gconf1 = run(config.for_guild(G1, db=db, force_reload=True))
+        assert gconf1.club_name == "ギルド1サークル"
+        assert gconf1.club_name_or_default == "ギルド1サークル"
+
+        # 他ギルドは未設定のまま（フォールバック）
+        gconf2 = run(config.for_guild(G2, db=db, force_reload=True))
+        assert gconf2.club_name is None
+        assert gconf2.club_name_or_default == "サークル"
+    finally:
+        run(db.close())
+        _cleanup_config()
+
+
+def test_setup_embed_shows_club_name():
+    """セットアップ Embed にサークル名が表示されること。"""
+    embed = build_setup_embed(GuildConfig(guild_id=G1, club_name="表示サークル"))
+    assert "表示サークル" in (embed.description or "")
+    # 未設定でもフォールバック表示で例外にならない
+    embed_default = build_setup_embed(GuildConfig(guild_id=G1))
+    assert "サークル名" in (embed_default.description or "")
