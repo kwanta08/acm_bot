@@ -16,9 +16,13 @@ from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cogs.setup_wizard import SetupWizard, build_setup_embed  # noqa: E402
+from cogs.setup_wizard import (  # noqa: E402
+    SetupWizard, build_setup_embed, parse_team_names,
+)
 from config import GuildConfig, config  # noqa: E402
+from repositories.member_repository import MemberRepository  # noqa: E402
 from repositories.settings_repository import SettingsRepository  # noqa: E402
+from services import team_service  # noqa: E402
 from utils.db import Database  # noqa: E402
 from utils.permissions import Level, get_level, has_level  # noqa: E402
 
@@ -148,3 +152,75 @@ def test_non_admin_is_rejected():
     # Discord 管理者権限持ち → L4
     admin = _fake_member(user_id=7, owner_id=42, administrator=True)
     assert has_level(admin, gconf, Level.L4)
+
+
+# ------------------------------------------------------------------
+# 班の一括作成（/setup の「班を一括作成」ステップ）
+# ------------------------------------------------------------------
+
+def test_parse_team_names():
+    assert parse_team_names("設計班, 製造班, 広報班") == ["設計班", "製造班", "広報班"]
+    # 全角カンマ・読点・改行も区切りとして扱う
+    assert parse_team_names("A班，B班、C班\nD班") == ["A班", "B班", "C班", "D班"]
+    # 空要素・重複は除去し、入力順を保持
+    assert parse_team_names(" A班 ,, B班 ,A班,") == ["A班", "B班"]
+    assert parse_team_names("") == []
+    assert parse_team_names(" , 、") == []
+    # 長すぎる班名は ValueError
+    try:
+        parse_team_names("あ" * 51)
+        assert False, "ValueError が送出されるべき"
+    except ValueError:
+        pass
+
+
+def test_register_teams_assigns_slugs():
+    db = run(_make_db())
+    try:
+        cog = _make_cog(db)
+        teams = run(cog.register_teams(G1, ["設計班", "製造班"], actor_id="u1"))
+        assert teams == [
+            {"slug": "team1", "name": "設計班"},
+            {"slug": "team2", "name": "製造班"},
+        ]
+
+        repo = MemberRepository(db)
+        assert (run(repo.get_team(G1, "team1")))["team_name"] == "設計班"
+        assert run(repo.list_teams(G2)) == []  # 他ギルドには影響しない
+
+        # 既存キーと重ならないよう続きから採番される
+        more = run(cog.register_teams(G1, ["広報班"]))
+        assert more == [{"slug": "team3", "name": "広報班"}]
+
+        # 空リストは何もしない（監査ログも記録しない）
+        assert run(cog.register_teams(G1, [])) == []
+    finally:
+        run(db.close())
+        _cleanup_config()
+
+
+def test_register_teams_avoids_existing_slug():
+    db = run(_make_db())
+    try:
+        repo = MemberRepository(db)
+        # team1 が /team-add 等で既に使われている場合は team2 から始める
+        run(repo.upsert_team(G1, "team1", "既存班"))
+        cog = _make_cog(db)
+        teams = run(cog.register_teams(G1, ["新規班"]))
+        assert teams == [{"slug": "team2", "name": "新規班"}]
+        assert (run(repo.get_team(G1, "team1")))["team_name"] == "既存班"
+    finally:
+        run(db.close())
+        _cleanup_config()
+
+
+def test_zero_teams_commands_helpers_work():
+    """班0件の状態でも参照系ヘルパーが例外なく動作すること。"""
+    db = run(_make_db())
+    try:
+        assert run(team_service.team_choices(db, G1, "")) == []
+        assert run(team_service.team_name_map(db, G1)) == {}
+        assert run(MemberRepository(db).list_teams(G1)) == []
+    finally:
+        run(db.close())
+        _cleanup_config()

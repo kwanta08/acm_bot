@@ -252,7 +252,9 @@ class ClubBot(commands.Bot):
             log.exception("on_guild_join セットアップ失敗 (guild=%s): %s", guild.id, e)
         await self._sync_guild_commands(guild)
         await self.log_to_channel(
-            f"新規ギルドに参加し、自動セットアップを実行しました: {guild.name} (id={guild.id})",
+            f"新規ギルドに参加し、自動セットアップを実行しました: {guild.name} (id={guild.id})\n"
+            "次のステップ: 管理者が `/setup` を実行し、通知チャンネル・ロールの設定と"
+            "班の作成を行ってください（班は自動作成されません）。",
             guild_id=guild.id)
 
     async def log_to_channel(self, message: str, guild_id: int | None = None) -> None:
