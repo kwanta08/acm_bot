@@ -1,38 +1,61 @@
 # 鳥人間サークル 統合運営 Discord Bot
 
-日程調整・タスク管理（Todoist連携）・班/メンバー管理・桁巻き積層記録・
-自動通知を Discord 上で一元化する統合運営 Bot です。仕様書 v1 に基づいて実装しています。
-記録の正本は SQLite で、閲覧・編集 UI として NocoDB を同じ DB に接続して使えます。
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../LICENSE)
 
-- 言語: Python 3.10 以上
-- Discord ライブラリ: discord.py 2.x
-- データ保存: PostgreSQL（本番・NocoDB 構成）/ SQLite（ローカル開発・テスト）
-- 閲覧 UI: NocoDB（Docker Compose。PostgreSQL に接続）
-- タスク連携: Todoist REST API（トークンはサーバーごとに暗号化して DB 保存）
-- ホスティング: さくらのVPS（Ubuntu 24.04 + systemd 常駐）
+**鳥人間サークル（人力飛行機・鳥人間コンテスト系）の運営を一元化する Discord Bot** です。
+日程調整・タスク管理・班/メンバー管理・桁巻き積層記録・リマインド・レポートを
+Discord 上だけで回せます。あなたのサークルのサーバーに招待するだけで導入でき、
+設定はすべて Discord 上の `/setup` で行えます。
 
-## ドキュメント
+- 言語: Python 3.10 以上 / discord.py 2.x
+- データ保存: SQLite（標準）/ PostgreSQL（NocoDB と併用する本番構成）
+- タスク連携: Todoist REST API（任意。トークンはサーバーごとに暗号化して保存）
+- 閲覧 UI: NocoDB（任意。Docker Compose で PostgreSQL に接続）
 
-| ファイル | 内容 |
+## 機能一覧
+
+| 機能 | 内容 |
 |---|---|
-| [`docs/SETUP.md`](docs/SETUP.md) | セットアップ手順書（初心者向け・ローカル動作確認 〜 さくらのVPS デプロイ） |
-| [`docs/OPERATION.md`](docs/OPERATION.md) | 運用マニュアル（全コマンド一覧・権限・トラブル対応） |
-| [`docs/NOCODB.md`](docs/NOCODB.md) | NocoDB 運用ガイド（起動・接続・権限・Sheets からの移行） |
+| 日程調整 | 候補日時へのリアクション投票・自動締切・未回答者への催促 DM |
+| タスク管理 | 期限付きタスクの登録・班別通知・Todoist 連携（任意）・`/today` ラベル |
+| 班・メンバー管理 | 班の作成・ロール紐付け・技能タグ・班をまたいだ支援候補の検索 |
+| 桁巻き積層記録 | `/layer start` `/layer end` で積層作業を記録（作業時間を自動計算） |
+| リマインド | 締切前の未回答催促・毎朝の期限タスク通知・期限超過の警告 |
+| レポート | 週次サマリー（サークル名入り）・タスク CSV 出力・出欠率・監査ログ |
 
-## モジュール構成（10 Cog）
+## マルチサーバー対応
 
-| モジュール | 役割 |
-|---|---|
-| Core | 起動・設定・権限・ログ・`/ping` `/health` |
-| Schedule | 日程調整・出欠投票・締切・未回答者通知 |
-| Tasks | Todoist 連携タスク・`/today` ラベル付与 |
-| Members | 班所属・班長・技能タグ・支援候補検索 |
-| Reminders | 定期通知の統括（締切催促・期限通知・超過警告） |
-| Reports | 週次サマリー・CSV出力・監査ログ |
-| LayerTracking | 桁巻き積層作業の開始/終了記録 |
-| Settings | チャンネル・ロール等の設定管理（管理者向け） |
-| Teams | 班・技能タグのマスタ管理（管理者向け） |
-| TodoistAdmin | Todoist トークンの登録・状態確認・削除（管理者向け） |
+この Bot は **1プロセスで複数の Discord サーバー（ギルド）を安全に扱える**
+マルチテナント仕様です。全データ・設定・権限・通知は `guild_id` 単位で完全に分離され、
+他のサーバーのデータが見えることはありません。サークルごとに Bot を立てる必要はなく、
+1つの Bot を複数サークルで共用できます。
+
+### 招待方法
+
+1. [Discord Developer Portal](https://discord.com/developers/applications) で
+   アプリケーションを作成し、Bot トークンを取得します。
+2. 「OAuth2 → URL Generator」で **SCOPES: `bot` + `applications.commands`** を選択し、
+   必要な権限（Send Messages / Embed Links / Add Reactions / Manage Roles など）に
+   チェックして生成された URL からサーバーに招待します。
+3. 招待すると `on_guild_join` が自動で初期セットアップ（ギルド登録・
+   管理者ロール・`#bot-log` チャンネルの作成・コマンド同期）を行います。
+
+詳しい権限の一覧は [`docs/SETUP.md`](docs/SETUP.md) を参照してください。
+
+## 導入手順（導入 → /setup → 班作成 → 運用開始）
+
+1. **導入**: 下記クイックスタートで Bot を起動し、上記の手順でサーバーに招待します。
+2. **`/setup`**: サーバーの管理者が `/setup` を実行すると、設定状況の一覧が表示されます。
+   セレクトメニューから通知チャンネル・ログチャンネル・管理者ロールを対話的に設定し、
+   「サークル名を設定」ボタンでレポート等に表示するサークル名を登録します。
+3. **班作成**: `/setup` の「班を一括作成」ボタンで班名をカンマ区切り入力すると、
+   班と対応する Discord ロールをまとめて作成できます
+   （班のデフォルトはありません。各サークルが自分の班を作ります）。
+   後からの追加・変更は `/team-add` `/team-remove` `/team-role` でも行えます。
+4. **運用開始**: `/schedule create` で日程調整、`/task add` でタスク登録、
+   `/layer start` で積層記録を開始してください。
+
+日常の使い方は [`docs/OPERATION.md`](docs/OPERATION.md) を参照してください。
 
 ## クイックスタート（ローカル）
 
@@ -44,80 +67,51 @@ venv/bin/python bot.py
 ```
 
 `ENCRYPTION_KEY` の生成:
+
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
 ローカルでは SQLite（`DB_PATH`）で動きます。本番（NocoDB 構成）では
-`.env` に `DATABASE_URL=postgresql://...` を設定して PostgreSQL に切り替えます
-（[`docs/NOCODB.md`](docs/NOCODB.md)）。
+`.env` に `DATABASE_URL=postgresql://...` を設定して PostgreSQL に切り替えます。
+VPS へのデプロイを含む詳しい手順は [`docs/SETUP.md`](docs/SETUP.md) を参照してください。
 
-詳細は [`docs/SETUP.md`](docs/SETUP.md) を参照してください。
+## ドキュメント
 
-## マルチテナント対応（複数サーバー運用）
+| ファイル | 内容 |
+|---|---|
+| [`docs/SETUP.md`](docs/SETUP.md) | セットアップ手順書（初心者向け・ローカル動作確認 〜 VPS デプロイ） |
+| [`docs/OPERATION.md`](docs/OPERATION.md) | 運用マニュアル（全コマンド一覧・権限・トラブル対応） |
+| [`docs/NOCODB.md`](docs/NOCODB.md) | NocoDB 運用ガイド（起動・接続・権限・Sheets からの移行） |
 
-この Bot は **1プロセスで複数の Discord サーバー（ギルド）を安全に扱える**
-マルチテナント仕様になっています。全テーブルが `guild_id` を保持し、
-データ・設定・権限・バックグラウンド通知はすべてギルド単位で分離されます。
+## モジュール構成（11 Cog）
 
-### 変更内容の要約
+| モジュール | 役割 |
+|---|---|
+| Core | 起動・設定・権限・ログ・`/ping` `/health` |
+| Schedule | 日程調整・出欠投票・締切・未回答者通知 |
+| Tasks | Todoist 連携タスク・`/today` ラベル付与 |
+| Members | 班所属・班長・技能タグ・支援候補検索 |
+| Reminders | 定期通知の統括（締切催促・期限通知・超過警告） |
+| Reports | 週次サマリー・CSV出力・監査ログ |
+| LayerTracking | 桁巻き積層作業の開始/終了記録 |
+| Settings | チャンネル・ロール等の設定管理（管理者向け） |
+| SetupWizard | `/setup` 設定ウィザード（管理者向け） |
+| Teams | 班・技能タグのマスタ管理（管理者向け） |
+| TodoistAdmin | Todoist トークンの登録・状態確認・削除（管理者向け） |
 
-- **DB**: 全テーブルに `guild_id INTEGER NOT NULL CHECK (guild_id >= 0)` を保持
-  （PostgreSQL の BIGINT へ移行しやすい設計）。`(guild_id, ...)` 先頭の複合
-  ユニーク制約・インデックスを整備（例: members は `(guild_id, user_id)` が PK、
-  teams は `(guild_id, team_key)` UNIQUE、settings は `(guild_id, setting_key)` PK）。
-- **config**: `GUILD_ID` 環境変数は任意に（`validate()` は `DISCORD_TOKEN` のみ必須）。
-  ギルド固有の設定（チャンネル ID・ロール ID 等）は `config.for_guild(guild_id)` が
-  キャッシュ付きで解決（優先順: ギルド別 DB 設定 > 環境変数 > デフォルト）。
-- **コマンド**: すべて `interaction.guild.id` でデータをスコープ。DM からの実行は
-  ギルドを特定できないため拒否メッセージを返します。
-- **バックグラウンド処理**: リマインド・自動締切は
-  「参加中の全ギルド」をギルドごとにループして処理します。
-- **権限**: 幹部/管理者/班長ロール ID もギルド別設定から判定します。
+## 技術メモ
 
-### 新しいサーバーを追加する場合（運用フロー）
-
-**Bot を招待するだけで追加作業は不要です。**
-
-1. Bot を新しいサーバーに招待すると `on_guild_join` が自動で:
-   - ギルド用デフォルト設定を settings に保存（未存在時のみ）
-   - 権限があれば「幹部」「Bot管理者」ロールと `#bot-log` チャンネルを
-     自動作成し、ID をギルド別設定に保存（失敗してもログに残して続行します）
-   - スラッシュコマンドをそのギルドへ即時同期
-2. 管理者が `/setup` を実行し、設定状況を確認しながら通知チャンネル・
-   ロールを対話的に設定します。「班を一括作成」ボタンから班名をカンマ区切りで
-   入力すると、班と対応ロールをまとめて作成できます。
-3. 班・技能タグは**空の状態で開始**します（固定の初期値は投入しません）。
-   `/setup` のほか、後から `/team-add` `/team-role` `/skill-add` でも
-   追加・変更できます。
-4. あとは従来どおり `/set_channel` `/set_role` 等で必要に応じて調整してください。
-
-### 既存サーバー（単一運用）からの移行
-
-- `.env` の `GUILD_ID` を設定したまま起動すれば **自動移行**されます。
-  `utils/db.py` の `_migrate()` が全テーブルを guild_id 付きスキーマへ再作成し、
-  既存行を `GUILD_ID` でバックフィルします（起動前に `data/club.db` の
-  バックアップを推奨）。
-- 手動で移行する場合は [`migrations/001_add_guild_id.sql`](migrations/001_add_guild_id.sql)
-  を使用してください（`:legacy_guild_id` に GUILD_ID をバインド）。
-- さらに起動時に 002〜005 マイグレーション（`guilds` ギルド台帳・`audit_log`
-  監査ログ・`skill_tags`・`todoist_configs` の追加、teams ロール紐付けの
-  バックフィル、NocoDB 表示用ビュー）が `PRAGMA user_version` による
-  スキーマバージョン管理のもと自動適用されます。
-  手動適用は [`migrations/`](migrations/) 配下の各 SQL を使用してください。
-- 詳細は [`docs/MULTI_TENANT_MIGRATION.md`](docs/MULTI_TENANT_MIGRATION.md) を参照。
-
-### 制約
-
-- Todoist 連携は**サーバー（ギルド）ごとに独立**しています。トークンは
-  `.env` には書かず、各サーバーの管理者が `/todoist-setup` を実行し、
-  表示されるフォーム（Modal）から登録します（Fernet で暗号化して DB に保存。
-  暗号鍵 `ENCRYPTION_KEY` は `.env` のみに保持します）。未登録のサーバーでは
-  Todoist 関連機能は自動的に無効になり、他サーバーのトークンやタスクは
-  参照されません。
-- Google Sheets 連携は廃止されました。記録の正本は PostgreSQL（ローカル開発は
-  SQLite）で、閲覧・編集 UI には NocoDB を利用します（[`docs/NOCODB.md`](docs/NOCODB.md)）。
-  旧 Sheets のデータは `scripts/migrate_sheets_to_db.py` で取り込めます。
+- **マルチテナント**: 全テーブルに `guild_id` を保持し、`(guild_id, ...)` 先頭の
+  複合ユニーク制約・インデックスで分離。ギルド別設定は `config.for_guild(guild_id)` が
+  キャッシュ付きで解決します（優先順: ギルド別 DB 設定 > 環境変数 > デフォルト）。
+- **コマンド**: すべて `interaction.guild.id` でスコープ。DM からの実行は拒否します。
+- **Todoist 連携**: サーバーごとに独立。トークンは `.env` には書かず、各サーバーの
+  管理者が `/todoist-setup` のフォーム（Modal）から登録します（Fernet で暗号化して
+  DB に保存。暗号鍵 `ENCRYPTION_KEY` は `.env` のみに保持）。
+- **既存サーバー（旧・単一運用版）からの移行**: `.env` の `GUILD_ID` を設定したまま
+  起動すれば自動移行されます。詳細は
+  [`docs/MULTI_TENANT_MIGRATION.md`](docs/MULTI_TENANT_MIGRATION.md) を参照してください。
 
 ## License
 
