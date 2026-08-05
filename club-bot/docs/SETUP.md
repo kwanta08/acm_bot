@@ -85,7 +85,7 @@ Discord アプリの「**ユーザー設定 → 詳細設定 → 開発者モー
 | チャンネル例 | 対応する `.env` 項目 |
 |---|---|
 | `#全体連絡` | `DEFAULT_ANNOUNCE_CHANNEL_ID` |
-| `#部会まとめ` | `DEFAULT_PROGRESS_CHANNEL_ID` |
+| `#進捗まとめ` | `DEFAULT_PROGRESS_CHANNEL_ID` |
 | `#タスク通知` | `DEFAULT_TASK_CHANNEL_ID` |
 | `#出欠管理` | `DEFAULT_SCHEDULE_CHANNEL_ID` |
 | `#bot-log` | `BOT_LOG_CHANNEL_ID` |

@@ -98,5 +98,5 @@ COMMIT;
 --   WHERE column_name = 'guild_id' ORDER BY table_name;
 -- 動作確認例（2^31 超のギルド ID でエラーにならないこと）:
 --   INSERT INTO todoist_configs (guild_id, api_token_encrypted, created_by, created_at, updated_at)
---   VALUES (1499345584874586143, 'dummy', 'mig', '2026-01-01', '2026-01-01');
---   DELETE FROM todoist_configs WHERE guild_id = 1499345584874586143;
+--   VALUES (3000000000000000001, 'dummy', 'mig', '2026-01-01', '2026-01-01');
+--   DELETE FROM todoist_configs WHERE guild_id = 3000000000000000001;

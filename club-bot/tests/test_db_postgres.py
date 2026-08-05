@@ -21,8 +21,8 @@ from utils.db import (  # noqa: E402
     SQLITE_VIEW_DDL, TABLE_DDL, TABLE_DDL_PG, Database, to_pg_ddl,
 )
 
-# 2^31 を超える Discord Snowflake ID（int32 では表現できない）
-BIG_SNOWFLAKE = 1499345584874586143
+# 2^31 を超える Discord Snowflake ID（int32 では表現できない）※明白なダミー値
+BIG_SNOWFLAKE = 3000000000000000001
 
 G1 = 100000000000000001
 G2 = 200000000000000002

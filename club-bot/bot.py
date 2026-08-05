@@ -226,7 +226,7 @@ class ClubBot(commands.Bot):
         log.info("ログイン完了: %s (id=%s)", self.user, self.user.id if self.user else "?")
         await self.change_presence(activity=discord.Game(name="鳥人間サークル運営"))
 
-        # 参加中の全ギルドをセットアップ（起動時に初期チームの存在を保証）し、
+        # 参加中の全ギルドをセットアップ（ギルド登録とデフォルト設定の投入）し、
         # コマンドをギルド同期する。初回の on_ready のみ実行し、
         # それ以降の新規参加は on_guild_join で処理する。
         if not self._initial_guild_setup_done:
