@@ -299,17 +299,21 @@ class ClubBot(commands.Bot):
         全スラッシュコマンドのエラーを集約（改訂版 14）
         """
         # ラップされた元例外を取り出す
+        # （app_commands.check 内で発生した例外は CommandInvokeError に
+        #   ラップされて届くため、error だけでなく original 側も判定する）
         original = getattr(error, "original", error)
 
-        if isinstance(error, PermissionDenied):
-            embed = error_embed(str(error), code="PERMISSION_DENIED")
+        if isinstance(original, PermissionDenied):
+            embed = error_embed(str(original), code="PERMISSION_DENIED")
         elif isinstance(original, InvalidDatetimeError):
             embed = error_embed(str(original), code="INVALID_DATETIME")
         elif isinstance(error, app_commands.CommandOnCooldown):
             embed = error_embed("実行間隔が短すぎます。少々待って再試行してください。")
         else:
             embed = error_embed("予期せぬエラーが発生しました。時間をおいて再試行してください。")
-            log.exception("未処理のコマンドエラー: %s", original)
+            # ハンドラ内は except 節の外なので log.exception ではなく
+            # 元例外を exc_info として明示的に渡す
+            log.error("未処理のコマンドエラー: %s", original, exc_info=original)
             await self.log_to_channel(
                 f"[ERROR] {interaction.command}: {original!r}",
                 guild_id=interaction.guild.id if interaction.guild else None)

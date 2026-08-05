@@ -21,7 +21,7 @@ from services import team_service
 from services.todoist_service import TodoistError
 from utils.embeds import error_embed, info_embed, success_embed, task_embed
 from utils.logger import get_logger
-from utils.parser import fmt_jp, parse_datetime, to_iso
+from utils.parser import fmt_jp, from_iso, parse_datetime, to_iso
 from utils.permissions import Level, ensure_guild, require
 
 log = get_logger("tasks")
@@ -29,9 +29,11 @@ log = get_logger("tasks")
 PRIORITY_LABELS = {1: "低", 2: "中", 3: "高", 4: "最優先"}
 
 class SectionSelectView(discord.ui.View):
-    def __init__(self, cog: "Tasks", candidates: list[dict], **task_kwargs):
+    def __init__(self, cog: "Tasks", candidates: list[dict],
+                 owner_id: int, **task_kwargs):
         super().__init__(timeout=120)
         self.cog = cog
+        self.owner_id = owner_id
         self.task_kwargs = task_kwargs
 
         options = [
@@ -49,6 +51,13 @@ class SectionSelectView(discord.ui.View):
         self.add_item(select)
 
     async def _on_select(self, interaction: discord.Interaction):
+        # コマンド実行者以外の操作を拒否（他人の interaction で
+        # タスク作成が確定しないようにする）
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                "このメニューはコマンドを実行した本人のみ操作できます。",
+                ephemeral=True)
+            return
         section_id = interaction.data["values"][0]
         await interaction.response.defer(ephemeral=True)
         await self.cog._finalize_add_task(
@@ -151,7 +160,7 @@ class Tasks(commands.Cog):
             return
 
         # 2件以上あれば選択メニューを表示（B案）
-        view = SectionSelectView(self, candidates, **task_kwargs)
+        view = SectionSelectView(self, candidates, interaction.user.id, **task_kwargs)
         await interaction.followup.send(
             embed=info_embed(
                 "配置先セクションを選択してください",
@@ -195,7 +204,7 @@ class Tasks(commands.Cog):
         if assignee:
             desc += f"\n担当: {assignee.display_name}"
         if due_iso:
-            desc += f"\n期限: {fmt_jp(parse_datetime(due))}"
+            desc += f"\n期限: {fmt_jp(from_iso(due_iso))}"
         embed = success_embed(f"タスクを作成しました: {title}", desc,
                               executor=interaction.user.display_name)
         await interaction.followup.send(embed=embed, ephemeral=True)
@@ -601,7 +610,18 @@ class Tasks(commands.Cog):
             return
 
         if len(matches) == 1:
-            await svc.add_today_label(str(matches[0].id))
+            try:
+                ok = await svc.add_today_label(str(matches[0].id))
+            except TodoistError:
+                await interaction.followup.send(
+                    embed=error_embed("ラベル付与に失敗しました。", code="TODOIST_API_FAILED"),
+                    ephemeral=True)
+                return
+            if not ok:
+                await interaction.followup.send(
+                    embed=error_embed(f"タスク「{name}」へのラベル付与に失敗しました。"),
+                    ephemeral=True)
+                return
             await interaction.followup.send(
                 embed=success_embed("ラベルを付与しました",
                                     f"「{name}」に「{svc.label_name}」を付与",
@@ -665,7 +685,7 @@ class Tasks(commands.Cog):
             if t.get("assignee_id") and guild:
                 m = guild.get_member(int(t["assignee_id"]))
                 assignee = m.display_name if m else "不明"
-            due = fmt_jp(parse_datetime(t["due_date"])) if t.get("due_date") else "期限なし"
+            due = fmt_jp(from_iso(t["due_date"])) if t.get("due_date") else "期限なし"
             pr = PRIORITY_LABELS.get(t.get("priority"), "—")
             embed.add_field(
                 name=f"`{t['local_task_id']}` {t['title']}",

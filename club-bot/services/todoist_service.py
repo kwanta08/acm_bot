@@ -89,6 +89,8 @@ class TodoistService:
             raise TodoistError(type(e).__name__) from e
 
     # ---------- タスク CRUD ----------
+    # 失敗時は TodoistError を伝播させる（呼び出し側がユーザーへ
+    # TODOIST_API_FAILED を表示できるようにするため、ここで握りつぶさない）
     async def add_task(self, content: str, due_string: str | None = None,
                        priority: int | None = None,
                        description: str | None = None,
@@ -103,63 +105,42 @@ class TodoistService:
             kwargs["section_id"] = section_id
         if self.project_id:
             kwargs["project_id"] = self.project_id
-        try:
-            return await self._run(self._api.add_task, **kwargs)
-        except TodoistError:
-            return None
+        return await self._run(self._api.add_task, **kwargs)
 
     async def update_task(self, task_id: str, **kwargs) -> Any | None:
         if not self.enabled:
             return None
-        try:
-            return await self._run(self._api.update_task, task_id, **kwargs)
-        except TodoistError:
-            return None
+        return await self._run(self._api.update_task, task_id, **kwargs)
 
     async def close_task(self, task_id: str) -> bool:
         if not self.enabled:
             return False
-        try:
-            await self._run(self._api.close_task, task_id)
-            return True
-        except TodoistError:
-            return False
+        await self._run(self._api.close_task, task_id)
+        return True
 
     async def delete_task(self, task_id: str) -> bool:
         if not self.enabled:
             return False
-        try:
-            await self._run(self._api.delete_task, task_id)
-            return True
-        except TodoistError:
-            return False
+        await self._run(self._api.delete_task, task_id)
+        return True
 
     async def get_task(self, task_id: str) -> Any | None:
         if not self.enabled:
             return None
-        try:
-            return await self._run(self._api.get_task, task_id)
-        except TodoistError:
-            return None
+        return await self._run(self._api.get_task, task_id)
 
     async def get_tasks(self, **kwargs) -> list[Any]:
         if not self.enabled:
             return []
-        try:
-            result = await self._run(self._api.get_tasks, **kwargs)
-            return _to_list(result)
-        except TodoistError:
-            return []
+        result = await self._run(self._api.get_tasks, **kwargs)
+        return _to_list(result)
 
     # ---------- プロジェクト / セクション ----------
     async def get_projects(self) -> list[Any]:
         if not self.enabled:
             return []
-        try:
-            result = await self._run(self._api.get_projects)
-            return _to_list(result)
-        except TodoistError:
-            return []
+        result = await self._run(self._api.get_projects)
+        return _to_list(result)
 
     async def get_sections(self) -> list[Any]:
         """プロジェクトのセクション一覧（project_id 設定時はそのプロジェクト）。"""
@@ -168,11 +149,8 @@ class TodoistService:
         kwargs: dict[str, Any] = {}
         if self.project_id:
             kwargs["project_id"] = self.project_id
-        try:
-            result = await self._run(self._api.get_sections, **kwargs)
-            return _to_list(result)
-        except TodoistError:
-            return []
+        result = await self._run(self._api.get_sections, **kwargs)
+        return _to_list(result)
 
     async def get_tasks_by_section(self, section_id: str) -> list[Any]:
         if not self.enabled:
@@ -193,19 +171,13 @@ class TodoistService:
     async def get_labels(self) -> list[Any]:
         if not self.enabled:
             return []
-        try:
-            result = await self._run(self._api.get_labels)
-            return _to_list(result)
-        except TodoistError:
-            return []
+        result = await self._run(self._api.get_labels)
+        return _to_list(result)
 
     async def add_label(self, name: str) -> Any | None:
         if not self.enabled:
             return None
-        try:
-            return await self._run(self._api.add_label, name=name)
-        except TodoistError:
-            return None
+        return await self._run(self._api.add_label, name=name)
 
     async def ensure_label(self) -> bool:
         """「今日やること」ラベルが存在しなければ作成する。"""
