@@ -19,10 +19,12 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT }}
           script_stop: true
+          # pip install がデフォルトの 10 分タイムアウトを超える場合があるため延長
+          command_timeout: "30m"
           script: |
             cd /home/ubuntu/club-bot
             git pull origin main
             cd /home/ubuntu/club-bot/club-bot
-            ./venv/bin/python -m pip install -r requirements.txt
+            ./venv/bin/python -m pip install --no-input -q -r requirements.txt
             sudo systemctl restart club-bot.service
             sudo systemctl status club-bot.service --no-pager
