@@ -337,7 +337,9 @@ POSTGRES_VIEW_DDL = "\n".join(
 #    created_at / updated_at を追加し、settings のロールマップをバックフィル
 # 4: todoist_configs 追加（Todoist トークンのギルド別暗号化保存）
 # 5: v_attendance / v_team_summary ビュー追加（Sheets 廃止に伴う NocoDB 表示用）
-SCHEMA_VERSION = 5
+# 6: PostgreSQL の guild_id を BIGINT へ変更（int4 で作成された既存 DB の修復。
+#    migrations/005_bigint_discord_ids.sql と同等の処理を自動適用。SQLite は no-op）
+SCHEMA_VERSION = 6
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
@@ -681,8 +683,41 @@ class Database:
             # v5: Sheets 廃止に伴う NocoDB 表示用ビュー（最新定義で作り直す）
             await self._migrate_v5_views()
 
+        if version < 6:
+            await self._migrate_v6_pg_bigint()
+
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
+
+    # guild_id 列を BIGINT へ変換する対象テーブル（PostgreSQL のみ。
+    # migrations/005_bigint_discord_ids.sql と同じ一覧）
+    _PG_BIGINT_TABLES = (
+        "guilds", "settings", "teams", "members", "schedules",
+        "schedule_options", "schedule_votes", "tasks", "reminders_log",
+        "todoist_sections", "todoist_configs", "layer_sessions",
+        "layer_records", "layer_keta", "audit_log", "skill_tags",
+    )
+
+    async def _migrate_v6_pg_bigint(self) -> None:
+        """
+        v6: PostgreSQL の guild_id 列を int4 から BIGINT へ変更する（冪等）。
+
+        過去の to_pg_ddl() 変換漏れで int4 として作成された既存 DB を修復する。
+        2^31 を超える Discord ギルド ID で asyncpg の DataError
+        （value out of int32 range）が発生する問題への対応。
+        int4 → int8 は値を失わない拡張変換で、既に BIGINT の列への ALTER は
+        実質 no-op。SQLite は動的型付けで 64bit を保持できるため何もしない。
+        """
+        if not self._is_pg:
+            return
+        # ビューは列の型変更を妨げるため、先に DROP して最後に再作成する
+        for view in ("v_todoist_status", "v_attendance", "v_team_summary"):
+            await self.execute(f"DROP VIEW IF EXISTS {view}")
+        for table in self._PG_BIGINT_TABLES:
+            await self.execute(
+                f"ALTER TABLE {table} ALTER COLUMN guild_id TYPE BIGINT")
+        await self._migrate_v5_views()
+        log.info("PostgreSQL の guild_id 列を BIGINT に変更しました。")
 
     async def _migrate_v5_views(self) -> None:
         """v5: 表示用ビューを最新定義で作り直す（冪等）。

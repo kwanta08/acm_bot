@@ -2,7 +2,8 @@
 
 - 旧 Google Sheets の attendance / team_summary シート相当データが
   ビューから guild_id 単位で取得できること
-- スキーマバージョンが 5 に更新されること
+- スキーマバージョンが最新に更新されること
+- v6（PostgreSQL guild_id BIGINT 化）が SQLite では no-op であること
 
 実行: venv/bin/python -m pytest tests/  （pytest 未導入なら直接実行も可）
 """
@@ -38,17 +39,38 @@ async def _connected_db() -> Database:
     return db
 
 
-def test_schema_is_v5():
+def test_schema_is_latest():
     async def _main():
         db = await _connected_db()
         try:
             row = await db.fetchone("PRAGMA user_version")
-            assert row[0] == SCHEMA_VERSION == 5
+            assert row[0] == SCHEMA_VERSION
             for view in ("v_attendance", "v_team_summary", "v_todoist_status"):
                 rows = await db.fetchall(
                     "SELECT name FROM sqlite_master WHERE type='view' AND name = ?",
                     (view,))
                 assert rows, f"{view} がありません"
+        finally:
+            await db.close()
+    run(_main())
+
+
+def test_migrate_v6_noop_on_sqlite():
+    """v6（PostgreSQL guild_id BIGINT 化）は SQLite では何もせず、
+    v5 相当の DB が最新バージョンへ更新されること。"""
+    async def _main():
+        db = await _connected_db()
+        try:
+            # v5 相当の状態に戻してからマイグレーションを再実行
+            await db.conn.execute("PRAGMA user_version = 5")
+            await db.conn.commit()
+            await db._migrate_versioned()
+            row = await db.fetchone("PRAGMA user_version")
+            assert row[0] == SCHEMA_VERSION
+            # ビューが壊れていないこと
+            rows = await db.fetchall(
+                "SELECT name FROM sqlite_master WHERE type='view'")
+            assert len(rows) >= 3
         finally:
             await db.close()
     run(_main())
@@ -126,8 +148,10 @@ def test_team_summary_view_guild_isolation():
 
 
 if __name__ == "__main__":
-    test_schema_is_v5()
-    print("test_schema_is_v5: OK")
+    test_schema_is_latest()
+    print("test_schema_is_latest: OK")
+    test_migrate_v6_noop_on_sqlite()
+    print("test_migrate_v6_noop_on_sqlite: OK")
     test_attendance_view_guild_isolation()
     print("test_attendance_view_guild_isolation: OK")
     test_team_summary_view_guild_isolation()
