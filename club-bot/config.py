@@ -9,7 +9,8 @@
 - チャンネル ID・ロール ID などのギルド固有情報は settings テーブルから
   guild_id キーで解決する。config.for_guild(guild_id) がキャッシュ付きの
   GuildConfig を返す。解決順は「ギルド別 DB 設定 > 環境変数 > デフォルト」。
-- Google Sheets 連携は廃止（NocoDB 移行）。記録の正本は SQLite。
+- Google Sheets の常時同期は廃止（NocoDB 移行）。記録の正本は SQLite/PostgreSQL。
+  任意でギルド別の Sheets エクスポート連携（/set_sheet /sheet_sync）が使える。
 """
 from __future__ import annotations
 
@@ -174,11 +175,12 @@ class Config:
     # today_label_channel_id は通知先チャンネルの設定（ギルド別解決のフォールバック）
     today_label_channel_id: int | None = _get_int("TODAY_LABEL_CHANNEL_ID")
 
-    # Google Sheets 連携は廃止（NocoDB 移行）。記録の正本は SQLite で、
+    # Google Sheets の常時同期は廃止（NocoDB 移行）。記録の正本は SQLite/PostgreSQL で、
     # 外部参照は NocoDB が同じ DB に接続して行う。
-    # 旧 Sheets 関連の環境変数・設定項目（SPREADSHEET_ID, SHEET_*,
-    # GOOGLE_CREDENTIALS_PATH 等）は移行スクリプト
+    # 旧 Sheets 関連の設定項目（SHEET_*, LAYER_SPREADSHEET_ID 等）は移行スクリプト
     # （scripts/migrate_sheets_to_db.py）でのみ使用する。
+    # なおギルド別の Sheets エクスポート連携（/set_sheet /sheet_sync）は任意で
+    # 利用できる（services/sheets_service.py 参照）。
 
     # 共通 - 環境変数 or デフォルト
     tz: str = _get_str("TZ", "Asia/Tokyo")

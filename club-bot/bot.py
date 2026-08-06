@@ -44,6 +44,7 @@ COGS = [
     "cogs.settings",      # 設定管理コグを追加
     "cogs.setup_wizard",  # /setup 設定ウィザードコグ
     "cogs.teams",         # 班・技能タグ管理コグ
+    "cogs.sheets",        # Google Sheets エクスポート連携コグ
     "cogs.todoist_admin",  # Todoist トークン管理コグ
 ]
 

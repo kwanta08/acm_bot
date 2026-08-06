@@ -87,9 +87,11 @@ class Settings(commands.Cog):
                     # （/todoist-setup での暗号化登録に置き換わった）
                     categories["その他"].append((key, "（廃止: /todoist-setup で再登録してください）"))
                 elif key.startswith("SHEET_") or key in (
-                        "SPREADSHEET_ID", "LAYER_SPREADSHEET_ID", "GOOGLE_CREDENTIALS_PATH"):
-                    # Google Sheets 連携は廃止（NocoDB 移行）
-                    categories["その他"].append((key, "（廃止: Sheets 連携は廃止されました）"))
+                        "LAYER_SPREADSHEET_ID", "GOOGLE_CREDENTIALS_PATH"):
+                    # 旧 Sheets 常時同期の設定キーは廃止
+                    # （SPREADSHEET_ID はギルド別エクスポート連携として有効。
+                    #   /set_sheet で登録する）
+                    categories["その他"].append((key, "（廃止: Sheets 常時同期は廃止されました）"))
                 else:
                     categories["その他"].append((key, value))
 
