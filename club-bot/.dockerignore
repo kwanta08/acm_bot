@@ -1,0 +1,22 @@
+# Git 管理情報
+.git
+
+# Python 仮想環境・キャッシュ
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# 秘密情報（イメージに含めない。起動時に env_file で注入する）
+.env
+credentials.json
+
+# 永続データ・ログ（volume マウントで永続化するためイメージには含めない）
+data/*.db
+data/*.db-wal
+data/*.db-shm
+logs/
+
+# OS
+.DS_Store

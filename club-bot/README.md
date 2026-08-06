@@ -76,6 +76,21 @@ python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().d
 `.env` に `DATABASE_URL=postgresql://...` を設定して PostgreSQL に切り替えます。
 VPS へのデプロイを含む詳しい手順は [`docs/SETUP.md`](docs/SETUP.md) を参照してください。
 
+### Docker で起動する場合
+
+リポジトリルートに Bot 単体起動用の `docker-compose.yml` があります。
+
+```bash
+cp club-bot/.env.example club-bot/.env   # DISCORD_TOKEN と ENCRYPTION_KEY を設定
+docker compose up -d --build
+```
+
+- `.env` の実値はイメージに含めず、起動時に `env_file` で注入します
+- SQLite DB（`club-bot/data/`）とログ（`club-bot/logs/`）はホスト側に
+  ボリュームマウントされ、コンテナを再作成してもデータは残ります
+- NocoDB + PostgreSQL の本番構成は
+  [`deploy/docker-compose.nocodb.yml`](deploy/docker-compose.nocodb.yml) を参照してください
+
 ## ドキュメント
 
 | ファイル | 内容 |

@@ -330,6 +330,12 @@ $ mkdir -p ~/club-bot/logs
 
 いきなり常駐させる前に、手で起動してエラーが出ないか確認します。
 
+> **Docker で動かす場合**: リポジトリルートの `docker-compose.yml` を使えば
+> venv や systemd のセットアップ（STEP3 の一部・STEP5）を省略できます。
+> `club-bot/.env` を用意して `docker compose up -d --build` を実行してください。
+> DB（`club-bot/data/`）とログはホスト側に永続化されます。
+> 以降はこの手順書の venv/systemd 版の説明として読み進めてください。
+
 ```bash
 $ cd ~/club-bot/app
 $ ../venv/bin/python bot.py

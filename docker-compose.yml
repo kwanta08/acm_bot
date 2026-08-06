@@ -1,0 +1,25 @@
+# Bot 単体起動用 Docker Compose 定義（SQLite 構成）
+#
+# 使い方:
+#   1. club-bot/.env を作成（club-bot/.env.example 参照。
+#      DISCORD_TOKEN と ENCRYPTION_KEY が必須。このファイルはコミットしない）
+#   2. 起動: docker compose up -d
+#
+# 永続データ:
+#   - SQLite DB: club-bot/data/（./club-bot/data -> /app/data にマウント）
+#   - ログ:      club-bot/logs/
+#
+# NocoDB + PostgreSQL の本番構成は
+# club-bot/deploy/docker-compose.nocodb.yml を参照してください
+# （その場合はこのファイルの volumes に加え、.env の DATABASE_URL で
+#   PostgreSQL に接続する）。
+services:
+  bot:
+    build: ./club-bot
+    restart: unless-stopped
+    env_file:
+      # .env の実値はイメージに含めず、起動時に環境変数として注入する
+      - ./club-bot/.env
+    volumes:
+      - ./club-bot/data:/app/data
+      - ./club-bot/logs:/app/logs
