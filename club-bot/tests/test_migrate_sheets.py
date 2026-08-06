@@ -16,10 +16,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))), "scripts"))
 
-import migrate_sheets_to_db as mig  # noqa: E402
-from repositories.member_repository import MemberRepository  # noqa: E402
-from repositories.schedule_repository import ScheduleRepository  # noqa: E402
-from utils.db import Database  # noqa: E402
+import migrate_sheets_to_db as mig
+
+from repositories.member_repository import MemberRepository
+from repositories.schedule_repository import ScheduleRepository
+from utils.db import Database
 
 G1 = 100000000000000001
 

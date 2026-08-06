@@ -14,11 +14,18 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import pytest  # noqa: E402
+import pytest
 
-from utils.db import (  # noqa: E402
-    INDEX_DDL, POSTGRES_VIEW_DDL, SCHEMA_META_DDL, SCHEMA_VERSION,
-    SQLITE_VIEW_DDL, TABLE_DDL, TABLE_DDL_PG, Database, to_pg_ddl,
+from utils.db import (
+    INDEX_DDL,
+    POSTGRES_VIEW_DDL,
+    SCHEMA_META_DDL,
+    SCHEMA_VERSION,
+    SQLITE_VIEW_DDL,
+    TABLE_DDL,
+    TABLE_DDL_PG,
+    Database,
+    to_pg_ddl,
 )
 
 # 2^31 を超える Discord Snowflake ID（int32 では表現できない）※明白なダミー値
@@ -356,7 +363,8 @@ CREATE TABLE IF NOT EXISTS {mig_table} (
                     f"INSERT INTO {mig_table} (guild_id, api_token_encrypted,"
                     f" created_by, created_at, updated_at)"
                     f" VALUES (?, 'c', 'a', 't', 't')", (BIG_SNOWFLAKE,))
-            except Exception:
+            # int4 範囲外で何らかの例外が出ること自体を検証するため例外種別は問わない
+            except Exception:  # noqa: BLE001
                 failed = True
             assert failed, "int4 では大きな ID が失敗するはず"
 

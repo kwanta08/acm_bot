@@ -97,8 +97,8 @@ class ClubBot(commands.Bot):
             try:
                 await self.load_extension(cog)
                 log.info("Cog 読み込み: %s", cog)
-            except Exception as e:  # noqa: BLE001
-                log.exception("Cog 読み込み失敗 %s: %s", cog, e)
+            except Exception:
+                log.exception("Cog 読み込み失敗: %s", cog)
 
         # スラッシュコマンド同期
         # - GUILD_ID 指定時: そのギルドへ即時反映（後方互換）
@@ -236,9 +236,9 @@ class ClubBot(commands.Bot):
             for guild in list(self.guilds):
                 try:
                     await self._ensure_guild_setup(guild)
-                except Exception as e:  # noqa: BLE001
-                    log.exception("ギルドセットアップ失敗 %s (id=%s): %s",
-                                  guild.name, guild.id, e)
+                except Exception:
+                    log.exception("ギルドセットアップ失敗 %s (id=%s)",
+                                  guild.name, guild.id)
                 await self._sync_guild_commands(guild)
 
         # 起動ログをチャンネルへ
@@ -249,8 +249,8 @@ class ClubBot(commands.Bot):
         log.info("新規ギルドに参加しました: %s (id=%s)", guild.name, guild.id)
         try:
             await self._ensure_guild_setup(guild)
-        except Exception as e:  # noqa: BLE001
-            log.exception("on_guild_join セットアップ失敗 (guild=%s): %s", guild.id, e)
+        except Exception:
+            log.exception("on_guild_join セットアップ失敗 (guild=%s)", guild.id)
         await self._sync_guild_commands(guild)
         await self.log_to_channel(
             f"新規ギルドに参加し、自動セットアップを実行しました: {guild.name} (id={guild.id})\n"
@@ -277,7 +277,8 @@ class ClubBot(commands.Bot):
             for guild in list(self.guilds):
                 try:
                     gconf = await config.for_guild(guild.id)
-                except Exception:  # noqa: BLE001
+                # 設定取得に失敗したギルドはスキップ（他ギルドへの送信を止めない）
+                except Exception:  # noqa: BLE001, S112
                     continue
                 if gconf.bot_log_channel_id and gconf.bot_log_channel_id not in channel_ids:
                     channel_ids.append(gconf.bot_log_channel_id)
@@ -290,7 +291,8 @@ class ClubBot(commands.Bot):
             if channel is None:
                 try:
                     channel = await self.fetch_channel(channel_id)
-                except Exception:  # noqa: BLE001
+                # 取得不能なチャンネルはスキップ（他の送信先への投稿を止めない）
+                except Exception:  # noqa: BLE001, S112
                     continue
             try:
                 await channel.send(f"```\n{message[:1900]}\n```")
@@ -327,7 +329,8 @@ class ClubBot(commands.Bot):
                 await interaction.followup.send(embed=embed, ephemeral=True)
             else:
                 await interaction.response.send_message(embed=embed, ephemeral=True)
-        except Exception:  # noqa: BLE001
+        # エラー応答の送信自体に失敗した場合はこれ以上できることがないため握りつぶす
+        except Exception:  # noqa: BLE001, S110
             pass
 
     async def close(self) -> None:

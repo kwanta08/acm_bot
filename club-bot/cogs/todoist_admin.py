@@ -56,7 +56,7 @@ class TodoistSetupModal(discord.ui.Modal, title="Todoist トークン登録"):
         max_length=50,
     )
 
-    def __init__(self, cog: "TodoistAdmin", guild_id: int, owner_id: int,
+    def __init__(self, cog: TodoistAdmin, guild_id: int, owner_id: int,
                  existing: dict | None):
         super().__init__()
         self.cog = cog
@@ -93,14 +93,15 @@ class TodoistSetupModal(discord.ui.Modal, title="Todoist トークン登録"):
                 await interaction.response.send_message(
                     embed=error_embed("登録に失敗しました。時間をおいて再試行してください。"),
                     ephemeral=True)
-        except Exception:  # noqa: BLE001
+        # エラー通知の送信自体に失敗した場合はこれ以上できることがないため握りつぶす
+        except Exception:  # noqa: BLE001, S110
             pass
 
 
 class TodoistSetupView(discord.ui.View):
     """/todoist-setup の ephemeral メッセージに付けるボタン View。"""
 
-    def __init__(self, cog: "TodoistAdmin", guild_id: int, owner_id: int,
+    def __init__(self, cog: TodoistAdmin, guild_id: int, owner_id: int,
                  existing: dict | None):
         super().__init__(timeout=300)  # 5分で無効化（タイムアウト時は DB 不変）
         self.cog = cog

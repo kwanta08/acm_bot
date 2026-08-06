@@ -25,7 +25,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.db import TABLE_DDL, Database  # noqa: E402
+from utils.db import TABLE_DDL, Database
 
 VIEWS = ["v_todoist_status", "v_attendance", "v_team_summary"]
 # ドロップ順（FK 参照のない順。CASCADE も付ける）

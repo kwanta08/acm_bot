@@ -115,8 +115,8 @@ class SheetsExporter:
             raise SheetsUnavailable(
                 "GOOGLE_CREDENTIALS_PATH（サービスアカウント JSON）が未設定です。")
         try:
-            import gspread  # noqa: PLC0415
-            from google.oauth2.service_account import Credentials  # noqa: PLC0415
+            import gspread
+            from google.oauth2.service_account import Credentials
         except ImportError as e:
             raise SheetsUnavailable(
                 "gspread / google-auth が見つかりません。"

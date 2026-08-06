@@ -16,15 +16,17 @@ from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cogs.setup_wizard import (  # noqa: E402
-    SetupWizard, build_setup_embed, parse_team_names,
+from cogs.setup_wizard import (
+    SetupWizard,
+    build_setup_embed,
+    parse_team_names,
 )
-from config import GuildConfig, config  # noqa: E402
-from repositories.member_repository import MemberRepository  # noqa: E402
-from repositories.settings_repository import SettingsRepository  # noqa: E402
-from services import team_service  # noqa: E402
-from utils.db import Database  # noqa: E402
-from utils.permissions import Level, get_level, has_level  # noqa: E402
+from config import GuildConfig, config
+from repositories.member_repository import MemberRepository
+from repositories.settings_repository import SettingsRepository
+from services import team_service
+from utils.db import Database
+from utils.permissions import Level, get_level, has_level
 
 G1 = 100000000000000001  # ギルド1
 G2 = 200000000000000002  # ギルド2

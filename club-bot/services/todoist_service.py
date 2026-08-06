@@ -22,7 +22,7 @@ log = get_logger("todoist")
 
 try:
     from todoist_api_python.api import TodoistAPI
-except Exception:  # SDK 未インストール環境でも import 失敗しないように
+except ImportError:  # SDK 未インストール環境でも import 失敗しないように
     TodoistAPI = None  # type: ignore
 
 
@@ -77,14 +77,14 @@ class TodoistService:
         self.label_name = label_name
 
     @classmethod
-    def disabled(cls) -> "TodoistService":
+    def disabled(cls) -> TodoistService:
         return cls(None, None, "今日やること")
 
     async def _run(self, fn, *args, **kwargs):
         """同期 SDK 呼び出しをスレッドへ逃がす。"""
         try:
             return await asyncio.to_thread(fn, *args, **kwargs)
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             log.error("Todoist API 失敗: %s", type(e).__name__)
             raise TodoistError(type(e).__name__) from e
 
@@ -98,9 +98,9 @@ class TodoistService:
                        section_id: str | None = None) -> Any | None:
         if not self.enabled:
             return None
-        kwargs: dict[str, Any] = dict(
-            content=content, due_string=due_string, priority=priority,
-            description=description, labels=labels)
+        kwargs: dict[str, Any] = {
+            "content": content, "due_string": due_string, "priority": priority,
+            "description": description, "labels": labels}
         if section_id:
             kwargs["section_id"] = section_id
         if self.project_id:

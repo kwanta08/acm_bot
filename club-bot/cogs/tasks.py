@@ -29,7 +29,7 @@ log = get_logger("tasks")
 PRIORITY_LABELS = {1: "低", 2: "中", 3: "高", 4: "最優先"}
 
 class SectionSelectView(discord.ui.View):
-    def __init__(self, cog: "Tasks", candidates: list[dict],
+    def __init__(self, cog: Tasks, candidates: list[dict],
                  owner_id: int, **task_kwargs):
         super().__init__(timeout=120)
         self.cog = cog
@@ -147,12 +147,12 @@ class Tasks(commands.Cog):
             links = await self.section_repo.list_links(guild_id)
             candidates = [l for l in links if l["team_key"] == team_key]
 
-        task_kwargs = dict(
-            guild_id=guild_id,
-            title=title, due_iso=due_iso, due_string=due_string, due=due,
-            assignee=assignee, team_key=team_key, team_name=team_name,
-            priority=priority, location=location, note=note,
-        )
+        task_kwargs = {
+            "guild_id": guild_id,
+            "title": title, "due_iso": due_iso, "due_string": due_string, "due": due,
+            "assignee": assignee, "team_key": team_key, "team_name": team_name,
+            "priority": priority, "location": location, "note": note,
+        }
 
         if len(candidates) <= 1:
             section_id = candidates[0]["section_id"] if candidates else None

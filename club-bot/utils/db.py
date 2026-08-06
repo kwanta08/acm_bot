@@ -29,7 +29,7 @@ log = get_logger("db")
 
 try:
     import asyncpg
-except Exception:  # asyncpg 未導入でも SQLite だけは動くように
+except ImportError:  # asyncpg 未導入でも SQLite だけは動くように
     asyncpg = None  # type: ignore
 
 # Discord ギルド ID のカラム型。
@@ -404,7 +404,7 @@ def legacy_guild_id() -> int:
         value = int(raw)
     except (TypeError, ValueError):
         return 0
-    return value if value > 0 else 0
+    return max(0, value)
 
 
 class _PgCursor:

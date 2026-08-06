@@ -16,10 +16,10 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cogs.tasks import Tasks  # noqa: E402
-from config import Config  # noqa: E402
-from services.todoist_service import TodoistServiceManager  # noqa: E402
-from utils.db import Database  # noqa: E402
+from cogs.tasks import Tasks
+from config import Config
+from services.todoist_service import TodoistServiceManager
+from utils.db import Database
 
 G1 = 100000000000000001  # ギルド1
 

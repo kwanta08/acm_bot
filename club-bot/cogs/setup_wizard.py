@@ -116,7 +116,7 @@ class ClubNameModal(discord.ui.Modal, title="サークル名の設定"):
         max_length=50,
     )
 
-    def __init__(self, cog: "SetupWizard", guild_id: int, owner_id: int,
+    def __init__(self, cog: SetupWizard, guild_id: int, owner_id: int,
                  current: str | None):
         super().__init__()
         self.cog = cog
@@ -161,7 +161,8 @@ class ClubNameModal(discord.ui.Modal, title="サークル名の設定"):
                 await interaction.response.send_message(
                     embed=error_embed("保存に失敗しました。時間をおいて再試行してください。"),
                     ephemeral=True)
-        except Exception:  # noqa: BLE001
+        # エラー通知の送信自体に失敗した場合はこれ以上できることがないため握りつぶす
+        except Exception:  # noqa: BLE001, S110
             pass
 
 
@@ -176,7 +177,7 @@ class TeamBulkCreateModal(discord.ui.Modal, title="班の一括作成"):
         max_length=1000,
     )
 
-    def __init__(self, cog: "SetupWizard", guild_id: int, owner_id: int):
+    def __init__(self, cog: SetupWizard, guild_id: int, owner_id: int):
         super().__init__()
         self.cog = cog
         self.guild_id = guild_id
@@ -254,14 +255,15 @@ class TeamBulkCreateModal(discord.ui.Modal, title="班の一括作成"):
                 await interaction.response.send_message(
                     embed=error_embed("班の作成に失敗しました。時間をおいて再試行してください。"),
                     ephemeral=True)
-        except Exception:  # noqa: BLE001
+        # エラー通知の送信自体に失敗した場合はこれ以上できることがないため握りつぶす
+        except Exception:  # noqa: BLE001, S110
             pass
 
 
 class SetupWizardView(discord.ui.View):
     """/setup の ephemeral メッセージに付ける対話 View（5分で無効化）。"""
 
-    def __init__(self, cog: "SetupWizard", guild_id: int, owner_id: int):
+    def __init__(self, cog: SetupWizard, guild_id: int, owner_id: int):
         super().__init__(timeout=300)
         self.cog = cog
         self.guild_id = guild_id
@@ -419,8 +421,8 @@ class SetupWizard(commands.Cog):
             view = SetupWizardView(self, guild_id, interaction.user.id)
             await interaction.response.send_message(
                 embed=embed, view=view, ephemeral=True)
-        except Exception as e:
-            log.exception("/setup 表示エラー: %s", e)
+        except Exception:
+            log.exception("/setup 表示エラー")
             embed = error_embed("セットアップ画面の表示に失敗しました")
             if interaction.response.is_done():
                 await interaction.followup.send(embed=embed, ephemeral=True)

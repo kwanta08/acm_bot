@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 from dotenv import load_dotenv
 
@@ -73,11 +73,11 @@ def _get_int(name: str, default: int | None = None) -> int | None:
         return default
 
 
-def _get_int_list(name: str) -> List[int]:
+def _get_int_list(name: str) -> list[int]:
     raw = _clean(os.getenv(name, ""))
     if not raw:
         return []
-    out: List[int] = []
+    out: list[int] = []
     for part in raw.split(","):
         part = _clean(part)
         if part.isdigit():
@@ -122,7 +122,7 @@ class GuildConfig:
     # ロール ID
     exec_role_id: int | None = None
     admin_role_id: int | None = None
-    leader_role_ids: List[int] = field(default_factory=list)
+    leader_role_ids: list[int] = field(default_factory=list)
     primary_team_role_ids: dict[str, int] = field(default_factory=dict)
     secondary_team_role_ids: dict[str, int] = field(default_factory=dict)
 
@@ -163,7 +163,7 @@ class Config:
     # ロールID - 環境変数 or データベース（ギルド別解決のフォールバック）
     exec_role_id: int | None = _get_int("EXEC_ROLE_ID")
     admin_role_id: int | None = _get_int("ADMIN_ROLE_ID")
-    leader_role_ids: List[int] = field(default_factory=lambda: _get_int_list("LEADER_ROLE_IDS"))
+    leader_role_ids: list[int] = field(default_factory=lambda: _get_int_list("LEADER_ROLE_IDS"))
     primary_team_role_ids: dict[str, int] = field(
         default_factory=lambda: _get_team_role_map("PRIMARY_TEAM_ROLE_IDS"))
     secondary_team_role_ids: dict[str, int] = field(
@@ -191,7 +191,7 @@ class Config:
     database_url: str = _get_str("DATABASE_URL")
 
     # データベース接続（設定読み込み用。setup_hook で接続後に保持される）
-    _db: "Database | None" = None
+    _db: Database | None = None
 
     # ギルド別設定キャッシュ（guild_id -> GuildConfig）
     _guild_cache: dict[int, GuildConfig] = field(default_factory=dict)
@@ -236,7 +236,7 @@ class Config:
     # ギルド別設定解決
     # ------------------------------------------------------------------
     async def for_guild(self, guild_id: int,
-                        db: "Database | None" = None,
+                        db: Database | None = None,
                         force_reload: bool = False) -> GuildConfig:
         """
         ギルド固有設定をキャッシュ付きで返す。
@@ -308,7 +308,7 @@ class Config:
     def clear_guild_cache(self) -> None:
         self._guild_cache.clear()
 
-    async def load_from_db(self, db: "Database") -> None:
+    async def load_from_db(self, db: Database) -> None:
         """
         データベースから設定を読み込む（環境変数が優先）。
 

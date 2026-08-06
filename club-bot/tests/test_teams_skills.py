@@ -14,12 +14,12 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import aiosqlite  # noqa: E402
+import aiosqlite
 
-from repositories.member_repository import MemberRepository  # noqa: E402
-from repositories.skill_tag_repository import SkillTagRepository  # noqa: E402
-from services import team_service  # noqa: E402
-from utils.db import SCHEMA_VERSION, TABLE_DDL, Database  # noqa: E402
+from repositories.member_repository import MemberRepository
+from repositories.skill_tag_repository import SkillTagRepository
+from services import team_service
+from utils.db import SCHEMA_VERSION, TABLE_DDL, Database
 
 G1 = 100000000000000001  # ギルド1
 G2 = 200000000000000002  # ギルド2

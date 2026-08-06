@@ -14,21 +14,21 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cryptography.fernet import Fernet  # noqa: E402
+from cryptography.fernet import Fernet
 
-from repositories.audit_log_repository import AuditLogRepository  # noqa: E402
-from repositories.guild_repository import GuildRepository  # noqa: E402
-from repositories.layer_keta_repository import LayerKetaRepository  # noqa: E402
-from repositories.layer_session_repository import LayerSessionRepository  # noqa: E402
-from repositories.member_repository import MemberRepository  # noqa: E402
-from repositories.reminders_log_repository import RemindersLogRepository  # noqa: E402
-from repositories.schedule_repository import ScheduleRepository  # noqa: E402
-from repositories.settings_repository import SettingsRepository  # noqa: E402
-from repositories.skill_tag_repository import SkillTagRepository  # noqa: E402
-from repositories.task_repository import TaskRepository  # noqa: E402
-from repositories.todoist_config_repository import TodoistConfigRepository  # noqa: E402
-from utils import crypto  # noqa: E402
-from utils.db import Database  # noqa: E402
+from repositories.audit_log_repository import AuditLogRepository
+from repositories.guild_repository import GuildRepository
+from repositories.layer_keta_repository import LayerKetaRepository
+from repositories.layer_session_repository import LayerSessionRepository
+from repositories.member_repository import MemberRepository
+from repositories.reminders_log_repository import RemindersLogRepository
+from repositories.schedule_repository import ScheduleRepository
+from repositories.settings_repository import SettingsRepository
+from repositories.skill_tag_repository import SkillTagRepository
+from repositories.task_repository import TaskRepository
+from repositories.todoist_config_repository import TodoistConfigRepository
+from utils import crypto
+from utils.db import Database
 
 G1 = 100000000000000001
 G2 = 200000000000000002

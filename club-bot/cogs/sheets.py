@@ -72,8 +72,8 @@ class Sheets(commands.Cog):
                     "`/sheet_sync` でエクスポートを実行できます。",
                     executor=interaction.user.display_name),
                 ephemeral=True)
-        except Exception as e:
-            log.exception("スプレッドシート ID 保存エラー: %s", e)
+        except Exception:
+            log.exception("スプレッドシート ID 保存エラー")
             await interaction.followup.send(
                 embed=error_embed("スプレッドシート ID の保存に失敗しました。"),
                 ephemeral=True)

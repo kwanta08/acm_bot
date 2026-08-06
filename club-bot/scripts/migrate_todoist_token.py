@@ -28,9 +28,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from repositories.todoist_config_repository import TodoistConfigRepository  # noqa: E402
-from utils import crypto  # noqa: E402
-from utils.db import Database, legacy_guild_id  # noqa: E402
+from repositories.todoist_config_repository import TodoistConfigRepository
+from utils import crypto
+from utils.db import Database, legacy_guild_id
 
 LEGACY_KEYS = ("TODOIST_API_TOKEN", "TODOIST_PROJECT_ID")
 DEFAULT_LABEL = "今日やること"

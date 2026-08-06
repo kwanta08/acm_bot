@@ -324,7 +324,7 @@ class Members(commands.Cog):
                 return
 
             # 主所属班と重複チェック
-            current_primary = primary_team if primary_team else (
+            current_primary = primary_team or (
                 (await self.repo.get_member(guild_id, str(user.id)) or {}).get("primary_team")
             )
             if current_primary and current_primary in raw_keys:

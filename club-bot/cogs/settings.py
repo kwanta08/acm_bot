@@ -113,8 +113,8 @@ class Settings(commands.Cog):
             for embed in embeds:
                 await interaction.followup.send(embed=embed, ephemeral=True)
 
-        except Exception as e:
-            log.exception("設定一覧取得エラー: %s", e)
+        except Exception:
+            log.exception("設定一覧取得エラー")
             embed = error_embed("設定一覧の取得に失敗しました")
             await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -153,8 +153,8 @@ class Settings(commands.Cog):
 
             await interaction.followup.send(embed=embed, ephemeral=True)
 
-        except Exception as e:
-            log.exception("設定取得エラー: %s", e)
+        except Exception:
+            log.exception("設定取得エラー")
             embed = error_embed(f"設定 `{setting_key}` の取得に失敗しました")
             await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -179,8 +179,8 @@ class Settings(commands.Cog):
             # ギルド別キャッシュとグローバル設定を更新
             await self._after_change(guild_id)
 
-        except Exception as e:
-            log.exception("設定保存エラー: %s", e)
+        except Exception:
+            log.exception("設定保存エラー")
             embed = error_embed(f"設定 `{setting_key}` の保存に失敗しました")
             await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -210,8 +210,8 @@ class Settings(commands.Cog):
             # ギルド別キャッシュとグローバル設定を更新
             await self._after_change(guild_id)
 
-        except Exception as e:
-            log.exception("設定削除エラー: %s", e)
+        except Exception:
+            log.exception("設定削除エラー")
             embed = error_embed(f"設定 `{setting_key}` の削除に失敗しました")
             await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -253,8 +253,8 @@ class Settings(commands.Cog):
             # 設定を更新
             await self._after_change(guild_id)
 
-        except Exception as e:
-            log.exception("チャンネル設定エラー: %s", e)
+        except Exception:
+            log.exception("チャンネル設定エラー")
             embed = error_embed(f"チャンネル `{channel_type}` の設定に失敗しました")
             await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -301,8 +301,8 @@ class Settings(commands.Cog):
             # 設定を更新
             await self._after_change(guild_id)
 
-        except Exception as e:
-            log.exception("ロール設定エラー: %s", e)
+        except Exception:
+            log.exception("ロール設定エラー")
             embed = error_embed(f"ロール `{role_type}` の設定に失敗しました")
             await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -334,8 +334,8 @@ class Settings(commands.Cog):
             # 設定を更新
             await self._after_change(guild_id)
 
-        except Exception as e:
-            log.exception("共通設定エラー: %s", e)
+        except Exception:
+            log.exception("共通設定エラー")
             embed = error_embed(f"共通設定 `{setting_type}` に失敗しました")
             await interaction.followup.send(embed=embed, ephemeral=True)
 

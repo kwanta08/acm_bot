@@ -175,11 +175,11 @@ class MemberRepository(BaseRepository):
         members = await self.list_members(guild_id)
         out = []
         for m in members:
-            if team_key:
-                if m.get("primary_team") != team_key and team_key not in m["secondary_teams"]:
-                    continue
-            if skill:
-                if skill not in m["skills"]:
-                    continue
+            if (team_key
+                    and m.get("primary_team") != team_key
+                    and team_key not in m["secondary_teams"]):
+                continue
+            if skill and skill not in m["skills"]:
+                continue
             out.append(m)
         return out

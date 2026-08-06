@@ -36,8 +36,8 @@ from dataclasses import dataclass, field
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.db import Database  # noqa: E402
-from utils.parser import now, to_iso  # noqa: E402
+from utils.db import Database
+from utils.parser import now, to_iso
 
 # 旧 Sheets の列構成（cogs/sheets.py / services/sheets_service.py のヘッダー定義に一致）
 TASK_COLS = {"local_id": 0, "todoist_id": 1, "title": 2, "assignee": 3, "team": 4,
@@ -301,8 +301,8 @@ async def import_layer_rows(db: Database, guild_id: int, keta: str,
 def _load_sheets() -> dict[str, dict[str, list[list]]]:
     """{ブック種別: {シート名: 行データ}} を返す。gspread 未導入なら案内して終了。"""
     try:
-        import gspread  # noqa: PLC0415
-        from google.oauth2.service_account import Credentials  # noqa: PLC0415
+        import gspread
+        from google.oauth2.service_account import Credentials
     except ImportError:
         print("ERROR: gspread / google-auth が見つかりません。"
               "移行時のみ次を実行してください:\n"

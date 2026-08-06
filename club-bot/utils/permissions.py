@@ -117,6 +117,7 @@ async def ensure_guild(interaction: discord.Interaction) -> int | None:
             await interaction.followup.send(embed=embed, ephemeral=True)
         else:
             await interaction.response.send_message(embed=embed, ephemeral=True)
-    except Exception:  # noqa: BLE001
+    # エラー通知の送信失敗は握りつぶす（DM 拒否の通知が送れなくても処理は継続）
+    except Exception:  # noqa: BLE001, S110
         pass
     return None

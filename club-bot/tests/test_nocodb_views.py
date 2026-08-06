@@ -13,9 +13,9 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from repositories.member_repository import MemberRepository  # noqa: E402
-from repositories.schedule_repository import ScheduleRepository  # noqa: E402
-from utils.db import SCHEMA_VERSION, Database  # noqa: E402
+from repositories.member_repository import MemberRepository
+from repositories.schedule_repository import ScheduleRepository
+from utils.db import SCHEMA_VERSION, Database
 
 G1 = 100000000000000001
 G2 = 200000000000000002

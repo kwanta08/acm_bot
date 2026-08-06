@@ -24,7 +24,7 @@ class GuildBoundRepository:
     非コーラブル属性（db など）はそのまま委譲する。
     """
 
-    def __init__(self, repo: "BaseRepository", guild_id: int):
+    def __init__(self, repo: BaseRepository, guild_id: int):
         self._repo = repo
         self._guild_id = guild_id
 

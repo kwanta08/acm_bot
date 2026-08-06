@@ -50,16 +50,18 @@ def parse_datetime(text: str) -> datetime:
     if not text:
         raise InvalidDatetimeError()
     
+    # naive な datetime として parse してから直後にローカル TZ を付与する設計のため、
+    # strptime には %z を含めない（各箇所の noqa: DTZ007 は意図的）
     for pattern in patterns:
         try:
-            dt = datetime.strptime(text, pattern)
+            dt = datetime.strptime(text, pattern)  # noqa: DTZ007
             return dt.replace(tzinfo=TZ)
         except ValueError:
             continue
 
     for fmt in DATETIME_FORMATS:
         try:
-            dt = datetime.strptime(text, fmt)
+            dt = datetime.strptime(text, fmt)  # noqa: DTZ007
             return dt.replace(tzinfo=TZ)
         except ValueError:
             continue
@@ -67,7 +69,7 @@ def parse_datetime(text: str) -> datetime:
     now = datetime.now(TZ)
     for fmt in SHORT_FORMATS:
         try:
-            dt = datetime.strptime(text, fmt)
+            dt = datetime.strptime(text, fmt)  # noqa: DTZ007
             dt = dt.replace(year=now.year, tzinfo=TZ)
             # 既に過去なら翌年扱い
             if dt < now:
@@ -81,14 +83,15 @@ def parse_datetime(text: str) -> datetime:
 
 def parse_deadline(text: str) -> datetime:
     text = text.strip()
+    # parse_datetime と同様、naive で parse してからローカル TZ を付与する設計
     try:
-        dt = datetime.strptime(text, "%Y-%m-%d %H:%M")
+        dt = datetime.strptime(text, "%Y-%m-%d %H:%M")  # noqa: DTZ007
         return dt.replace(tzinfo=TZ)
     except ValueError:
         pass
 
     try:
-        dt = datetime.strptime(text, "%Y-%m-%d")
+        dt = datetime.strptime(text, "%Y-%m-%d")  # noqa: DTZ007
         return dt.replace(hour=23, minute=59, tzinfo=TZ)
     except ValueError:
         pass

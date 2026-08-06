@@ -17,14 +17,14 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from cryptography.fernet import Fernet  # noqa: E402
+from cryptography.fernet import Fernet
 
-from config import GuildConfig  # noqa: E402
-from repositories.todoist_config_repository import TodoistConfigRepository  # noqa: E402
-from services.todoist_service import TodoistServiceManager  # noqa: E402
-from utils import crypto  # noqa: E402
-from utils.db import SCHEMA_VERSION, Database  # noqa: E402
-from utils.permissions import Level, get_level, has_level  # noqa: E402
+from config import GuildConfig
+from repositories.todoist_config_repository import TodoistConfigRepository
+from services.todoist_service import TodoistServiceManager
+from utils import crypto
+from utils.db import SCHEMA_VERSION, Database
+from utils.permissions import Level, get_level, has_level
 
 G1 = 100000000000000001
 G2 = 200000000000000002
@@ -164,7 +164,8 @@ def test_repository_isolation_and_no_plaintext_in_db():
             await db.close()
 
         # DB ファイル全体に平文トークンが残っていないこと
-        with open(path, "rb") as f:
+        # テストで一回限りのバイナリ確認のため同期 open を許容
+        with open(path, "rb") as f:  # noqa: ASYNC230
             content = f.read()
         assert PLAIN_TOKEN.encode() not in content
     run(_main())

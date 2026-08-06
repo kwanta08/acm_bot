@@ -13,13 +13,13 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import aiosqlite  # noqa: E402
+import aiosqlite
 
-from repositories.audit_log_repository import AuditLogRepository  # noqa: E402
-from repositories.guild_repository import GuildRepository  # noqa: E402
-from repositories.reminders_log_repository import RemindersLogRepository  # noqa: E402
-from repositories.schedule_repository import ScheduleRepository  # noqa: E402
-from utils.db import SCHEMA_VERSION, TABLE_DDL, Database  # noqa: E402
+from repositories.audit_log_repository import AuditLogRepository
+from repositories.guild_repository import GuildRepository
+from repositories.reminders_log_repository import RemindersLogRepository
+from repositories.schedule_repository import ScheduleRepository
+from utils.db import SCHEMA_VERSION, TABLE_DDL, Database
 
 G1 = 100000000000000001  # ギルド1
 G2 = 200000000000000002  # ギルド2
@@ -87,7 +87,8 @@ def test_guild_registry_ensure():
             raised = False
             try:
                 await repo.ensure(0, "legacy")
-            except Exception:
+            # CHECK 制約違反で何らかの例外が出ること自体を検証するため例外種別は問わない
+            except Exception:  # noqa: BLE001
                 raised = True
             assert raised, "guild_id=0 の登録が拒否されませんでした"
         finally:

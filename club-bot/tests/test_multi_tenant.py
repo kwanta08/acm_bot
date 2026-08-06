@@ -13,17 +13,17 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import aiosqlite  # noqa: E402
+import aiosqlite
 
-from config import Config  # noqa: E402
-from repositories.layer_keta_repository import LayerKetaRepository  # noqa: E402
-from repositories.layer_session_repository import LayerSessionRepository  # noqa: E402
-from repositories.member_repository import MemberRepository  # noqa: E402
-from repositories.schedule_repository import ScheduleRepository  # noqa: E402
-from repositories.section_repository import SectionRepository  # noqa: E402
-from repositories.settings_repository import SettingsRepository  # noqa: E402
-from repositories.task_repository import TaskRepository  # noqa: E402
-from utils.db import Database  # noqa: E402
+from config import Config
+from repositories.layer_keta_repository import LayerKetaRepository
+from repositories.layer_session_repository import LayerSessionRepository
+from repositories.member_repository import MemberRepository
+from repositories.schedule_repository import ScheduleRepository
+from repositories.section_repository import SectionRepository
+from repositories.settings_repository import SettingsRepository
+from repositories.task_repository import TaskRepository
+from utils.db import Database
 
 G1 = 100000000000000001  # ギルド1
 G2 = 200000000000000002  # ギルド2

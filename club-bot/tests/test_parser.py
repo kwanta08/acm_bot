@@ -2,12 +2,12 @@
 
 実行: venv/bin/python -m pytest tests/  （pytest 未導入なら直接実行も可）
 """
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.parser import parse_datetime, parse_deadline, InvalidDatetimeError  # noqa: E402
+from utils.parser import InvalidDatetimeError, parse_datetime, parse_deadline
 
 
 def test_valid_formats():

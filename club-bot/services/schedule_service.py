@@ -17,7 +17,6 @@ from repositories.schedule_repository import ScheduleRepository
 from utils.embeds import schedule_embed
 from utils.parser import fmt_jp, from_iso
 
-
 DEFAULT_STATUS_TO_EMOJI = {
     "ok": "✅",
     "maybe": "❓",

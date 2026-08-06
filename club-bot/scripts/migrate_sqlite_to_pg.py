@@ -37,7 +37,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.db import Database  # noqa: E402
+from utils.db import Database
 
 # コピー順（FK 参照が壊れない順序。guilds → schedules → options → votes）
 COPY_ORDER = [
