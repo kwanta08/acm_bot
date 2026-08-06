@@ -92,6 +92,14 @@ class ClubBot(commands.Bot):
                 "python -c \"from cryptography.fernet import Fernet; "
                 "print(Fernet.generate_key().decode())\"）")
 
+        # スラッシュコマンドはギルド同期に統一する。
+        # 過去にグローバル同期したコマンドが残っているとギルド側と二重表示に
+        # なるため、先にグローバルを空で同期して除去する
+        # （clear_commands はローカルのツリーも空にするため Cog 読み込みより前に行う）
+        self.tree.clear_commands(guild=None)
+        await self.tree.sync()
+        log.info("グローバルコマンドをクリアしました（ギルド同期に統一）")
+
         # Cog 読み込み
         for cog in COGS:
             try:
@@ -102,15 +110,12 @@ class ClubBot(commands.Bot):
 
         # スラッシュコマンド同期
         # - GUILD_ID 指定時: そのギルドへ即時反映（後方互換）
-        # - それ以外: グローバル同期 + on_ready で参加中全ギルドへ個別同期
+        # - それ以外: on_ready / on_guild_join で参加中全ギルドへ個別同期
         if config.guild_id:
             guild = discord.Object(id=config.guild_id)
             self.tree.copy_global_to(guild=guild)
             synced = await self.tree.sync(guild=guild)
             log.info("スラッシュコマンドを同期（guild=%s）: %d 件", config.guild_id, len(synced))
-        else:
-            synced = await self.tree.sync()
-            log.info("スラッシュコマンドをグローバル同期: %d 件", len(synced))
 
         # グローバルエラーハンドラ
         self.tree.error(self.on_app_command_error)
