@@ -182,6 +182,14 @@ class Config:
     # なおギルド別の Sheets エクスポート連携（/set_sheet /sheet_sync）は任意で
     # 利用できる（services/sheets_service.py 参照）。
 
+    # Directus（外部 DB 閲覧・編集 UI）連携 - 環境変数のみ（運用者が1回設定する）。
+    # ギルド別の発行状況は directus_access テーブルで管理する。
+    # DIRECTUS_ADMIN_TOKEN は Directus 全体の管理権限を持つため .env のみに置く。
+    # DIRECTUS_ROLE_ID は招待時に付与するロール「サークル管理者」の UUID。
+    directus_url: str = _get_str("DIRECTUS_URL")
+    directus_admin_token: str = _get_str("DIRECTUS_ADMIN_TOKEN")
+    directus_role_id: str = _get_str("DIRECTUS_ROLE_ID")
+
     # 共通 - 環境変数 or デフォルト
     tz: str = _get_str("TZ", "Asia/Tokyo")
     # SQLite のパス（ローカル開発・テスト用。デフォルト: ./data/club.db）
