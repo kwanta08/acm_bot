@@ -1,0 +1,107 @@
+# Directus + PostgreSQL 起動用 Docker Compose 定義（本番の推奨構成）
+#
+# 構成:
+#   - postgres   : 業務 DB（bot が読み書きする正本）
+#   - directus   : 閲覧・編集 UI。業務 DB をそのままラップする
+#                  （bot は Directus API に依存しない。Directus が止まっても
+#                   bot は動く）
+#   - bot        : systemd で動かし、DATABASE_URL で 127.0.0.1:5432 の
+#                  業務 DB に接続する（この Compose には含めない）
+#
+# NocoDB 構成との重要な違い:
+#   NocoDB は自身のメタデータを別データベース（nocodb_meta）に分離できたが、
+#   **Directus は自身のメタデータテーブル（directus_*）を業務 DB
+#   （clubdb）内に直接作成する**。これは別 DB に分離できない Directus の
+#   仕様であり、以下の運用上の含意がある:
+#     - pg_dump で clubdb をバックアップすると directus_* も一緒に含まれる
+#     - bot のテーブルと directus_* が同じスキーマ内に共存する
+#       （bot 側は自分のテーブルのみを CREATE/ALTER するため衝突しない）
+#
+# 使い方:
+#   1. deploy/.env を作成（値はコミットしない。deploy/.env.example 参照）:
+#        POSTGRES_USER=clubbot
+#        POSTGRES_PASSWORD=<強固なパスワード>
+#        POSTGRES_DB=clubdb
+#        DIRECTUS_KEY=<openssl rand -hex 32 の結果>
+#        DIRECTUS_SECRET=<openssl rand -hex 32 の結果（KEY とは別の値）>
+#        DIRECTUS_ADMIN_EMAIL / DIRECTUS_ADMIN_PASSWORD（初回の管理者）
+#   2. 起動:
+#        cd deploy && docker compose -f docker-compose.directus.yml up -d
+#   3. bot 側の .env に DATABASE_URL を設定して bot を起動:
+#        DATABASE_URL=postgresql://clubbot:<パスワード>@127.0.0.1:5432/clubdb
+#      （bot 起動時に業務テーブルが作成される。Directus より先でも後でもよい）
+#   4. Directus の UI（SSH トンネル経由 http://localhost:8055）で
+#      docs/DIRECTUS.md の「グローバル設定」を一度だけ実施する
+#   5. bot 側の .env に DIRECTUS_URL / DIRECTUS_ADMIN_TOKEN /
+#      DIRECTUS_ROLE_ID を設定して bot を再起動すると /directus-setup が使える
+#
+# 注意:
+#   - ポートはどちらも 127.0.0.1 にバインド（外部公開しない）。
+#     外部からは SSH ポートフォワード（ssh -L 8055:localhost:8055）
+#     または認証付きリバースプロキシでアクセスする
+#   - SQLite（data/club.db）はローカル開発・テスト専用であり、
+#     本番の Directus 接続先としては使用しない
+#   - SMTP（EMAIL_*）が未設定だと招待メールが送信されない。
+#     その場合のフォールバック手順は docs/DIRECTUS.md を参照
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?deploy/.env を設定してください}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?deploy/.env を設定してください}
+      POSTGRES_DB: ${POSTGRES_DB:?deploy/.env を設定してください}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  directus:
+    image: directus/directus:11
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8055:8055"
+    volumes:
+      - directus_uploads:/directus/uploads
+    environment:
+      # 暗号化・セッション用の鍵（変更するとログインセッションが無効になる）
+      KEY: ${DIRECTUS_KEY:?deploy/.env を設定してください}
+      SECRET: ${DIRECTUS_SECRET:?deploy/.env を設定してください}
+
+      # 業務 DB への接続（directus_* メタテーブルもこの DB 内に作られる）
+      DB_CLIENT: "pg"
+      DB_HOST: "postgres"
+      DB_PORT: "5432"
+      DB_DATABASE: ${POSTGRES_DB}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+
+      # 初回起動時のみ作成される管理者アカウント
+      ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL:?deploy/.env を設定してください}
+      ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD:?deploy/.env を設定してください}
+
+      # 招待メールのリンク生成に使う公開 URL
+      PUBLIC_URL: ${DIRECTUS_PUBLIC_URL:-http://localhost:8055}
+
+      # 招待メールの送信設定。未設定でも Directus は起動するが、
+      # /directus-setup の招待メールは届かない（手動フォールバックが必要）
+      EMAIL_FROM: ${EMAIL_FROM:-no-reply@example.com}
+      EMAIL_TRANSPORT: ${EMAIL_TRANSPORT:-sendmail}
+      EMAIL_SMTP_HOST: ${EMAIL_SMTP_HOST:-}
+      EMAIL_SMTP_PORT: ${EMAIL_SMTP_PORT:-587}
+      EMAIL_SMTP_USER: ${EMAIL_SMTP_USER:-}
+      EMAIL_SMTP_PASSWORD: ${EMAIL_SMTP_PASSWORD:-}
+      EMAIL_SMTP_SECURE: ${EMAIL_SMTP_SECURE:-false}
+
+volumes:
+  pgdata:
+  directus_uploads:
