@@ -8,9 +8,11 @@ Discord 上だけで回せます。あなたのサークルのサーバーに招
 設定はすべて Discord 上の `/setup` で行えます。
 
 - 言語: Python 3.10 以上 / discord.py 2.x
-- データ保存: SQLite（標準）/ PostgreSQL（NocoDB と併用する本番構成）
+- データ保存: SQLite（標準）/ PostgreSQL（閲覧 UI と併用する本番構成）
 - タスク連携: Todoist REST API（任意。トークンはサーバーごとに暗号化して保存）
-- 閲覧 UI: NocoDB（任意。Docker Compose で PostgreSQL に接続）
+- 閲覧 UI: Directus（任意。Docker Compose で PostgreSQL に接続。
+  各サーバーの管理者が `/directus-setup` で自分用のアカウントを発行でき、
+  自サーバーのデータだけが見える）
 
 ## 機能一覧
 
@@ -22,6 +24,7 @@ Discord 上だけで回せます。あなたのサークルのサーバーに招
 | 桁巻き積層記録 | `/layer start` `/layer end` で積層作業を記録（作業時間を自動計算） |
 | リマインド | 締切前の未回答催促・毎朝の期限タスク通知・期限超過の警告 |
 | レポート | 週次サマリー（サークル名入り）・タスク CSV 出力・出欠率・監査ログ |
+| 閲覧 UI 発行 | `/directus-setup` で自サーバー専用の Directus アカウントを発行（任意） |
 
 ## マルチサーバー対応
 
@@ -29,6 +32,11 @@ Discord 上だけで回せます。あなたのサークルのサーバーに招
 マルチテナント仕様です。全データ・設定・権限・通知は `guild_id` 単位で完全に分離され、
 他のサーバーのデータが見えることはありません。サークルごとに Bot を立てる必要はなく、
 1つの Bot を複数サークルで共用できます。
+
+**参加団体はセルフサービスで完結します。** 設定はすべて Discord 上の `/setup` で行え、
+DB を表形式で見たい場合も管理者が `/directus-setup` を実行するだけで
+自サーバー専用の閲覧アカウントが発行されます（[`docs/DIRECTUS.md`](docs/DIRECTUS.md)）。
+Bot の運用者による個別対応は必要ありません。
 
 ### 招待方法
 
@@ -72,7 +80,7 @@ venv/bin/python bot.py
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-ローカルでは SQLite（`DB_PATH`）で動きます。本番（NocoDB 構成）では
+ローカルでは SQLite（`DB_PATH`）で動きます。本番（Directus 構成）では
 `.env` に `DATABASE_URL=postgresql://...` を設定して PostgreSQL に切り替えます。
 VPS へのデプロイを含む詳しい手順は [`docs/SETUP.md`](docs/SETUP.md) を参照してください。
 
@@ -88,8 +96,10 @@ docker compose up -d --build
 - `.env` の実値はイメージに含めず、起動時に `env_file` で注入します
 - SQLite DB（`club-bot/data/`）とログ（`club-bot/logs/`）はホスト側に
   ボリュームマウントされ、コンテナを再作成してもデータは残ります
-- NocoDB + PostgreSQL の本番構成は
-  [`deploy/docker-compose.nocodb.yml`](deploy/docker-compose.nocodb.yml) を参照してください
+- Directus + PostgreSQL の本番構成は
+  [`deploy/docker-compose.directus.yml`](deploy/docker-compose.directus.yml) を参照してください
+  （NocoDB 構成 [`deploy/docker-compose.nocodb.yml`](deploy/docker-compose.nocodb.yml) は
+  レガシーとして残しています）
 
 ## ドキュメント
 
@@ -97,9 +107,10 @@ docker compose up -d --build
 |---|---|
 | [`docs/SETUP.md`](docs/SETUP.md) | セットアップ手順書（初心者向け・ローカル動作確認 〜 VPS デプロイ） |
 | [`docs/OPERATION.md`](docs/OPERATION.md) | 運用マニュアル（全コマンド一覧・権限・トラブル対応） |
-| [`docs/NOCODB.md`](docs/NOCODB.md) | NocoDB 運用ガイド（起動・接続・権限・Sheets からの移行） |
+| [`docs/DIRECTUS.md`](docs/DIRECTUS.md) | Directus 運用ガイド（起動・グローバル設定・アカウント発行・移行） |
+| [`docs/NOCODB.md`](docs/NOCODB.md) | NocoDB 運用ガイド（レガシー。Directus へ移行済み） |
 
-## モジュール構成（11 Cog）
+## モジュール構成（13 Cog）
 
 | モジュール | 役割 |
 |---|---|
@@ -113,7 +124,9 @@ docker compose up -d --build
 | Settings | チャンネル・ロール等の設定管理（管理者向け） |
 | SetupWizard | `/setup` 設定ウィザード（管理者向け） |
 | Teams | 班・技能タグのマスタ管理（管理者向け） |
+| Sheets | Google Sheets への一方向エクスポート（任意・管理者向け） |
 | TodoistAdmin | Todoist トークンの登録・状態確認・削除（管理者向け） |
+| DirectusAdmin | Directus 閲覧アカウントの発行・状態確認・失効（管理者向け） |
 
 ## 技術メモ
 
@@ -124,6 +137,10 @@ docker compose up -d --build
 - **Todoist 連携**: サーバーごとに独立。トークンは `.env` には書かず、各サーバーの
   管理者が `/todoist-setup` のフォーム（Modal）から登録します（Fernet で暗号化して
   DB に保存。暗号鍵 `ENCRYPTION_KEY` は `.env` のみに保持）。
+- **Directus 連携**: 運用者が Directus 側の権限フィルタ
+  （`{"guild_id": {"_eq": "$CURRENT_USER.guild_id"}}`）を一度設定するだけで、
+  以降は各サーバーの管理者が `/directus-setup` で自分のアカウントを発行できます。
+  パスワードは Bot が生成も保存もせず、Directus の招待メールに委ねます。
 - **既存サーバー（旧・単一運用版）からの移行**: `.env` の `GUILD_ID` を設定したまま
   起動すれば自動移行されます。詳細は
   [`docs/MULTI_TENANT_MIGRATION.md`](docs/MULTI_TENANT_MIGRATION.md) を参照してください。
