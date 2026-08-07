@@ -399,3 +399,49 @@ venv/bin/python scripts/migrate_todoist_token.py --apply  # 移行実行
 4. 以降のバックアップは `pg_dump`（[`NOCODB.md`](NOCODB.md) 5章）
 5. SQLite の `data/club.db` はローカル開発・テスト用途として残す（本番参照先ではない）
 
+
+## 14. 007/008: Directus セルフサービス・アクセス発行（スキーマバージョン 7・8）
+
+### 背景
+
+NocoDB 構成ではギルドごとの分離を「テーブルごとに `guild_id` 固定の
+フィルタビューを手動で複製する」方法で実現していたため
+（[`NOCODB.md`](NOCODB.md) 4章）、参加サークルが増えるたびに運用者の
+手作業が必要だった。Directus はユーザーのカスタムフィールドを使った
+動的な行レベル権限フィルタ（`$CURRENT_USER.guild_id`）を一度設定すれば、
+以降は追加作業なしに分離が効く。
+
+### 変更内容
+
+| レイヤ | 変更 |
+|---|---|
+| DB 層（v7） | `directus_access` テーブルを追加（1ギルド1件。Directus 側のユーザー ID・メール・発行状態のみ。**秘密情報は保持しない** — パスワードは Directus のメール招待フローに委ね、bot は生成も保存もしない） |
+| DB 層（v8） | `members` に代理主キー `member_id` を追加。旧主キー `(guild_id, user_id)` は UNIQUE 制約として維持。Directus は単一列の主キーを要求するため、複合主キーのままでは members を扱えなかった。リポジトリ層の SQL は `guild_id + user_id` 指定のため無変更 |
+| Service 層 | `services/directus_service.py`。`POST /users/invite` は作成したユーザー ID を返さずカスタムフィールドも受け取らないため、**招待 → メールアドレスで検索 → `guild_id` を PATCH** の3段構成で行う。`guild_id` 未設定のユーザーはフィルタに一致する行が無く何も見えない（fail-closed） |
+| Cog | `/directus-setup`（引数なし → ボタン → Modal でメール入力）・`/directus-status`・`/directus-revoke`。未設定環境では例外ではなく案内 Embed を返す |
+| デプロイ | `deploy/docker-compose.directus.yml`。NocoDB と異なり **Directus は自身のメタテーブル（`directus_*`）を業務 DB 内に作成する**（別 DB に分離できない仕様） |
+
+### Directus 側の権限設計（運用者が一度だけ実施）
+
+`directus_users` にカスタムフィールド `guild_id` を **bigInteger**
+（Discord Snowflake は 64bit のため `int4` では溢れる。v6 と同じ理由）で追加し、
+Policy「サークル管理者」の各コレクションに
+`{"guild_id": {"_eq": "$CURRENT_USER.guild_id"}}` を設定する。
+
+`todoist_configs`（暗号文）・`settings`・`guilds`・`audit_log`・
+`reminders_log`・`todoist_sections`・`directus_access` には権限を付与しない
+（4章・11章の「暗号文を見せない」方針と同じ）。なお `settings` と
+`todoist_sections` は複合主キーのため、そもそも Directus に登録できない。
+
+詳細な手順は [`DIRECTUS.md`](DIRECTUS.md) を参照。
+
+### 移行手順（NocoDB → Directus）
+
+1. bot を停止し `pg_dump` でバックアップを取る
+2. `docker compose -f deploy/docker-compose.nocodb.yml down` で NocoDB を停止
+3. `docker compose -f deploy/docker-compose.directus.yml up -d` で Directus を起動
+   （業務 DB は同じ `clubdb` をそのまま使う）
+4. [`DIRECTUS.md`](DIRECTUS.md) 2章のグローバル設定を実施し、
+   bot の `.env` に `DIRECTUS_URL` / `DIRECTUS_ADMIN_TOKEN` / `DIRECTUS_ROLE_ID` を設定
+5. bot を起動する（スキーマが 8 へ自動更新され、`members` に `member_id` が付与される）
+6. 各サークルの管理者に `/directus-setup` を案内する

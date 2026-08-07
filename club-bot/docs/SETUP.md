@@ -28,7 +28,7 @@
 ## 全体の流れ（所要 1〜2 時間）
 
 1. **【準備A】** Discord Bot を作ってトークンと各種 ID を用意する
-2. **【準備B】**（任意）Todoist の連携情報・NocoDB の準備をする
+2. **【準備B】**（任意）Todoist の連携情報・Directus の準備をする
 3. **【STEP1】** さくらのVPSを契約して Ubuntu を用意する
 4. **【STEP2】** VPSに接続して、初期設定（更新・作業ユーザー作成）
 5. **【STEP3】** Bot のファイルを配置し、`.env` を設定する
@@ -94,7 +94,7 @@ Discord アプリの「**ユーザー設定 → 詳細設定 → 開発者モー
 
 ---
 
-# 【準備B】Todoist / NocoDB（任意）
+# 【準備B】Todoist / Directus（任意）
 
 ## B-1. Todoist（タスク連携）
 
@@ -118,15 +118,35 @@ Todoist の API トークンは **`.env` には書きません**。セキュリ�
 4. 登録状況は `/todoist-status`、削除は `/todoist-remove` で行えます。
 5. 「今日やること」ラベルは `/task sync` 実行時に自動で作られます。
 
-## B-2. NocoDB（記録の閲覧 UI・任意）
+## B-2. Directus（記録の閲覧 UI・任意）
 
-本番では記録の正本を **PostgreSQL** とし、表形式の Web UI として NocoDB を
-Docker Compose で起動します（bot と NocoDB が同じ PostgreSQL 業務 DB に接続。
-NocoDB が止まっても Bot は動きます）。
+本番では記録の正本を **PostgreSQL** とし、表形式の Web UI として Directus を
+Docker Compose で起動します（bot と Directus が同じ PostgreSQL 業務 DB に接続。
+Directus が止まっても Bot は動きます）。
 
-手順は [`NOCODB.md`](NOCODB.md) を参照してください
-（`deploy/docker-compose.nocodb.yml` で PostgreSQL と NocoDB を起動し、
+手順は [`DIRECTUS.md`](DIRECTUS.md) を参照してください
+（`deploy/docker-compose.directus.yml` で PostgreSQL と Directus を起動し、
 `.env` の `DATABASE_URL` で Bot を接続します）。
+
+Directus を選ぶ理由は、**参加サークルが自分でアカウントを発行できる**ためです。
+運用者が権限フィルタを一度設定しておけば、あとは各サーバーの管理者が
+`/directus-setup` を実行するだけで「自分のサーバーのデータだけが見える」
+アカウントが発行されます。サークルが増えても運用者の作業は発生しません。
+
+Bot 側の `.env` には次の3つを設定します（設定手順は
+[`DIRECTUS.md`](DIRECTUS.md) 2章）。未設定でも Bot は正常に動作し、
+`/directus-setup` は案内を返すだけです。
+
+```ini
+DIRECTUS_URL=http://localhost:8055
+DIRECTUS_ADMIN_TOKEN=<Directus の管理ユーザーの Static Token>
+DIRECTUS_ROLE_ID=<ロール「サークル管理者」の UUID>
+```
+
+> NocoDB を使った旧構成（[`NOCODB.md`](NOCODB.md)）もそのまま残していますが、
+> テーブルごとにギルド別のフィルタビューを手作業で複製する必要があるため、
+> 新規導入では Directus を推奨します。移行手順は
+> [`DIRECTUS.md`](DIRECTUS.md) 7章にあります。
 
 > 以前のバージョンで使っていた Google Sheets 連携は廃止されました。
 > 旧 Sheets のデータを移す場合は `scripts/migrate_sheets_to_db.py` を使います
