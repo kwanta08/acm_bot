@@ -81,16 +81,31 @@ def build_invite_url(client_id: int) -> str:
     )
 
 
+def build_intents() -> discord.Intents:
+    """Bot が要求する Gateway Intents を返す。
+
+    特権インテントは `members`（班・メンバー管理で実使用）のみ。
+    `message_content` は要求しない: 本 Bot はスラッシュコマンドのみで動作し、
+    `on_message` ハンドラ・`message.content` 参照・prefix コマンドを一切持たない。
+    公開 Bot として不要な特権インテントを持たないことは、
+    Bot Verification（100サーバー超）での審査負担も下げる。
+    再混入は tests/test_intents.py の回帰テストで検出する。
+    """
+    intents = discord.Intents.default()
+    intents.guilds = True
+    intents.members = True            # Guild Members（特権。班・メンバー管理で使用）
+    intents.messages = True           # Guild Messages（本文は含まない）
+    intents.reactions = True          # Guild Message Reactions（日程調整の投票）
+    intents.dm_messages = True        # Direct Messages
+    return intents
+
+
 class ClubBot(commands.Bot):
     def __init__(self):
-        intents = discord.Intents.default()
-        intents.guilds = True
-        intents.members = True            # Guild Members
-        intents.messages = True           # Guild Messages
-        intents.message_content = True    # Message Content（最小限）
-        intents.reactions = True          # Guild Message Reactions
-        intents.dm_messages = True        # Direct Messages
-        super().__init__(command_prefix="!club ", intents=intents, help_command=None)
+        # command_prefix は commands.Bot の必須引数だが prefix コマンドは
+        # 一切定義していない（message_content を持たないため機能もしない）。
+        super().__init__(command_prefix="!club ", intents=build_intents(),
+                         help_command=None)
 
         self.db = Database(config.db_path, database_url=config.database_url)
         self.todoist_manager = TodoistServiceManager(self.db)

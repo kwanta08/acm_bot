@@ -49,9 +49,14 @@
 1. [Discord Developer Portal](https://discord.com/developers/applications) を開き、右上「**New Application**」。名前は自由（例: 鳥人間運営Bot）。
 2. 左メニュー「**Bot**」→「**Reset Token**」→ 表示された文字列を**コピーして安全な場所に保存**。
    これが `DISCORD_TOKEN` です。**他人に見せない・SNS等に貼らない**でください。
-3. 同じ Bot 画面の「**Privileged Gateway Intents**」で、次の2つを**ONにして保存**します。
-   - ✅ SERVER MEMBERS INTENT（メンバー情報の取得に必要）
-   - ✅ MESSAGE CONTENT INTENT（メッセージ内容の取得に必要）
+3. 同じ Bot 画面の「**Privileged Gateway Intents**」で、次の1つだけを**ONにして保存**します。
+   - ✅ SERVER MEMBERS INTENT（班・メンバー管理でメンバー情報の取得に必要）
+   - ❌ MESSAGE CONTENT INTENT（**OFF のままにする**）
+   - ❌ PRESENCE INTENT（**OFF のままにする**）
+
+   本 Bot はスラッシュコマンドのみで動作し、メッセージ本文を読みません
+   （`on_message` ハンドラも prefix コマンドも持ちません）。
+   MESSAGE CONTENT を ON にしても機能は増えず、公開 Bot の審査負担が増えるだけです。
 
 ## A-2. Bot をサーバーに招待する
 
@@ -458,7 +463,7 @@ $ sudo cp ~/club-bot/app/deploy/club-bot.logrotate /etc/logrotate.d/club-bot
 | 起動時「必須設定が不足しています」 | `~/club-bot/.env` の `DISCORD_TOKEN` と `GUILD_ID` が埋まっているか |
 | スラッシュコマンドが Discord に出ない | 招待時に `applications.commands` を付けたか / コマンドはグローバル登録のため反映に最大1時間程度かかることがある（Ctrl+R でクライアント再起動も試す） |
 | メンバー一覧が取れない | Developer Portal で **SERVER MEMBERS INTENT** が ON か |
-| 投票のリアクションが反映されない | Bot に **Manage Messages** 権限があるか / **MESSAGE CONTENT INTENT** が ON か |
+| 投票のリアクションが反映されない | Bot に **Add Reactions** / **Read Message History** 権限があるか（MESSAGE CONTENT INTENT は不要。OFF のままで正常です） |
 | `/health` で Todoist が「未登録」 | そのサーバーで `/todoist-setup` を実行したか。`ENCRYPTION_KEY` が `.env` に正しく設定されているか |
 | `sudo systemctl status` が failed | `journalctl -u club-bot -e` で赤いエラー行を確認。多くは `.env` かパスのミス |
 | SSHで接続できない | IPアドレス/ユーザー名/パスワード、さくらの「パケットフィルタ」でSSH(22)が許可されているか |
