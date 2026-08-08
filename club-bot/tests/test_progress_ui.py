@@ -11,10 +11,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from cogs.progress import (  # noqa: E402
     CHART_FILENAME,
+    anchor_candidates,
     breadcrumb,
     build_level_embed,
     chart_items,
     child_nodes,
+    new_part_row,
+    unmapped_projects,
 )
 from services.progress_tree import ProgressNode, build_and_aggregate  # noqa: E402
 from utils.progress_chart import render_progress_bars  # noqa: E402
@@ -92,6 +95,75 @@ def test_chart_items_order_and_values():
     tree = _tree()
     items = chart_items(tree, "wing")
     assert items == [("リブ", 0.5), ("桁", 1.0)]
+
+
+# ---------------------------------------------------------------------
+# /progress setup ウィザードヘルパー
+# ---------------------------------------------------------------------
+class _Proj:
+    def __init__(self, pid, name):
+        self.id = pid
+        self.name = name
+
+
+def test_unmapped_projects_excludes_registered():
+    projects = [_Proj("1", "主翼班"), _Proj("2", "尾翼班"), _Proj("3", "電装班")]
+    mappings = [{"project_name": "主翼班", "node_id": "wing",
+                 "notify_channel_id": ""}]
+    result = unmapped_projects(projects, mappings)
+    assert [p.name for p in result] == ["尾翼班", "電装班"]
+
+
+def test_anchor_candidates_depth_limited_and_ordered():
+    tree = _tree()
+    # 機体（深さ0）→ その配下のパーツ（深さ1）の行きがけ順。深さ2は含まない
+    ids = [n.node_id for n in anchor_candidates(tree)]
+    assert ids == ["m1", "wing", "tail"]
+
+
+def test_new_part_row_layout():
+    row = new_part_row("P1", "主翼班", "m1", "2026-08-08 12:00")
+    assert row[0] == "pj_P1"       # ID
+    assert row[1] == "m1"          # 親ID = 選択した機体
+    assert row[4] == "主翼班"      # 名前 = プロジェクト名
+    assert row[10] == "manual"     # ソース（同期処理の上書き対象にしない）
+    assert row[12] == "2026-08-08 12:00"
+    assert len(row) == 13          # 進捗管理シートの列数と一致
+
+
+# ---------------------------------------------------------------------
+# プロジェクト別タスク通知
+# ---------------------------------------------------------------------
+def test_due_items_filters_and_formats():
+    from datetime import date
+
+    from cogs.progress import due_items
+
+    class Due:
+        def __init__(self, d):
+            self.date = d
+
+    class Task:
+        def __init__(self, tid, content, due=None, priority=1):
+            self.id = tid
+            self.content = content
+            self.due = due
+            self.priority = priority
+
+    today = date(2026, 8, 8)
+    until = date(2026, 8, 15)
+    tasks = [
+        Task("1", "超過タスク", Due(date(2026, 8, 1)), priority=4),
+        Task("2", "今週タスク", Due(date(2026, 8, 10))),
+        Task("3", "来月タスク", Due(date(2026, 9, 1))),   # 期間外
+        Task("4", "期限なし"),                              # 除外
+    ]
+    items = due_items(tasks, until, "主翼班")
+    assert [i["title"] for i in items] == ["超過タスク", "今週タスク"]
+    assert items[0]["priority"] == 4
+    assert items[0]["category"] == "主翼班"
+    assert "todoist.com" in items[0]["url"]
+    assert today < items[1]["due_date"] <= until
 
 
 # ---------------------------------------------------------------------

@@ -29,6 +29,8 @@ SETTINGS_KEY = "PROGRESS_SPREADSHEET_ID"
 PROGRESS_SHEET = "進捗管理"
 MAPPING_SHEET = "Todoist対応表"
 DASHBOARD_SHEET = "ダッシュボード"
+SETTINGS_SHEET = "設定"
+SPAR_MAPPING_SHEET = "桁巻き対応表"
 
 # 進捗管理シートの列（0始まりインデックス）
 COL_ID = 0            # A
@@ -50,10 +52,26 @@ PROGRESS_HEADER = [
     "進捗率(手入力)", "集計進捗率", "進捗バー", "ソース",
     "TodoistタスクID", "更新日時",
 ]
-MAPPING_HEADER = ["Todoistプロジェクト名", "紐付け先ノードID"]
+MAPPING_HEADER = ["Todoistプロジェクト名", "紐付け先ノードID", "通知チャンネルID",
+                  "登録ギルドID"]
+SETTINGS_HEADER = ["キー", "値", "メモ"]
+SPAR_MAPPING_HEADER = ["桁巻きファイル内の識別子", "紐付け先ノードID"]
+
+# 「設定」タブの管理者設定キー（.env ではなくシートで管理する。
+# キーを増やすときはここに定数を足し、SETTINGS_INITIAL_ROWS に行を足すだけでよい）
+SHEET_KEY_DEFAULT_CHANNEL = "デフォルト通知チャンネルID"
+SHEET_KEY_SPAR_BOOK = "桁巻きスプレッドシートID"
+
+SETTINGS_INITIAL_ROWS = [
+    [SHEET_KEY_DEFAULT_CHANNEL, "",
+     "タスク通知の共通送信先。対応表の通知チャンネルIDが空の場合に使用"],
+    [SHEET_KEY_SPAR_BOOK, "",
+     "桁巻きデータを管理する別スプレッドシートの ID（任意）"],
+]
 
 SOURCE_MANUAL = "manual"
 SOURCE_TODOIST = "todoist"
+SOURCE_SPAR_WINDING = "spar_winding"
 
 # Todoist 由来ノードの ID プレフィックス
 TODOIST_ID_PREFIX = "td_"
@@ -165,16 +183,51 @@ def build_writeback_ranges(grid: list[list], tree: ProgressTree,
 
 
 def parse_mapping_grid(grid: list[list]) -> list[dict[str, str]]:
-    """Todoist対応表のグリッドを [{project_name, node_id}] へ変換する。
+    """Todoist対応表のグリッドを
+    [{project_name, node_id, notify_channel_id, guild_id}] へ変換する。
 
-    どちらかが空の行はスキップする。
+    プロジェクト名・ノード ID のどちらかが空の行はスキップする。
+    通知チャンネルID（3列目）・登録ギルドID（4列目）は任意
+    （旧2〜3列シートも読める）。通知チャンネルID の空欄は「設定」タブの
+    デフォルト通知チャンネルへのフォールバックを意味する。
+    登録ギルドID はどのサーバーの /progress setup で登録されたかの追跡用。
     """
     out: list[dict[str, str]] = []
     for row in grid[1:]:
         project = _cell(row, 0)
         node_id = _cell(row, 1)
         if project and node_id:
-            out.append({"project_name": project, "node_id": node_id})
+            out.append({"project_name": project, "node_id": node_id,
+                        "notify_channel_id": _cell(row, 2),
+                        "guild_id": _cell(row, 3)})
+    return out
+
+
+def parse_settings_grid(grid: list[list]) -> dict[str, str]:
+    """「設定」タブ（キー・バリュー形式）を dict へ変換する。
+
+    キーが空の行はスキップ。同一キーは後勝ち。値は前後空白を除去する。
+    """
+    out: dict[str, str] = {}
+    for row in grid[1:]:
+        key = _cell(row, 0)
+        if key:
+            out[key] = _cell(row, 1)
+    return out
+
+
+def parse_spar_mapping_grid(grid: list[list]) -> list[dict[str, str]]:
+    """桁巻き対応表を [{spar_key, node_id}] へ変換する。
+
+    spar_key は桁巻きスプレッドシート内でその桁を一意に指す識別子
+    （桁別シートのシート名）。どちらかが空の行はスキップする。
+    """
+    out: list[dict[str, str]] = []
+    for row in grid[1:]:
+        spar_key = _cell(row, 0)
+        node_id = _cell(row, 1)
+        if spar_key and node_id:
+            out.append({"spar_key": spar_key, "node_id": node_id})
     return out
 
 
@@ -194,14 +247,14 @@ def dashboard_cells() -> list[dict[str, Any]]:
         {"range": f"'{DASHBOARD_SHEET}'!A1:B2", "values": [
             ["機体全体の進捗", ""],
             [f"=IFERROR(AVERAGE(FILTER({q}!I2:I, {q}!D2:D=0)), 0)",
-             f'=SPARKLINE(A2, {{"charttype","bar";"max",1;"color1","#4a86e8"}})'],
+             '=SPARKLINE(A2, {"charttype","bar";"max",1;"color1","#4a86e8"})'],
         ]},
         {"range": f"'{DASHBOARD_SHEET}'!A4:B4", "values": [
             ["パーツ別進捗（深さ=1）", ""],
         ]},
         {"range": f"'{DASHBOARD_SHEET}'!A5", "values": [
-            [f"=IFERROR(SORT(FILTER({{{q}!E2:E, {q}!I2:I}}, "
-             f"{q}!D2:D=1), 2, TRUE), \"（データなし）\")"],
+            [(f"=IFERROR(SORT(FILTER({{{q}!E2:E, {q}!I2:I}}, "
+              f"{q}!D2:D=1), 2, TRUE), \"（データなし）\")")],
         ]},
         {"range": f"'{DASHBOARD_SHEET}'!D4:E7", "values": [
             ["状態別内訳", ""],
@@ -292,7 +345,7 @@ class ProgressSheetClient:
                    rows: int = 200, cols: int = 15) -> Any:
         try:
             return book.worksheet(title), False
-        except Exception:  # noqa: BLE001  (gspread.WorksheetNotFound 等)
+        except Exception:
             if not create:
                 raise
             return book.add_worksheet(title=title, rows=rows, cols=cols), True
@@ -305,6 +358,24 @@ class ProgressSheetClient:
     def read_mapping_grid(self, spreadsheet_id: str) -> list[list]:
         ws, _ = self._worksheet(self._open(spreadsheet_id), MAPPING_SHEET)
         return ws.get_all_values()
+
+    def read_settings_grid(self, spreadsheet_id: str) -> list[list]:
+        ws, _ = self._worksheet(self._open(spreadsheet_id), SETTINGS_SHEET)
+        return ws.get_all_values()
+
+    def read_spar_mapping_grid(self, spreadsheet_id: str) -> list[list]:
+        ws, _ = self._worksheet(self._open(spreadsheet_id),
+                                SPAR_MAPPING_SHEET)
+        return ws.get_all_values()
+
+    def read_grid(self, spreadsheet_id: str, sheet_title: str) -> list[list]:
+        """任意ブック・任意シートのグリッドを読む（桁巻きブック用）。"""
+        ws, _ = self._worksheet(self._open(spreadsheet_id), sheet_title)
+        return ws.get_all_values()
+
+    def list_sheet_titles(self, spreadsheet_id: str) -> list[str]:
+        """ブック内のシート名一覧（桁巻きブックの桁別シート探索用）。"""
+        return [ws.title for ws in self._open(spreadsheet_id).worksheets()]
 
     # ---------- 書き込み ----------
     def apply_value_ranges(self, spreadsheet_id: str,
@@ -330,6 +401,19 @@ class ProgressSheetClient:
         ws, _ = self._worksheet(self._open(spreadsheet_id), PROGRESS_SHEET)
         ws.append_rows(rows, value_input_option="USER_ENTERED")
 
+    def append_mapping_row(self, spreadsheet_id: str, project_name: str,
+                           node_id: str, notify_channel_id: str = "",
+                           guild_id: str = "") -> None:
+        """Todoist対応表に1行追加する（/progress setup 用）。
+
+        guild_id にはどのサーバーから登録されたかを記録する
+        （空文字なら未記録。旧仕様との互換のため必須にはしない）。
+        """
+        ws, _ = self._worksheet(self._open(spreadsheet_id), MAPPING_SHEET)
+        ws.append_rows(
+            [[project_name, node_id, notify_channel_id, guild_id]],
+            value_input_option="USER_ENTERED")
+
     # ---------- 初期セットアップ ----------
     def setup_book(self, spreadsheet_id: str) -> dict[str, bool]:
         """3シートの作成・ヘッダー・条件付き書式・ダッシュボード数式を設置する。
@@ -354,6 +438,32 @@ class ProgressSheetClient:
         created[MAPPING_SHEET] = is_new
         if is_new:
             ws_mapping.update([MAPPING_HEADER])
+        else:
+            # 旧シート（登録ギルドID 列なし）にはヘッダー行のみ追記する（冪等。
+            # データ行には触れない。旧行の 4 列目は空欄のまま = 未記録扱い）
+            values = ws_mapping.get_all_values()
+            header = values[0] if values else []
+            if len(header) < len(MAPPING_HEADER) or not str(
+                    header[len(MAPPING_HEADER) - 1]).strip():
+                book.values_batch_update(body={
+                    "valueInputOption": "USER_ENTERED",
+                    "data": [{
+                        "range": f"'{MAPPING_SHEET}'!A1:D1",
+                        "values": [MAPPING_HEADER],
+                    }],
+                })
+
+        ws_settings, is_new = self._worksheet(
+            book, SETTINGS_SHEET, create=True, rows=50, cols=5)
+        created[SETTINGS_SHEET] = is_new
+        if is_new:
+            ws_settings.update([SETTINGS_HEADER, *SETTINGS_INITIAL_ROWS])
+
+        ws_spar, is_new = self._worksheet(
+            book, SPAR_MAPPING_SHEET, create=True, rows=50, cols=5)
+        created[SPAR_MAPPING_SHEET] = is_new
+        if is_new:
+            ws_spar.update([SPAR_MAPPING_HEADER])
 
         _, is_new = self._worksheet(
             book, DASHBOARD_SHEET, create=True, rows=50, cols=10)
