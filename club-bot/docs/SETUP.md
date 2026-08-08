@@ -126,7 +126,11 @@ Todoist の API トークンは **`.env` には書きません**。セキュリ�
    ```
    表示された文字列を `.env` の `ENCRYPTION_KEY=` の右に書きます。
    **この鍵はバックアップして安全に保管してください**（紛失すると保存済み
-   トークンを復号できなくなります）。
+   トークンを復号できなくなります）。この鍵1本が**参加している全サーバーの**
+   トークンを保護するため、紛失・漏洩の影響は全サーバーに及びます。
+   保管・ローテーション・漏洩時の手順は
+   [`OPERATION.md` 7章「暗号鍵（ENCRYPTION_KEY）の管理」](OPERATION.md#7-暗号鍵encryption_keyの管理)
+   を参照してください。
 2. [Todoist の開発者設定](https://todoist.com/app/settings/integrations/developer) で
    **API トークン**をコピーします。
 3. Discord で各サーバーの管理者が `/todoist-setup` を実行します（サーバーごとに登録）。
