@@ -4,7 +4,7 @@
 - .env 読み込み・必須設定検証（DISCORD_TOKEN のみ必須。GUILD_ID は後方互換用の任意指定）
 - SQLite 初期化・ギルドごとの初期設定投入
 - 各 Cog 読み込み
-- スラッシュコマンド同期（参加中の全ギルド）
+- スラッシュコマンド同期（グローバル登録。新規サーバーへの参加時に追加作業は不要）
 - on_guild_join による新規ギルド自動セットアップ
 - グローバルエラーハンドラ
 
@@ -52,6 +52,9 @@ COGS = [
 # on_guild_join / 起動時の自動セットアップで投入するギルド別デフォルト設定
 # （ID 系は自動作成に成功した場合のみ保存される）
 AUTO_SETUP_DONE_KEY = "AUTO_SETUP_DONE"
+# 旧ギルド限定コマンドの除去マーカー（グローバル登録への移行措置。
+# 一度クリアしたギルドでは再実行しない）
+GUILD_COMMANDS_CLEARED_KEY = "GUILD_COMMANDS_CLEARED_AT"
 BOT_LOG_CHANNEL_NAME = "bot-log"
 EXEC_ROLE_NAME = "幹部"
 ADMIN_ROLE_NAME = "Bot管理者"
@@ -93,14 +96,6 @@ class ClubBot(commands.Bot):
                 "python -c \"from cryptography.fernet import Fernet; "
                 "print(Fernet.generate_key().decode())\"）")
 
-        # スラッシュコマンドはギルド同期に統一する。
-        # 過去にグローバル同期したコマンドが残っているとギルド側と二重表示に
-        # なるため、先にグローバルを空で同期して除去する
-        # （clear_commands はローカルのツリーも空にするため Cog 読み込みより前に行う）
-        self.tree.clear_commands(guild=None)
-        await self.tree.sync()
-        log.info("グローバルコマンドをクリアしました（ギルド同期に統一）")
-
         # Cog 読み込み
         for cog in COGS:
             try:
@@ -109,14 +104,13 @@ class ClubBot(commands.Bot):
             except Exception:
                 log.exception("Cog 読み込み失敗: %s", cog)
 
-        # スラッシュコマンド同期
-        # - GUILD_ID 指定時: そのギルドへ即時反映（後方互換）
-        # - それ以外: on_ready / on_guild_join で参加中全ギルドへ個別同期
-        if config.guild_id:
-            guild = discord.Object(id=config.guild_id)
-            self.tree.copy_global_to(guild=guild)
-            synced = await self.tree.sync(guild=guild)
-            log.info("スラッシュコマンドを同期（guild=%s）: %d 件", config.guild_id, len(synced))
+        # スラッシュコマンドはグローバル登録に統一する。
+        # 新規サーバーへ参加してもコマンド登録の追加作業は不要
+        # （グローバル反映には最大1時間程度かかることがある。README 参照）。
+        # 過去のギルド限定登録が残っていると二重表示になるため、
+        # 各ギルドのコマンドは on_ready / on_guild_join で1回だけ除去する。
+        synced = await self.tree.sync()
+        log.info("スラッシュコマンドをグローバル同期: %d 件", len(synced))
 
         # グローバルエラーハンドラ
         self.tree.error(self.on_app_command_error)
@@ -218,14 +212,32 @@ class ClubBot(commands.Bot):
         log.info("ログチャンネル作成: #%s (%s) [guild=%s]", channel.name, channel.id, guild.id)
         await repo.set_if_absent(guild.id, "BOT_LOG_CHANNEL_ID", str(channel.id))
 
-    async def _sync_guild_commands(self, guild: discord.Guild) -> None:
-        """ギルドへスラッシュコマンドを同期する。"""
+    async def _clear_legacy_guild_commands(self, guild: discord.Guild) -> None:
+        """旧ギルド限定登録のコマンドを除去する（グローバル登録への移行措置）。
+
+        グローバル登録と旧ギルド登録が併存すると同じコマンドが二重表示に
+        なるため、ギルド側を空で同期して除去する。settings のマーカーで
+        ギルドごとに1回だけ実行する（失敗時はマーカーを残さず次回再試行）。
+        """
+        repo = SettingsRepository(self.db)
         try:
-            self.tree.copy_global_to(guild=guild)
-            synced = await self.tree.sync(guild=guild)
-            log.info("スラッシュコマンドを同期（guild=%s）: %d 件", guild.id, len(synced))
+            done = await repo.get(guild.id, GUILD_COMMANDS_CLEARED_KEY)
         except Exception as e:  # noqa: BLE001
-            log.warning("コマンド同期失敗（guild=%s）: %s", guild.id, e)
+            log.warning("コマンド除去マーカーの取得に失敗 (guild=%s): %s", guild.id, e)
+            done = None
+        if done:
+            return
+        try:
+            self.tree.clear_commands(guild=guild)
+            await self.tree.sync(guild=guild)
+            log.info("旧ギルド限定コマンドを除去しました（guild=%s）", guild.id)
+        except Exception as e:  # noqa: BLE001
+            log.warning("旧ギルド限定コマンドの除去に失敗（guild=%s）: %s", guild.id, e)
+            return
+        try:
+            await repo.set(guild.id, GUILD_COMMANDS_CLEARED_KEY, to_iso(now()))
+        except Exception as e:  # noqa: BLE001
+            log.warning("コマンド除去マーカーの保存に失敗 (guild=%s): %s", guild.id, e)
 
     # ------------------------------------------------------------------
     # イベント
@@ -235,8 +247,8 @@ class ClubBot(commands.Bot):
         await self.change_presence(activity=discord.Game(name="鳥人間サークル運営"))
 
         # 参加中の全ギルドをセットアップ（ギルド登録とデフォルト設定の投入）し、
-        # コマンドをギルド同期する。初回の on_ready のみ実行し、
-        # それ以降の新規参加は on_guild_join で処理する。
+        # 旧ギルド限定コマンドを除去する（コマンド本体はグローバル登録済み）。
+        # 初回の on_ready のみ実行し、それ以降の新規参加は on_guild_join で処理する。
         if not self._initial_guild_setup_done:
             self._initial_guild_setup_done = True
             for guild in list(self.guilds):
@@ -245,7 +257,7 @@ class ClubBot(commands.Bot):
                 except Exception:
                     log.exception("ギルドセットアップ失敗 %s (id=%s)",
                                   guild.name, guild.id)
-                await self._sync_guild_commands(guild)
+                await self._clear_legacy_guild_commands(guild)
 
         # 起動ログをチャンネルへ
         await self.log_to_channel(f"Bot を起動しました: {self.user}")
@@ -257,7 +269,7 @@ class ClubBot(commands.Bot):
             await self._ensure_guild_setup(guild)
         except Exception:
             log.exception("on_guild_join セットアップ失敗 (guild=%s)", guild.id)
-        await self._sync_guild_commands(guild)
+        await self._clear_legacy_guild_commands(guild)
         await self.log_to_channel(
             f"新規ギルドに参加し、自動セットアップを実行しました: {guild.name} (id={guild.id})\n"
             "次のステップ: 管理者が `/setup` を実行し、通知チャンネル・ロールの設定と"
