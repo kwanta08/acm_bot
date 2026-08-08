@@ -759,7 +759,8 @@ class Progress(commands.Cog):
             return
         desc = (f"対象プロジェクト: {result.projects} 件\n"
                 f"追加 {result.added} 行 / 更新 {result.updated} 行 / "
-                f"完了 {result.completed} 行")
+                f"完了 {result.completed} 行 / "
+                f"桁巻き反映 {result.spar_updated} 件")
         if result.errors:
             desc += "\n\n⚠️ 警告:\n" + "\n".join(
                 f"- {e}" for e in result.errors[:10])

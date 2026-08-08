@@ -26,6 +26,7 @@ from typing import Any
 
 from repositories.settings_repository import SettingsRepository
 from services import progress_sheet_service as pss
+from services import spar_winding_service
 from services.progress_tree import (
     ProgressNode,
     ProgressTree,
@@ -67,6 +68,7 @@ class SyncResult:
     added: int = 0
     updated: int = 0
     completed: int = 0
+    spar_updated: int = 0
     errors: list[str] = field(default_factory=list)
 
 
@@ -249,11 +251,24 @@ async def sync_guild(db: Database, guild_id: int, todoist_svc: Any,
                     client.append_progress_rows, spreadsheet_id,
                     plan.new_rows)
 
+    # 桁巻きブックの進捗反映（「設定」タブに桁巻きスプレッドシートID が
+    # ある場合のみ。設定タブが無い旧ブックでは黙ってスキップする）
+    try:
+        sheet_settings = pss.parse_settings_grid(await asyncio.to_thread(
+            client.read_settings_grid, spreadsheet_id))
+    except Exception:  # noqa: BLE001  (設定タブ未作成)
+        sheet_settings = {}
+    if sheet_settings:
+        spar_plan = await spar_winding_service.sync_spar_winding(
+            client, spreadsheet_id, sheet_settings)
+        result.spar_updated = spar_plan.updated
+        result.errors.extend(spar_plan.errors)
+
     tree = await recalculate(client, spreadsheet_id)
     result.errors.extend(
         f"行スキップ: {e.node_id or '(ID なし)'} — {e.reason}"
         for e in tree.errors)
-    log.info("進捗同期完了 (guild=%s): +%d行 / 更新%d / 完了%d / エラー%d",
-             guild_id, result.added, result.updated, result.completed,
-             len(result.errors))
+    log.info("進捗同期完了 (guild=%s): +%d行 / 更新%d / 完了%d / 桁巻き%d /"
+             " エラー%d", guild_id, result.added, result.updated,
+             result.completed, result.spar_updated, len(result.errors))
     return result

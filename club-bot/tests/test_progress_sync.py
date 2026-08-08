@@ -136,6 +136,19 @@ def test_plan_already_completed_rows_not_rewritten():
     assert plan.cell_ranges == []
 
 
+def test_plan_never_touches_spar_winding_rows():
+    # アンカー配下に桁巻き行があっても、完了扱い・更新の対象にしない
+    grid = [
+        HEADER,
+        _row("wing", "", "1", "", "主翼"),
+        _row("spar1", "wing", "1", "", "主桁", manual="0.5",
+             source="spar_winding"),
+    ]
+    plan = sync.plan_todoist_upsert(_nodes(grid), [("wing", [])], "now")
+    assert plan.completed == 0
+    assert plan.cell_ranges == []
+
+
 def test_plan_completion_limited_to_anchored_subtrees():
     # アンカー外（対応表から外れた別サブツリー）の td_ 行は完了扱いしない
     grid = [
