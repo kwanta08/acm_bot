@@ -231,6 +231,65 @@ class Schedule(commands.Cog):
                 executor=interaction.user.display_name),
             ephemeral=True)
 
+    @emoji_group.command(
+        name="show",
+        description="現在の出欠リアクション絵文字の設定を表示します（管理者）。")
+    @app_commands.check(is_admin)
+    async def emoji_show(self, interaction: discord.Interaction):
+        await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        gconf = await config.for_guild(guild_id)
+        emojis = svc.get_schedule_emojis(gconf, interaction.guild)
+        configured = {
+            "ok": gconf.schedule_emoji_ok_id,
+            "maybe": gconf.schedule_emoji_maybe_id,
+            "ng": gconf.schedule_emoji_ng_id,
+        }
+        lines = []
+        for status in ("ok", "maybe", "ng"):
+            emoji = emojis[status]
+            if getattr(emoji, "id", None):
+                note = "カスタム"
+            elif configured[status]:
+                note = "既定（設定済みの絵文字が見つからないためフォールバック中）"
+            else:
+                note = "既定"
+            lines.append(f"{STATUS_LABELS[status]}: {emoji} — {note}")
+        await interaction.followup.send(
+            embed=info_embed(
+                "出欠リアクション絵文字の設定",
+                "\n".join(lines)
+                + "\n\n変更: `/schedule emoji set` / 既定に戻す: "
+                  "`/schedule emoji reset`"),
+            ephemeral=True)
+
+    @emoji_group.command(
+        name="reset",
+        description="出欠リアクション絵文字を既定（✅❓❌）に戻します（管理者）。")
+    @app_commands.describe(status="対象ステータス（省略時は3つすべて）")
+    @app_commands.choices(status=STATUS_CHOICES)
+    @app_commands.check(is_admin)
+    async def emoji_reset(self, interaction: discord.Interaction,
+                          status: str | None = None):
+        await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        targets = [status] if status else list(EMOJI_SETTING_KEYS)
+        repo = SettingsRepository(self.bot.db)
+        for s in targets:
+            await repo.delete(guild_id, EMOJI_SETTING_KEYS[s])
+        config.invalidate_guild(guild_id)
+        await interaction.followup.send(
+            embed=success_embed(
+                "リアクション絵文字をリセットしました",
+                "対象: " + "、".join(STATUS_LABELS[s] for s in targets)
+                + "\nこの後に作成する日程調整から既定絵文字が使われます。",
+                executor=interaction.user.display_name),
+            ephemeral=True)
+
     # ---------- list ----------
     @group.command(name="list", description="開催中の日程調整一覧を表示します。")
     @require(Level.L1)

@@ -133,3 +133,42 @@ def test_emoji_setting_keys_match_guild_config_resolution():
         "maybe": "SCHEDULE_EMOJI_MAYBE_ID",
         "ng": "SCHEDULE_EMOJI_NG_ID",
     }
+
+
+# ---------------------------------------------------------------------
+# 設定 → for_guild 解決 → リセット（実 sqlite）
+# ---------------------------------------------------------------------
+def test_set_and_reset_roundtrip_via_for_guild(monkeypatch, tmp_path):
+    """settings への保存が for_guild で解決され、削除で既定に戻る。"""
+    import asyncio
+
+    from config import config
+    from repositories.settings_repository import SettingsRepository
+    from utils.db import Database
+
+    # 環境変数フォールバックの影響を除去
+    for key in EMOJI_SETTING_KEYS.values():
+        monkeypatch.delenv(key, raising=False)
+
+    async def _main():
+        db = Database(str(tmp_path / "t.db"))
+        await db.connect()
+        try:
+            repo = SettingsRepository(db)
+            await repo.set(G1, "SCHEDULE_EMOJI_OK_ID", "1234")
+            gconf = await config.for_guild(G1, db=db, force_reload=True)
+            assert gconf.schedule_emoji_ok_id == 1234
+            assert gconf.schedule_emoji_maybe_id is None
+
+            # リセット（/schedule emoji reset 相当）
+            await repo.delete(G1, "SCHEDULE_EMOJI_OK_ID")
+            config.invalidate_guild(G1)
+            gconf2 = await config.for_guild(G1, db=db, force_reload=True)
+            assert gconf2.schedule_emoji_ok_id is None
+            assert (get_schedule_emojis(gconf2, FakeGuild())
+                    == DEFAULT_STATUS_TO_EMOJI)
+        finally:
+            await db.close()
+            config.invalidate_guild(G1)
+
+    asyncio.run(_main())
