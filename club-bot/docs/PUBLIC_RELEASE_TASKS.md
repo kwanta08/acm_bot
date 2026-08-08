@@ -14,7 +14,7 @@
 
 ## Phase 0: 公開準備
 
-- [ ] **P0-1** `bot.py` の `message_content` 特権インテントを削除する。
+- [x] **P0-1** `bot.py` の `message_content` 特権インテントを削除する。
       `on_message` ハンドラ・`message.content` 参照・prefix コマンドのいずれも
       存在しないことを確認済み。再混入を防ぐ回帰テストも追加する
 - [ ] **P0-2** `README.md` を全面書き換え。「各サークルが自分で Bot を立てる」前提を捨て、
@@ -68,3 +68,4 @@
 | タスク | 完了内容 / 設計判断 / 申し送り |
 |---|---|
 | （初期化） | タスク管理表を作成。次は P0-1（`message_content` インテント削除）から着手する |
+| P0-1 | intents 構築を `bot.build_intents()` に切り出して `message_content` を削除。特権インテントは `members` のみに（`presences` も不要）。`tests/test_intents.py` で intents の検証に加え、`on_message` / `message.content` / prefix コマンド / `message_content =` のソース再混入を走査（コメント・文字列リテラルは `tokenize` で除外）。`docs/SETUP.md` の Portal 手順も MESSAGE CONTENT を OFF に更新。**申し送り**: `command_prefix="!club "` は `commands.Bot` の必須引数のため残置（prefix コマンドは未定義で機能しない）。P0-2 の README 書き換え時に、必要インテントは SERVER MEMBERS のみと明記すること |
