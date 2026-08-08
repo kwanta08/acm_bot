@@ -23,7 +23,7 @@
 - [x] **P0-3** `docs/TERMS.md`（利用規約）と `docs/PRIVACY.md`（プライバシーポリシー）を作成する。
       収集するデータ（Discord ユーザーID・表示名・所属班・出欠・作業記録）、
       保存場所、削除請求の方法を明記する
-- [ ] **P0-4** `ENCRYPTION_KEY` のバックアップとローテーション方針を `docs/OPERATION.md` に追記する。
+- [x] **P0-4** `ENCRYPTION_KEY` のバックアップとローテーション方針を `docs/OPERATION.md` に追記する。
       単一の鍵が全テナントの Todoist トークンを保護する構成であることを明記する
 - [ ] **P0-5** 【人間タスク】Discord Developer Portal で Public Bot を ON にする
 
@@ -72,3 +72,4 @@
 | P0-1 | intents 構築を `bot.build_intents()` に切り出して `message_content` を削除。特権インテントは `members` のみに（`presences` も不要）。`tests/test_intents.py` で intents の検証に加え、`on_message` / `message.content` / prefix コマンド / `message_content =` のソース再混入を走査（コメント・文字列リテラルは `tokenize` で除外）。`docs/SETUP.md` の Portal 手順も MESSAGE CONTENT を OFF に更新。**申し送り**: `command_prefix="!club "` は `commands.Bot` の必須引数のため残置（prefix コマンドは未定義で機能しない）。P0-2 の README 書き換え時に、必要インテントは SERVER MEMBERS のみと明記すること |
 | P0-2 | README を招待URL前提の3ステップ導入（招待 → `/setup` → 運用開始）へ全面書き換え。冒頭で対象＝鳥人間サークルを明示し、`/layer` `/progress` はサブコマンド単位の専用セクションに。`/progress` の Sheets 共有が残る制約と、`message_content` を要求しない旨も記載。**設計判断**: 招待URLは P0-5（人間タスク）完了まで確定しないため、URL 欄は「公開準備中」のプレースホルダとし HTML コメントで差し替え箇所を明示した。**申し送り**: (1) P0-5 完了後に README の招待URLを差し替えること。(2) README から `docs/TERMS.md` / `docs/PRIVACY.md` へのリンクは未設置 — P0-3 で作成したら「よくある質問」の該当箇所とドキュメント表にリンクを追加すること。(3) `docs/DESIGN_PUBLIC_DISTRIBUTION.md` は git 未追跡のままなので、コミットしないと README のリンクが GitHub 上で切れる |
 | P0-3 | `docs/TERMS.md` と `docs/PRIVACY.md` を作成し、README からリンク（招待をもって規約同意）。収集項目は `utils/db.py` の `TABLE_DDL` を実地確認して 12 テーブル分を列挙。**設計判断**: (1) 運営者名・連絡先・サーバー所在地は P0-5 まで確定しないため `〈…〉` プレースホルダとし、各文書冒頭に「公開前に記入が必要な項目」として明示。(2) `on_guild_remove` ハンドラが存在せず**キックしてもデータは消えない**ことを確認したため、その事実を規約・ポリシー・README の3箇所に明記し、削除請求フロー（サーバー単位 / 個人単位 / 自分で消せるコマンド）を用意。(3) `guild_directus_access` のメールアドレス欄は現在 Bot から書き込まれないため、その旨を注記して列挙。**申し送り**: P0-5 完了時にプレースホルダ3種を全文書で置換すること |
+| P0-4 | `docs/OPERATION.md` に 7章「暗号鍵（ENCRYPTION_KEY）の管理」を新設（旧7章 FAQ は8章へ繰り下げ）。単一鍵が全テナントを保護する構成と紛失/漏洩/変更の影響範囲、バックアップ方針、ローテーション手順、漏洩時の緊急対応、チェックリストを記載。`SETUP.md` と `.env.example` から導線を追加。**設計判断**: (1) 再暗号化スクリプトが存在しないため、現行の推奨は「鍵差し替え + 各サーバーへ `/todoist-setup` 再実行依頼」の手順Aとし、`MultiFernet` を使う手順Bは**未実装の将来方針**として明示（実装する場合は `scripts/rotate_encryption_key.py`、dry-run 既定）。(2) 漏洩時は鍵交換より先に Todoist 側でのトークン失効が必要である点を最優先手順として明記。(3) `crypto.is_encryption_ready()` が鍵の**形式**しか検証しない事実を確認し、`/health` の ✅ を復号可能性の保証と誤解しないよう注記。**申し送り**: 鍵ローテーションを無停止で行いたくなった時点で手順Bのスクリプトを実装すること |
