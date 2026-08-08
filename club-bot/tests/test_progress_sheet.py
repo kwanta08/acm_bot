@@ -122,15 +122,46 @@ def test_writeback_empty_grid():
 def test_parse_mapping_grid():
     grid = [
         pss.MAPPING_HEADER,
-        ["主翼班", "p1"],
+        ["主翼班", "p1", "111"],
         ["", "x"],           # 名前欠落はスキップ
         ["尾翼班", ""],      # ノード ID 欠落はスキップ
-        ["電装班", "p2"],
+        ["電装班", "p2"],    # 旧2列形式（通知チャンネル列なし）も読める
     ]
     mapping = pss.parse_mapping_grid(grid)
     assert mapping == [
-        {"project_name": "主翼班", "node_id": "p1"},
-        {"project_name": "電装班", "node_id": "p2"},
+        {"project_name": "主翼班", "node_id": "p1",
+         "notify_channel_id": "111"},
+        {"project_name": "電装班", "node_id": "p2",
+         "notify_channel_id": ""},
+    ]
+
+
+def test_parse_settings_grid():
+    grid = [
+        pss.SETTINGS_HEADER,
+        [pss.SHEET_KEY_DEFAULT_CHANNEL, " 123 ", "メモ"],
+        ["", "無視される"],
+        [pss.SHEET_KEY_SPAR_BOOK, ""],
+        ["独自キー", "abc"],
+    ]
+    settings = pss.parse_settings_grid(grid)
+    assert settings[pss.SHEET_KEY_DEFAULT_CHANNEL] == "123"
+    assert settings[pss.SHEET_KEY_SPAR_BOOK] == ""
+    assert settings["独自キー"] == "abc"
+
+
+def test_parse_spar_mapping_grid():
+    grid = [
+        pss.SPAR_MAPPING_HEADER,
+        ["主桁", "spar1"],
+        ["", "x"],
+        ["後桁", ""],
+        ["尾桁", "spar2"],
+    ]
+    mapping = pss.parse_spar_mapping_grid(grid)
+    assert mapping == [
+        {"spar_key": "主桁", "node_id": "spar1"},
+        {"spar_key": "尾桁", "node_id": "spar2"},
     ]
 
 
@@ -180,6 +211,9 @@ class FakeBook:
     def batch_update(self, body):
         self.format_batches.append(body)
 
+    def worksheets(self):
+        return list(self.sheets.values())
+
 
 class FakeClient:
     def __init__(self, book):
@@ -212,16 +246,42 @@ def test_client_append_rows():
     assert ws.appended == [["td_1", "p1"]]
 
 
+def test_client_append_mapping_row():
+    ws = FakeWorksheet(pss.MAPPING_SHEET, values=[pss.MAPPING_HEADER])
+    book = FakeBook([ws])
+    client = pss.ProgressSheetClient(client=FakeClient(book))
+    client.append_mapping_row("sid", "主翼班", "wing", "999")
+    assert ws.appended == [["主翼班", "wing", "999"]]
+
+
+def test_client_read_grid_and_titles():
+    ws1 = FakeWorksheet("主桁", values=[["層番号"], ["1"]])
+    ws2 = FakeWorksheet("桁マスタ", values=[["桁名", "目標層数"]])
+    book = FakeBook([ws1, ws2])
+    client = pss.ProgressSheetClient(client=FakeClient(book))
+    assert client.read_grid("sid", "主桁")[1] == ["1"]
+    assert set(client.list_sheet_titles("sid")) == {"主桁", "桁マスタ"}
+
+
 def test_setup_book_creates_sheets_idempotently():
     book = FakeBook()
     client = pss.ProgressSheetClient(client=FakeClient(book))
 
     created = client.setup_book("sid")
     assert created == {pss.PROGRESS_SHEET: True, pss.MAPPING_SHEET: True,
+                       pss.SETTINGS_SHEET: True, pss.SPAR_MAPPING_SHEET: True,
                        pss.DASHBOARD_SHEET: True}
     # ヘッダーが書かれている
     assert book.sheets[pss.PROGRESS_SHEET].updates == [[pss.PROGRESS_HEADER]]
     assert book.sheets[pss.MAPPING_SHEET].updates == [[pss.MAPPING_HEADER]]
+    # 設定タブには初期キーが投入される
+    settings_rows = book.sheets[pss.SETTINGS_SHEET].updates[0]
+    assert settings_rows[0] == pss.SETTINGS_HEADER
+    keys = [r[0] for r in settings_rows[1:]]
+    assert pss.SHEET_KEY_DEFAULT_CHANNEL in keys
+    assert pss.SHEET_KEY_SPAR_BOOK in keys
+    assert (book.sheets[pss.SPAR_MAPPING_SHEET].updates
+            == [[pss.SPAR_MAPPING_HEADER]])
     # 条件付き書式は1回だけ
     assert len(book.format_batches) == 1
     rule = book.format_batches[0]["requests"][0]["addConditionalFormatRule"]
@@ -234,7 +294,9 @@ def test_setup_book_creates_sheets_idempotently():
     # 2回目: 既存シートを作り直さず、書式・数式も重複しない
     created2 = client.setup_book("sid")
     assert created2 == {pss.PROGRESS_SHEET: False, pss.MAPPING_SHEET: False,
-                       pss.DASHBOARD_SHEET: False}
+                        pss.SETTINGS_SHEET: False,
+                        pss.SPAR_MAPPING_SHEET: False,
+                        pss.DASHBOARD_SHEET: False}
     assert len(book.format_batches) == 1
     assert len(book.sheets[pss.PROGRESS_SHEET].updates) == 1
 
