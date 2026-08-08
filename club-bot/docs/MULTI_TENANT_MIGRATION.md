@@ -402,6 +402,11 @@ venv/bin/python scripts/migrate_todoist_token.py --apply  # 移行実行
 
 ## 14. 007/008: Directus セルフサービス・アクセス発行（スキーマバージョン 7・8）
 
+> ⚠️ **Directus 連携はその後廃止されました**（進捗管理を Google Sheets 正本へ
+> 移行したため）。本章は DB スキーマ（`guild_directus_access` テーブル・
+> `members.member_id`）が導入された経緯の記録として残しています。
+> テーブル自体は後方互換のため残置されており、bot のコードからは参照されません。
+
 ### 背景
 
 NocoDB 構成ではギルドごとの分離を「テーブルごとに `guild_id` 固定の
@@ -433,15 +438,14 @@ Policy「サークル管理者」の各コレクションに
 （4章・11章の「暗号文を見せない」方針と同じ）。なお `settings` と
 `todoist_sections` は複合主キーのため、そもそも Directus に登録できない。
 
-詳細な手順は [`DIRECTUS.md`](DIRECTUS.md) を参照。
-
-### 移行手順（NocoDB → Directus）
+### 移行手順（NocoDB → Directus）※廃止済み・記録のみ
 
 1. bot を停止し `pg_dump` でバックアップを取る
 2. `docker compose -f deploy/docker-compose.nocodb.yml down` で NocoDB を停止
-3. `docker compose -f deploy/docker-compose.directus.yml up -d` で Directus を起動
-   （業務 DB は同じ `clubdb` をそのまま使う）
-4. [`DIRECTUS.md`](DIRECTUS.md) 2章のグローバル設定を実施し、
+3. Directus を起動（業務 DB は同じ `clubdb` をそのまま使う）
+4. Directus 側のグローバル設定を実施し、
    bot の `.env` に `DIRECTUS_URL` / `DIRECTUS_ADMIN_TOKEN` / `DIRECTUS_ROLE_ID` を設定
 5. bot を起動する（スキーマが 8 へ自動更新され、`members` に `member_id` が付与される）
 6. 各サークルの管理者に `/directus-setup` を案内する
+
+現行の PostgreSQL 単体構成は `deploy/docker-compose.postgres.yml` を参照。
