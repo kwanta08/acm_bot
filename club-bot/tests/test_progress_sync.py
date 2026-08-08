@@ -309,6 +309,21 @@ def test_sync_guild_reports_cycle_errors():
     run(_main())
 
 
+def test_resolve_notify_channel_id_priority():
+    settings = {pss.SHEET_KEY_DEFAULT_CHANNEL: "200"}
+    # 対応表のプロジェクト専用チャンネルが最優先
+    assert sync.resolve_notify_channel_id(
+        {"notify_channel_id": "100"}, settings) == 100
+    # 空欄なら設定タブのデフォルト
+    assert sync.resolve_notify_channel_id(
+        {"notify_channel_id": ""}, settings) == 200
+    # 数値でない値はデフォルトへフォールバック
+    assert sync.resolve_notify_channel_id(
+        {"notify_channel_id": "abc"}, settings) == 200
+    # どちらも無ければ None
+    assert sync.resolve_notify_channel_id({"notify_channel_id": ""}, {}) is None
+
+
 def test_get_spreadsheet_id_strips_blank():
     async def _main():
         db = Database(_tmp_db_path())

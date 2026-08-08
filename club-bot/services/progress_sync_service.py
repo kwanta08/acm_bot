@@ -169,6 +169,20 @@ def plan_todoist_upsert(nodes: list[ProgressNode],
     return plan
 
 
+def resolve_notify_channel_id(mapping_entry: dict[str, str],
+                              sheet_settings: dict[str, str]) -> int | None:
+    """タスク通知の送信先チャンネル ID を解決する。
+
+    優先順: 対応表の通知チャンネルID（プロジェクト専用）>
+    「設定」タブのデフォルト通知チャンネルID。
+    どちらも無効・未設定なら None（呼び出し側でギルド既定へフォールバック）。
+    """
+    raw = (mapping_entry.get("notify_channel_id") or "").strip()
+    if not raw.isdigit():
+        raw = (sheet_settings.get(pss.SHEET_KEY_DEFAULT_CHANNEL) or "").strip()
+    return int(raw) if raw.isdigit() else None
+
+
 def _now_text() -> str:
     return now().strftime("%Y-%m-%d %H:%M")
 

@@ -132,6 +132,41 @@ def test_new_part_row_layout():
 
 
 # ---------------------------------------------------------------------
+# プロジェクト別タスク通知
+# ---------------------------------------------------------------------
+def test_due_items_filters_and_formats():
+    from datetime import date
+
+    from cogs.progress import due_items
+
+    class Due:
+        def __init__(self, d):
+            self.date = d
+
+    class Task:
+        def __init__(self, tid, content, due=None, priority=1):
+            self.id = tid
+            self.content = content
+            self.due = due
+            self.priority = priority
+
+    today = date(2026, 8, 8)
+    until = date(2026, 8, 15)
+    tasks = [
+        Task("1", "超過タスク", Due(date(2026, 8, 1)), priority=4),
+        Task("2", "今週タスク", Due(date(2026, 8, 10))),
+        Task("3", "来月タスク", Due(date(2026, 9, 1))),   # 期間外
+        Task("4", "期限なし"),                              # 除外
+    ]
+    items = due_items(tasks, until, "主翼班")
+    assert [i["title"] for i in items] == ["超過タスク", "今週タスク"]
+    assert items[0]["priority"] == 4
+    assert items[0]["category"] == "主翼班"
+    assert "todoist.com" in items[0]["url"]
+    assert today < items[1]["due_date"] <= until
+
+
+# ---------------------------------------------------------------------
 # グラフ PNG 生成
 # ---------------------------------------------------------------------
 def test_render_progress_bars_returns_png():

@@ -18,20 +18,26 @@ from __future__ import annotations
 
 import asyncio
 import io
+from datetime import time as dtime, timedelta
 from typing import TYPE_CHECKING
 
 import discord
 from discord import app_commands
 from discord.ext import commands, tasks
 
+# タスク一覧の整形は既存の Reminders 通知とスタイルを揃える
+from cogs.reminders import _build_grouped_description
+
 from services import progress_sheet_service as pss
 from services import progress_sync_service
 from services.progress_sheet_service import ProgressSheetUnavailable
 from services.progress_tree import ProgressNode, ProgressTree
 from services.todoist_service import TodoistError
+from config import config
 from utils import progress_chart
-from utils.embeds import error_embed, info_embed, success_embed
+from utils.embeds import error_embed, info_embed, success_embed, task_embed
 from utils.logger import get_logger
+from utils.parser import TZ, now
 from utils.permissions import Level, ensure_guild, is_admin, require
 
 if TYPE_CHECKING:
@@ -173,6 +179,33 @@ def new_part_row(project_id: str, project_name: str, root_id: str,
     """
     return [f"pj_{project_id}", root_id, "", "", project_name,
             "", "", "", "", "", pss.SOURCE_MANUAL, "", now_text]
+
+
+def due_items(tasks: list, until, category: str) -> list[dict]:
+    """通知対象タスク（期限が until 以前。超過含む）を整形して返す。
+
+    _build_grouped_description が受け取る item 形式に合わせる。
+    期限なし・until より先のタスクは除外する。
+    """
+    items = []
+    for t in tasks:
+        due = getattr(t, "due", None)
+        raw = getattr(due, "date", None) if due else None
+        if raw is None:
+            continue
+        due_date = raw.date() if hasattr(raw, "date") else raw
+        if due_date > until:
+            continue
+        raw_pr = getattr(t, "priority", None)
+        pr_int = raw_pr.value if hasattr(raw_pr, "value") else (raw_pr or 1)
+        items.append({
+            "due_date": due_date,
+            "title": t.content,
+            "priority": pr_int,
+            "url": _todoist_task_url(t.id),
+            "category": category,
+        })
+    return items
 
 
 # ---------------------------------------------------------------------
@@ -506,9 +539,11 @@ class Progress(commands.Cog):
 
     async def cog_load(self):
         self.periodic_sync.start()
+        self.daily_project_notify.start()
 
     async def cog_unload(self):
         self.periodic_sync.cancel()
+        self.daily_project_notify.cancel()
 
     # ---------- 共通処理 ----------
     async def load_tree(self, guild_id: int) -> ProgressTree:
@@ -547,6 +582,89 @@ class Progress(commands.Cog):
     @periodic_sync.before_loop
     async def _before_sync(self):
         await self.bot.wait_until_ready()
+
+    # ---------- 毎朝 08:30: プロジェクト別タスク通知 ----------
+    @tasks.loop(time=dtime(hour=8, minute=30, tzinfo=TZ))
+    async def daily_project_notify(self):
+        for guild in list(self.bot.guilds):
+            try:
+                await self.push_project_tasks(guild.id)
+            except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
+                log.warning("プロジェクト別通知失敗 (guild=%s): %s",
+                            guild.id, type(e).__name__)
+
+    @daily_project_notify.before_loop
+    async def _before_notify(self):
+        await self.bot.wait_until_ready()
+
+    async def push_project_tasks(self, guild_id: int) -> int:
+        """対応表の各プロジェクトの期限タスク（7日以内・超過）を通知する。
+
+        送信先は対応表の通知チャンネルID →「設定」タブのデフォルト →
+        ギルドのタスクチャンネルの順で解決する。送信件数を返す。
+        """
+        spreadsheet_id = await progress_sync_service.get_spreadsheet_id(
+            self.db, guild_id)
+        if spreadsheet_id is None:
+            return 0
+        svc = await self.bot.todoist_manager.for_guild(guild_id)
+        if not svc.enabled:
+            return 0
+
+        client = self._client()
+        mappings = pss.parse_mapping_grid(await asyncio.to_thread(
+            client.read_mapping_grid, spreadsheet_id))
+        if not mappings:
+            return 0
+        sheet_settings = pss.parse_settings_grid(await asyncio.to_thread(
+            client.read_settings_grid, spreadsheet_id))
+
+        projects = await svc.get_projects()
+        project_ids = {getattr(p, "name", ""): str(p.id) for p in projects}
+
+        gconf = await config.for_guild(guild_id)
+        today = now().date()
+        until = today + timedelta(days=7)
+        sent = 0
+
+        for m in mappings:
+            project_id = project_ids.get(m["project_name"])
+            if project_id is None:
+                continue
+            try:
+                proj_tasks = await svc.get_tasks(project_id=project_id)
+            except TodoistError:
+                log.warning("プロジェクト %s のタスク取得失敗 (guild=%s)",
+                            m["project_name"], guild_id)
+                continue
+            items = due_items(proj_tasks, until, m["project_name"])
+            if not items:
+                continue
+
+            channel_id = progress_sync_service.resolve_notify_channel_id(
+                m, sheet_settings) or gconf.default_task_channel_id
+            channel = (self.bot.get_channel(channel_id)
+                       if channel_id else None)
+            if channel is None:
+                await self.bot.log_to_channel(
+                    f"[進捗通知] 送信先チャンネルがありません"
+                    f"（{m['project_name']}）。対応表の通知チャンネルID か"
+                    "「設定」タブのデフォルト通知チャンネルID を設定してください。",
+                    guild_id=guild_id)
+                continue
+
+            desc = _build_grouped_description(
+                today, until, "今日から7日以内", items)
+            embed = task_embed(f"【進捗・{m['project_name']}】期限タスク")
+            embed.description = desc[:4096]
+            try:
+                await channel.send(embed=embed)
+                sent += 1
+            except discord.HTTPException as e:
+                await self.bot.log_to_channel(
+                    f"[進捗通知] 送信失敗（{m['project_name']}）: {e}",
+                    guild_id=guild_id)
+        return sent
 
     # ---------- /progress init ----------
     @group.command(
