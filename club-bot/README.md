@@ -20,7 +20,7 @@ Discord 上だけで回せます。あなたのサークルのサーバーに招
 | タスク管理 | 期限付きタスクの登録・班別通知・Todoist 連携（任意）・`/today` ラベル |
 | 班・メンバー管理 | 班の作成・ロール紐付け・技能タグ・班をまたいだ支援候補の検索 |
 | 桁巻き積層記録 | `/layer start` `/layer end` で積層作業を記録（作業時間を自動計算） |
-| 機体進捗管理 | Google Sheets を正本に機体→パーツ→部品…の進捗ツリーを管理。`/progress` でドリルダウン表示・Todoist の親子構造を自動同期 |
+| 機体進捗管理 | Google Sheets を正本に機体→パーツ→部品…の進捗ツリーを管理。`/progress view` でドリルダウン表示、`/progress setup` で Todoist プロジェクトをセルフサービス登録（親子構造を自動同期）。桁巻きデータの自動反映・プロジェクト別タスク通知にも対応 |
 | リマインド | 締切前の未回答催促・毎朝の期限タスク通知・期限超過の警告 |
 | レポート | 週次サマリー（サークル名入り）・タスク CSV 出力・出欠率・監査ログ |
 
@@ -132,10 +132,13 @@ docker compose up -d --build
 - **Todoist 連携**: サーバーごとに独立。トークンは `.env` には書かず、各サーバーの
   管理者が `/todoist-setup` のフォーム（Modal）から登録します（Fernet で暗号化して
   DB に保存。暗号鍵 `ENCRYPTION_KEY` は `.env` のみに保持）。
-- **機体進捗管理**: 進捗データの正本はギルドごとの Google Sheets。bot は
-  深さ・集計進捗率の再帰計算と Todoist 同期（20分ごと）だけを行い、
-  進捗バー（SPARKLINE）・色分け・ダッシュボードはシートのネイティブ機能に
-  委ねます。詳細は [`docs/OPERATION.md`](docs/OPERATION.md) の Progress 節を参照。
+- **機体進捗管理**: 進捗データの正本はギルドごとの中央 Google Sheets 1枚。
+  bot は深さ・集計進捗率の再帰計算と Todoist・桁巻きの同期（20分ごと）だけを
+  行い、進捗バー（SPARKLINE）・色分け・ダッシュボードはシートのネイティブ
+  機能に委ねます。チーム単位の設定（プロジェクト紐付け・通知先）は
+  `/progress setup` からシートに書き込まれ、管理者設定は「設定」タブで
+  持つため、`.env` 編集や再起動なしで新チームを追加できます。
+  詳細は [`docs/OPERATION.md`](docs/OPERATION.md) の Progress 節を参照。
 - **既存サーバー（旧・単一運用版）からの移行**: `.env` の `GUILD_ID` を設定したまま
   起動すれば自動移行されます。詳細は
   [`docs/MULTI_TENANT_MIGRATION.md`](docs/MULTI_TENANT_MIGRATION.md) を参照してください。
