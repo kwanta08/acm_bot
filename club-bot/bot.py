@@ -46,7 +46,7 @@ COGS = [
     "cogs.teams",         # 班・技能タグ管理コグ
     "cogs.sheets",        # Google Sheets エクスポート連携コグ
     "cogs.todoist_admin",  # Todoist トークン管理コグ
-    "cogs.directus_admin",  # Directus アクセス発行コグ
+    "cogs.progress",      # 機体進捗管理コグ（Google Sheets 正本）
 ]
 
 # on_guild_join / 起動時の自動セットアップで投入するギルド別デフォルト設定
