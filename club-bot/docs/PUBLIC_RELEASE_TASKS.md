@@ -17,7 +17,7 @@
 - [x] **P0-1** `bot.py` の `message_content` 特権インテントを削除する。
       `on_message` ハンドラ・`message.content` 参照・prefix コマンドのいずれも
       存在しないことを確認済み。再混入を防ぐ回帰テストも追加する
-- [ ] **P0-2** `README.md` を全面書き換え。「各サークルが自分で Bot を立てる」前提を捨て、
+- [x] **P0-2** `README.md` を全面書き換え。「各サークルが自分で Bot を立てる」前提を捨て、
       「公開招待URLを踏むだけ」の導入手順にする。対象が鳥人間サークルであることを明示し、
       `/layer`（桁巻き積層記録）と `/progress`（機体進捗管理）が何をする機能かを説明する
 - [ ] **P0-3** `docs/TERMS.md`（利用規約）と `docs/PRIVACY.md`（プライバシーポリシー）を作成する。
@@ -68,4 +68,6 @@
 | タスク | 完了内容 / 設計判断 / 申し送り |
 |---|---|
 | （初期化） | タスク管理表を作成。次は P0-1（`message_content` インテント削除）から着手する |
+| （方針確認） | 2026-08-08 ユーザー判断: Phase 2/3 の要望があったが、**Phase 1 を先に完走**し、**1タスクずつ**進める方針を維持する（`migrations/` が 008 までで `progress_nodes` 未作成のため P2-4 の progress グリッドと P3-2 が Phase 1 なしでは完成しないことを確認） |
 | P0-1 | intents 構築を `bot.build_intents()` に切り出して `message_content` を削除。特権インテントは `members` のみに（`presences` も不要）。`tests/test_intents.py` で intents の検証に加え、`on_message` / `message.content` / prefix コマンド / `message_content =` のソース再混入を走査（コメント・文字列リテラルは `tokenize` で除外）。`docs/SETUP.md` の Portal 手順も MESSAGE CONTENT を OFF に更新。**申し送り**: `command_prefix="!club "` は `commands.Bot` の必須引数のため残置（prefix コマンドは未定義で機能しない）。P0-2 の README 書き換え時に、必要インテントは SERVER MEMBERS のみと明記すること |
+| P0-2 | README を招待URL前提の3ステップ導入（招待 → `/setup` → 運用開始）へ全面書き換え。冒頭で対象＝鳥人間サークルを明示し、`/layer` `/progress` はサブコマンド単位の専用セクションに。`/progress` の Sheets 共有が残る制約と、`message_content` を要求しない旨も記載。**設計判断**: 招待URLは P0-5（人間タスク）完了まで確定しないため、URL 欄は「公開準備中」のプレースホルダとし HTML コメントで差し替え箇所を明示した。**申し送り**: (1) P0-5 完了後に README の招待URLを差し替えること。(2) README から `docs/TERMS.md` / `docs/PRIVACY.md` へのリンクは未設置 — P0-3 で作成したら「よくある質問」の該当箇所とドキュメント表にリンクを追加すること。(3) `docs/DESIGN_PUBLIC_DISTRIBUTION.md` は git 未追跡のままなので、コミットしないと README のリンクが GitHub 上で切れる |
