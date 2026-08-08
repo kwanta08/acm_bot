@@ -415,7 +415,7 @@ NocoDB 構成ではギルドごとの分離を「テーブルごとに `guild_id
 
 | レイヤ | 変更 |
 |---|---|
-| DB 層（v7） | `directus_access` テーブルを追加（1ギルド1件。Directus 側のユーザー ID・メール・発行状態のみ。**秘密情報は保持しない** — パスワードは Directus のメール招待フローに委ね、bot は生成も保存もしない） |
+| DB 層（v7） | `guild_directus_access` テーブルを追加（1ギルド1件。Directus 側のユーザー ID・メール・発行状態のみ。**秘密情報は保持しない** — パスワードは Directus のメール招待フローに委ね、bot は生成も保存もしない） |
 | DB 層（v8） | `members` に代理主キー `member_id` を追加。旧主キー `(guild_id, user_id)` は UNIQUE 制約として維持。Directus は単一列の主キーを要求するため、複合主キーのままでは members を扱えなかった。リポジトリ層の SQL は `guild_id + user_id` 指定のため無変更 |
 | Service 層 | `services/directus_service.py`。`POST /users/invite` は作成したユーザー ID を返さずカスタムフィールドも受け取らないため、**招待 → メールアドレスで検索 → `guild_id` を PATCH** の3段構成で行う。`guild_id` 未設定のユーザーはフィルタに一致する行が無く何も見えない（fail-closed） |
 | Cog | `/directus-setup`（引数なし → ボタン → Modal でメール入力）・`/directus-status`・`/directus-revoke`。未設定環境では例外ではなく案内 Embed を返す |
@@ -429,7 +429,7 @@ Policy「サークル管理者」の各コレクションに
 `{"guild_id": {"_eq": "$CURRENT_USER.guild_id"}}` を設定する。
 
 `todoist_configs`（暗号文）・`settings`・`guilds`・`audit_log`・
-`reminders_log`・`todoist_sections`・`directus_access` には権限を付与しない
+`reminders_log`・`todoist_sections`・`guild_directus_access` には権限を付与しない
 （4章・11章の「暗号文を見せない」方針と同じ）。なお `settings` と
 `todoist_sections` は複合主キーのため、そもそも Directus に登録できない。
 

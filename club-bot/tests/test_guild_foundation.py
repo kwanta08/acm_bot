@@ -24,11 +24,11 @@ from utils.db import SCHEMA_VERSION, TABLE_DDL, Database
 G1 = 100000000000000001  # ギルド1
 G2 = 200000000000000002  # ギルド2
 
-# v1 相当（guilds / audit_log / skill_tags / todoist_configs / directus_access
+# v1 相当（guilds / audit_log / skill_tags / todoist_configs / guild_directus_access
 # 導入前）のテーブル群
 V1_TABLES = [t for t in TABLE_DDL
              if t not in ("guilds", "audit_log", "skill_tags", "todoist_configs",
-                          "directus_access")]
+                          "guild_directus_access")]
 
 
 def _tmp_db_path() -> str:

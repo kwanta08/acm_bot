@@ -166,7 +166,7 @@ def test_v2_to_v3_migration_backfills_team_roles():
         # v2 相当の DB を準備（skill_tags 無し、teams は旧カラム構成、user_version=2）
         conn = await aiosqlite.connect(path)
         for name, ddl in TABLE_DDL.items():
-            if name in ("skill_tags", "todoist_configs", "directus_access"):
+            if name in ("skill_tags", "todoist_configs", "guild_directus_access"):
                 continue
             if name == "teams":
                 await conn.executescript(V2_TEAMS_DDL)

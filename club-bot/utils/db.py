@@ -259,8 +259,17 @@ CREATE TABLE IF NOT EXISTS todoist_configs (
     # bot は生成も保存もしない。directus_user_id は Directus 側のユーザー
     # （UUID）で、これ自体は認証に使えない。
     # 専用テーブルとすることで外部 UI 側でテーブル単位に非表示にできる。
-    "directus_access": """
-CREATE TABLE IF NOT EXISTS directus_access (
+    #
+    # 命名の注意: Directus は業務 DB と同じデータベースへ自身のシステム
+    # テーブルを作成し、その名前空間は `directus_` プレフィックスで予約
+    # されている。特に Directus 11 の `directus_access`（ユーザー/ロールと
+    # ポリシーの紐付け）と名前が衝突すると、Directus の初回セットアップが
+    # 自身のシステムテーブルへ INSERT する際に本テーブルの NOT NULL 制約に
+    # 掛かり、"Value for field \"guild_id\" in collection \"directus_access\"
+    # can't be null" で初期化不能になる。そのため本テーブルは
+    # `directus_` で始まらない名前とすること。
+    "guild_directus_access": """
+CREATE TABLE IF NOT EXISTS guild_directus_access (
     guild_id         INTEGER PRIMARY KEY CHECK (guild_id > 0),
     directus_user_id TEXT NOT NULL,
     email            TEXT NOT NULL,
@@ -364,7 +373,10 @@ POSTGRES_VIEW_DDL = "\n".join(
 # 8: members に代理主キー member_id を追加（旧 PK (guild_id, user_id) は
 #    UNIQUE 制約として維持）。単一列 PK を必須とする外部 DB UI（Directus）
 #    から members を扱えるようにするため
-SCHEMA_VERSION = 8
+# 9: directus_access を guild_directus_access へ改名（Directus 11 の
+#    システムテーブル `directus_access` との名前衝突を解消。衝突すると
+#    Directus の初回セットアップが失敗して起動できない）
+SCHEMA_VERSION = 9
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
@@ -718,6 +730,9 @@ class Database:
         if version < 8:
             await self._migrate_v8_members_surrogate_pk()
 
+        if version < 9:
+            await self._migrate_v9_rename_directus_access()
+
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
 
@@ -753,15 +768,65 @@ class Database:
 
     async def _migrate_v7_directus_access(self) -> None:
         """
-        v7: directus_access テーブルを追加する（冪等）。
+        v7: Directus アクセス発行状況テーブルを追加する（冪等）。
 
         新規 DB では init_schema（SQLite）・_connect_pg（PostgreSQL）が
         CREATE TABLE IF NOT EXISTS で作成済みだが、既存 DB でも確実に
         作成されるようここでもドライバ別 DDL を実行する。
+
+        テーブル名は v9 で directus_access から guild_directus_access へ
+        改名済み（Directus のシステムテーブルとの衝突回避）。旧名で作成
+        済みの DB は _migrate_v9_rename_directus_access() が引き継ぐ。
         """
-        ddl = (TABLE_DDL_PG if self._is_pg else TABLE_DDL)["directus_access"]
+        ddl = (TABLE_DDL_PG if self._is_pg
+               else TABLE_DDL)["guild_directus_access"]
         await self._executescript(ddl)
-        log.info("directus_access テーブルを作成しました（v7）。")
+        log.info("guild_directus_access テーブルを作成しました（v7）。")
+
+    async def _migrate_v9_rename_directus_access(self) -> None:
+        """
+        v9: 旧 directus_access を guild_directus_access へ改名する（冪等）。
+
+        Directus は業務 DB と同じデータベースへ自身のシステムテーブルを
+        作成する。Directus 11 のシステムコレクション `directus_access`
+        （ユーザー/ロールとポリシーの紐付け）と bot 側のテーブル名が衝突
+        すると、Directus の初回セットアップが自身のシステムテーブルへ
+        INSERT する際に bot 側の guild_id NOT NULL 制約に掛かり、
+        "Value for field \"guild_id\" in collection \"directus_access\"
+        can't be null" で初期化不能になる。
+
+        安全性: Directus 自身のシステムテーブルには guild_id 列が無い。
+        guild_id 列を持つ場合のみ「bot が作った旧テーブル」と判定して
+        改名するため、Directus のテーブルを誤って壊すことはない。
+        """
+        legacy_cols = await self._table_columns("directus_access")
+        if not legacy_cols or "guild_id" not in legacy_cols:
+            # 旧テーブルが無い（新規 DB・適用済み）か、Directus 自身の
+            # システムテーブルなので触らない
+            return
+
+        if not await self._table_columns("guild_directus_access"):
+            await self.execute(
+                "ALTER TABLE directus_access RENAME TO guild_directus_access")
+            log.info("directus_access を guild_directus_access へ"
+                     "改名しました（v9）。")
+            return
+
+        # 新名テーブルが既にある（init_schema が作成済み）ケース:
+        # 行を移してから旧表を削除する。
+        # WHERE true は INSERT ... SELECT ... ON CONFLICT の構文的曖昧さを
+        # 解消するために必須（SQLite の仕様。PostgreSQL でも有効）。
+        await self.execute(
+            "INSERT INTO guild_directus_access"
+            " (guild_id, directus_user_id, email, status,"
+            "  created_by, created_at, updated_at)"
+            " SELECT guild_id, directus_user_id, email, status,"
+            "  created_by, created_at, updated_at FROM directus_access"
+            " WHERE true"
+            " ON CONFLICT (guild_id) DO NOTHING")
+        await self.execute("DROP TABLE directus_access")
+        log.info("旧 directus_access の行を guild_directus_access へ移行し、"
+                 "旧テーブルを削除しました（v9）。")
 
     async def _migrate_v8_members_surrogate_pk(self) -> None:
         """
