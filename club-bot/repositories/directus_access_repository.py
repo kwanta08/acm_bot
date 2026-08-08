@@ -1,4 +1,4 @@
-"""directus_access テーブル（Directus アクセス発行状況）の CRUD。
+"""guild_directus_access テーブル（Directus アクセス発行状況）の CRUD。
 
 1ギルド1件（PK = guild_id）。このテーブルは秘密情報を保持しない:
 パスワードは Directus 自身のメール招待フローが扱い、bot は生成も保存も
@@ -25,7 +25,8 @@ class DirectusAccessRepository(BaseRepository):
 
     async def get(self, guild_id: int) -> dict[str, Any] | None:
         row = await self.db.fetchone(
-            "SELECT * FROM directus_access WHERE guild_id = ?", (guild_id,))
+            "SELECT * FROM guild_directus_access WHERE guild_id = ?",
+            (guild_id,))
         return dict(row) if row else None
 
     async def upsert(self, guild_id: int, directus_user_id: str, email: str,
@@ -34,7 +35,7 @@ class DirectusAccessRepository(BaseRepository):
         now_iso = to_iso(now())
         await self.db.execute(
             """
-            INSERT INTO directus_access
+            INSERT INTO guild_directus_access
                 (guild_id, directus_user_id, email, status,
                  created_by, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -51,7 +52,7 @@ class DirectusAccessRepository(BaseRepository):
     async def set_status(self, guild_id: int, status: str) -> bool:
         """発行状態を更新する。対象が無ければ False。"""
         cur = await self.db.execute(
-            "UPDATE directus_access SET status = ?, updated_at = ?"
+            "UPDATE guild_directus_access SET status = ?, updated_at = ?"
             " WHERE guild_id = ?",
             (status, to_iso(now()), guild_id),
         )
@@ -60,5 +61,6 @@ class DirectusAccessRepository(BaseRepository):
     async def delete(self, guild_id: int) -> bool:
         """発行記録を削除する。対象が無ければ False。"""
         cur = await self.db.execute(
-            "DELETE FROM directus_access WHERE guild_id = ?", (guild_id,))
+            "DELETE FROM guild_directus_access WHERE guild_id = ?",
+            (guild_id,))
         return cur.rowcount > 0

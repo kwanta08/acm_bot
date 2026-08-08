@@ -34,8 +34,13 @@ Directus は権限フィルタに `$CURRENT_USER.guild_id` を書けるため、
 
 ## 1. 起動手順（Docker Compose）
 
-前提: Docker と Docker Compose が使えること（さくらのVPS の場合は
-`sudo apt install docker.io docker-compose-v2` 等で導入）。
+前提:
+
+- Docker と Docker Compose が使えること（さくらのVPS の場合は
+  `sudo apt install docker.io docker-compose-v2` 等で導入）
+- **メモリ 2GB 以上**（Directus 公式の推奨下限）。1GB では OOM Killer に
+  よる強制終了が繰り返し発生し、管理画面が空白ページになる。
+  NocoDB も併用する場合は 4GB を見込むこと（6.2 参照）
 
 1. 環境変数ファイルを作る（秘密情報。**絶対にコミットしない**。
    `.gitignore` の `.env` パターンで除外される）。
@@ -62,7 +67,7 @@ Directus は権限フィルタに `$CURRENT_USER.guild_id` を書けるため、
    DATABASE_URL=postgresql://clubbot:<パスワード>@127.0.0.1:5432/clubdb
    ```
    bot 起動時にスキーマ（全テーブル・ビュー）が自動作成される。
-   ログに「PostgreSQL に接続しました」「スキーマバージョンを 8 に更新しました」
+   ログに「PostgreSQL に接続しました」「スキーマバージョンを 9 に更新しました」
    と出れば OK。
 4. Directus にアクセスする。ポートは `127.0.0.1:8055` バインドのため、
    VPS では SSH トンネル経由を推奨する。
@@ -90,8 +95,14 @@ NocoDB はメタデータ DB を業務 DB と別データベース（`nocodb_met
 
 - `pg_dump clubdb` のバックアップに `directus_*` も一緒に含まれる
   （復元時も一体で戻るため、運用としてはむしろ単純）
-- bot は自分のテーブルだけを `CREATE TABLE IF NOT EXISTS` するため、
-  Directus のテーブルと衝突しない
+- **`directus_` プレフィックスは Directus の予約名前空間**であり、
+  bot 側のテーブルには絶対に使わない。過去にアクセス発行状況テーブルを
+  `directus_access` という名前で作ってしまい、Directus 11 の同名システム
+  テーブル（ユーザー/ロールとポリシーの紐付け）と衝突して Directus が
+  初期化不能になる不具合があった（現在は `guild_directus_access` に改名済み。
+  6章のトラブルシュートを参照）。回帰は
+  `tests/test_directus_admin.py::test_schema_has_no_directus_prefixed_table`
+  が防いでいる
 
 ---
 
@@ -154,7 +165,7 @@ Nullable にするのは fail-closed のためである。`guild_id` が未設�
 | `audit_log` | 管理操作の証跡 |
 | `reminders_log` | 通知の内部ログ |
 | `todoist_sections` | Todoist 連携の内部データ |
-| `directus_access` | Directus 発行状況（他団体のメールアドレスを含む） |
+| `guild_directus_access` | Directus 発行状況（他団体のメールアドレスを含む） |
 | `schema_meta` | スキーマバージョン |
 | `v_todoist_status` | Todoist 連携状態（暗号文は含まないが運用情報） |
 
@@ -238,7 +249,7 @@ $ sudo systemctl restart club-bot
 - メールアドレスはコマンドの引数では受け取らない（オプション値は Discord の
   履歴に残るため）。Modal の入力値は履歴に残らない
 - **パスワードは bot が生成も保存もしない**。Directus のメール招待フローに委ねる。
-  `directus_access` テーブルに秘密情報は保存されない
+  `guild_directus_access` テーブルに秘密情報は保存されない
 - 1つの Directus ユーザーには `guild_id` を1つしか設定できないため、
   **同じメールアドレスを複数のサークルで使うことはできない**
   （既に登録済みのアドレスを指定すると、その旨を案内して処理を中止する）
@@ -308,6 +319,100 @@ $ cat backup_YYYYMMDD.sql | docker compose -f deploy/docker-compose.directus.yml
 | **他サークルのデータが見える** | Policy のフィルタが抜けているコレクションがある。2.2 を見直す。管理者ロールのユーザーは全件見える点にも注意 |
 | `value out of int32 range` | `guild_id` フィールドを Integer で作成している。**Big Integer** に修正する（2.1） |
 | メールが届かない | SMTP 未設定。4章のフォールバック手順を使う |
+| 初回セットアップ画面で `Value for field "guild_id" in collection "directus_access" can't be null` | bot の旧バージョンが作った `directus_access` テーブルが Directus のシステムテーブルと**名前衝突**している。下記「6.1 テーブル名衝突からの復旧」を参照 |
+| 管理画面が**空白ページ**／`NS_ERROR_NET_EMPTY_RESPONSE` が返る | Directus プロセスがメモリ不足で強制終了（OOM Kill）と再起動を繰り返している可能性が高い。下記「6.2 メモリ不足（OOM）」を参照 |
+
+### 6.1 テーブル名衝突からの復旧
+
+bot の旧バージョン（スキーマ v7〜v8）は、アクセス発行状況を
+`directus_access` という名前のテーブルに保存していた。これは Directus 11 の
+システムコレクション `directus_access` と同名であり、同じ `clubdb` に同居
+すると Directus の初回セットアップが自身のシステムテーブルへ INSERT する
+際に bot 側の `guild_id NOT NULL` 制約に掛かり、初期化できない。
+
+**bot を新しいバージョンに更新して起動するだけで自動的に解消する。**
+スキーマ v9 のマイグレーションが `directus_access` を
+`guild_directus_access` へ改名する（`guild_id` 列の有無で bot のテーブルか
+どうかを判定するため、Directus のシステムテーブルには一切触れない）。
+
+ただし、**衝突したまま Directus を一度でも起動してしまった場合**は、
+Directus 側が「マイグレーション済み」と記録した状態で自分のテーブルだけが
+無い状態になるため、Directus のシステムテーブルを作り直す必要がある。
+Directus の初回セットアップが完了していない＝Directus 側に守るべきデータは
+まだ無いので、`directus_*` だけを削除して再起動すればよい
+（**bot の業務データは別テーブルなので消えない**）。
+
+```bash
+# 0. 必ず先にバックアップを取る（5章参照）
+docker compose -f deploy/docker-compose.directus.yml exec -T postgres \
+  pg_dump -U clubbot clubdb > backup_before_directus_reset.sql
+
+# 1. Directus を停止する
+docker compose -f deploy/docker-compose.directus.yml stop directus
+
+# 2. bot を新バージョンで起動し、v9 マイグレーション（改名）を適用する
+#    ログに「directus_access を guild_directus_access へ改名しました（v9）」
+#    または「スキーマバージョンを 9 に更新しました」と出れば成功
+
+# 3. Directus のシステムテーブルだけを削除する
+#    （消えるのは directus_* のみ。bot の業務テーブルは対象外）
+docker compose -f deploy/docker-compose.directus.yml exec -T postgres \
+  psql -U clubbot clubdb -c "DO \$\$ DECLARE t text; BEGIN
+    FOR t IN SELECT tablename FROM pg_tables
+             WHERE schemaname='public' AND tablename LIKE 'directus\_%'
+    LOOP EXECUTE format('DROP TABLE IF EXISTS %I CASCADE', t); END LOOP;
+  END \$\$;"
+
+# 4. 削除対象が directus_* だけだったことを確認する
+docker compose -f deploy/docker-compose.directus.yml exec -T postgres \
+  psql -U clubbot clubdb -c "\dt"
+
+# 5. Directus を起動し直す（初回セットアップからやり直せる）
+docker compose -f deploy/docker-compose.directus.yml up -d directus
+```
+
+再起動後、2章のグローバル設定を最初から行う。
+
+> `guild_id` フィールドは **`directus_users`** に追加する。
+> `directus_access` など他のシステムコレクションに追加してはならない
+> （Directus 内部の処理はカスタムフィールドの存在を知らないため、
+> 必須フィールドを足すと内部の INSERT が失敗する）。
+
+### 6.2 メモリ不足（OOM）
+
+Directus（Node.js）は公式に **最低 2GB RAM** が推奨されている。
+1GB の VPS で Directus + PostgreSQL + NocoDB を同時稼働させると、
+OOM Killer が数分おきにプロセスを強制終了し、Directus が再起動を
+繰り返して「空白ページ」「空レスポンス」になる。
+
+```bash
+# メモリの空き状況
+free -h
+
+# OOM Killer の発生履歴（Directus が殺されていないか）
+sudo dmesg -T | grep -i "out of memory\|oom" | tail -20
+
+# コンテナごとの実使用量
+docker stats --no-stream
+```
+
+対処:
+
+- **NocoDB を止める**（レガシー構成なので Directus 移行後は不要。
+  実測で 500MB 前後を占有する）:
+  `docker stop deploy-nocodb-1`
+- **VPS のメモリを増やす**。Directus + PostgreSQL のみなら 2GB で足りる
+  （実測アイドル時: Directus 約 200MB / PostgreSQL 約 50MB）。
+  NocoDB も常時稼働させるなら 4GB が現実的な下限
+- **スワップを追加する**（対症療法。落ちにくくはなるが遅くなる）:
+
+  ```bash
+  sudo fallocate -l 2G /swapfile
+  sudo chmod 600 /swapfile
+  sudo mkswap /swapfile
+  sudo swapon /swapfile
+  echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+  ```
 
 ## 7. NocoDB からの移行
 
@@ -318,7 +423,7 @@ NocoDB 構成（[`NOCODB.md`](NOCODB.md)）から移行する場合、**業務 D
 2. NocoDB を停止する: `docker compose -f docker-compose.nocodb.yml down`
 3. 本書の1章で Directus を起動する（同じ `clubdb` に接続する）
 4. 2章のグローバル設定を行う
-5. bot を起動する（スキーマバージョンが 8 へ自動更新される）
+5. bot を起動する（スキーマバージョンが 9 へ自動更新される）
 6. 各サークルの管理者に `/directus-setup` を案内する
 
 `nocodb_meta` データベースは不要になるが、削除は任意

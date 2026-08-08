@@ -2,9 +2,9 @@
 
 外部 HTTP は一切発生させず、FakeDirectusClient を注入して検証する。
 
-- スキーマ v7（directus_access）・v8（members の代理主キー）
+- スキーマ v7/v9（guild_directus_access）・v8（members の代理主キー）
 - Directus 未設定時に例外ではなく案内 Embed を返すこと
-- 発行時に directus_access へ記録され監査ログが残ること
+- 発行時に guild_directus_access へ記録され監査ログが残ること
 - 失効時に Directus 側の停止が呼ばれ status が revoked になること
 - ギルド分離（他ギルドの発行が見えないこと）
 - メール重複・API 失敗時に DB を変更しないこと
@@ -117,18 +117,120 @@ def _text(embed) -> str:
 # スキーマ
 # ------------------------------------------------------------------
 
-def test_schema_v7_has_directus_access():
+def test_schema_has_guild_directus_access():
     async def _main():
         db = await _make_db()
         try:
             cols = {r["name"] for r in
-                    await db.fetchall("PRAGMA table_info(directus_access)")}
+                    await db.fetchall("PRAGMA table_info(guild_directus_access)")}
             assert {"guild_id", "directus_user_id", "email", "status",
                     "created_by", "created_at", "updated_at"} <= cols
             row = await db.fetchone("PRAGMA user_version")
             assert row[0] == SCHEMA_VERSION
         finally:
             await db.close()
+    run(_main())
+
+
+def test_schema_has_no_directus_prefixed_table():
+    """bot のテーブルが Directus の予約プレフィックスを使わないこと。
+
+    Directus は業務 DB と同じデータベースへ `directus_*` という名前で
+    自身のシステムテーブルを作る。bot 側が同じ名前空間を使うと、
+    Directus 11 の `directus_access` のように衝突して Directus の初回
+    セットアップが失敗する（回帰防止）。
+    """
+    async def _main():
+        db = await _make_db()
+        try:
+            rows = await db.fetchall(
+                "SELECT name FROM sqlite_master"
+                " WHERE type IN ('table', 'view')")
+            offenders = [r["name"] for r in rows
+                         if r["name"].startswith("directus_")]
+            assert offenders == [], (
+                f"Directus の予約プレフィックスと衝突: {offenders}")
+        finally:
+            await db.close()
+    run(_main())
+
+
+def test_migrate_v9_renames_legacy_directus_access():
+    """旧 directus_access が guild_directus_access へ改名され行が残ること。"""
+    async def _main():
+        path = _tmp_db_path()
+        # v8 相当の DB を用意（テーブル名は旧名 directus_access）
+        db = Database(path)
+        await db.connect()
+        await db.execute(
+            "ALTER TABLE guild_directus_access RENAME TO directus_access")
+        await db.execute(
+            "INSERT INTO directus_access (guild_id, directus_user_id, email,"
+            " status, created_by, created_at, updated_at)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (G1, "legacy-user-1", EMAIL1, STATUS_INVITED, "admin1",
+             "2026-01-01T00:00:00+09:00", "2026-01-01T00:00:00+09:00"))
+        await db.conn.execute("PRAGMA user_version = 8")
+        await db.conn.commit()
+        await db.close()
+
+        # 再接続で v9 マイグレーションが走る
+        db2 = Database(path)
+        await db2.connect()
+        try:
+            names = {r["name"] for r in await db2.fetchall(
+                "SELECT name FROM sqlite_master WHERE type = 'table'")}
+            assert "guild_directus_access" in names
+            assert "directus_access" not in names
+
+            row = await db2.fetchone(
+                "SELECT * FROM guild_directus_access WHERE guild_id = ?",
+                (G1,))
+            assert row is not None
+            assert row["email"] == EMAIL1
+            assert row["directus_user_id"] == "legacy-user-1"
+
+            ver = await db2.fetchone("PRAGMA user_version")
+            assert ver[0] == SCHEMA_VERSION
+        finally:
+            await db2.close()
+            os.unlink(path)
+    run(_main())
+
+
+def test_migrate_v9_keeps_directus_system_table():
+    """Directus 自身の directus_access（guild_id 列なし）は改名しないこと。"""
+    async def _main():
+        path = _tmp_db_path()
+        db = Database(path)
+        await db.connect()
+        # Directus 11 のシステムテーブルを模した定義（guild_id 列を持たない）
+        await db.execute(
+            "CREATE TABLE directus_access ("
+            " id TEXT PRIMARY KEY, role TEXT, \"user\" TEXT, policy TEXT)")
+        await db.execute(
+            "INSERT INTO directus_access (id, role, \"user\", policy)"
+            " VALUES ('a1', 'r1', NULL, 'p1')")
+        await db.conn.execute("PRAGMA user_version = 8")
+        await db.conn.commit()
+        await db.close()
+
+        db2 = Database(path)
+        await db2.connect()
+        try:
+            # Directus のテーブルはそのまま残る
+            cols = {r["name"] for r in await db2.fetchall(
+                "PRAGMA table_info(directus_access)")}
+            assert cols == {"id", "role", "user", "policy"}
+            row = await db2.fetchone(
+                "SELECT id FROM directus_access WHERE id = 'a1'")
+            assert row is not None
+            # bot 側のテーブルは新名で存在する
+            assert await db2.fetchall(
+                "PRAGMA table_info(guild_directus_access)")
+        finally:
+            await db2.close()
+            os.unlink(path)
     run(_main())
 
 
@@ -216,7 +318,7 @@ def test_v8_migration_preserves_existing_members():
             row = await db.fetchone("PRAGMA user_version")
             assert row[0] == SCHEMA_VERSION
             # v7 のテーブルも作成されている
-            cols = await db.fetchall("PRAGMA table_info(directus_access)")
+            cols = await db.fetchall("PRAGMA table_info(guild_directus_access)")
             assert cols
         finally:
             await db.close()
@@ -441,7 +543,7 @@ def test_reissue_overwrites_same_guild_row():
             await cog.issue_access(G1, EMAIL1, actor_id="admin1")
             await cog.issue_access(G1, EMAIL2, actor_id="admin1")
 
-            rows = await db.fetchall("SELECT * FROM directus_access")
+            rows = await db.fetchall("SELECT * FROM guild_directus_access")
             assert len(rows) == 1  # 1ギルド1件
             assert rows[0]["email"] == EMAIL2
             assert rows[0]["directus_user_id"] == "directus-user-2"

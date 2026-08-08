@@ -13,7 +13,7 @@ Directus 管理モジュール。
   （コマンドのオプション値は Discord の履歴に残るため）。
   /directus-setup は引数なしで実行し、ephemeral なボタンから Modal を開く。
 - パスワードは bot が生成も保存もしない（Directus のメール招待フローに委ねる）。
-  directus_access テーブルには秘密情報を保存しない。
+  guild_directus_access テーブルには秘密情報を保存しない。
 - 管理トークンは応答・Embed・ログ・監査ログに一切出力しない。
 - 応答はすべて ephemeral。Modal 送信者がコマンド実行者と同一であることを検証する。
 - Modal のタイムアウト・キャンセルでは DB を変更しない。
