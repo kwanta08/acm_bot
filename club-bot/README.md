@@ -38,11 +38,20 @@ Bot の運用者による個別対応は必要ありません。
 
 1. [Discord Developer Portal](https://discord.com/developers/applications) で
    アプリケーションを作成し、Bot トークンを取得します。
-2. 「OAuth2 → URL Generator」で **SCOPES: `bot` + `applications.commands`** を選択し、
-   必要な権限（Send Messages / Embed Links / Add Reactions / Manage Roles など）に
-   チェックして生成された URL からサーバーに招待します。
+2. **bot を起動すると、最小権限の招待 URL がログに出力されます**。その URL から
+   サーバーに招待してください（スコープ: `bot` + `applications.commands`、
+   権限: チャンネル閲覧 / メッセージ送信 / 埋め込み / ファイル添付 /
+   リアクション / 履歴の読み取りのみ。`Administrator` は要求しません）。
 3. 招待すると `on_guild_join` が自動で初期セットアップ（ギルド登録・
-   管理者ロール・`#bot-log` チャンネルの作成・コマンド同期）を行います。
+   管理者ロール・`#bot-log` チャンネルの作成）を行います。
+   ロール・チャンネルの自動作成を使う場合のみ、サーバー側で bot に
+   Manage Roles / Manage Channels を追加で付与してください
+   （無くても bot はその部分をスキップして動作します）。
+
+> **スラッシュコマンドはグローバル登録です。** 新しいサーバーに参加しても
+> コマンド登録の追加作業は不要ですが、Discord 側の反映に**最大1時間程度**
+> かかることがあります。招待直後にコマンドが見えない場合は少し待つか、
+> Discord クライアントを再起動（Ctrl+R）してください。
 
 詳しい権限の一覧は [`docs/SETUP.md`](docs/SETUP.md) を参照してください。
 
@@ -132,13 +141,25 @@ docker compose up -d --build
 - **Todoist 連携**: サーバーごとに独立。トークンは `.env` には書かず、各サーバーの
   管理者が `/todoist-setup` のフォーム（Modal）から登録します（Fernet で暗号化して
   DB に保存。暗号鍵 `ENCRYPTION_KEY` は `.env` のみに保持）。
-- **機体進捗管理**: 進捗データの正本はギルドごとの中央 Google Sheets 1枚。
+- **機体進捗管理**: 進捗データの正本は中央 Google Sheets 1枚。
   bot は深さ・集計進捗率の再帰計算と Todoist・桁巻きの同期（20分ごと）だけを
   行い、進捗バー（SPARKLINE）・色分け・ダッシュボードはシートのネイティブ
   機能に委ねます。チーム単位の設定（プロジェクト紐付け・通知先）は
-  `/progress setup` からシートに書き込まれ、管理者設定は「設定」タブで
-  持つため、`.env` 編集や再起動なしで新チームを追加できます。
+  `/progress setup` からシートに書き込まれ（登録元の `guild_id` も記録）、
+  管理者設定は「設定」タブで持つため、`.env` 編集や再起動なしで
+  新チームを追加できます。
   詳細は [`docs/OPERATION.md`](docs/OPERATION.md) の Progress 節を参照。
+- **進捗管理の複数サーバー運用**: 部内の各チームが別々の Discord サーバーを
+  使う場合も、中央シートは1枚のまま共有できます。各サーバーの管理者が
+  `/progress init` に**同じスプレッドシート ID** を登録するだけです。
+  同期・集計・桁巻き反映は bot 全体で単一の定期ジョブが**シート単位で
+  1回だけ**実行するため、Sheets API のクォータ消費はサーバー数に比例しません。
+  `/progress view` のドリルダウン表示は同期ジョブが構築したメモリキャッシュを
+  参照します（シート直編集を即座に反映したいときは 🔄 再読込ボタン）。
+  `/progress setup` の実行権限はデフォルトで Discord 標準の
+  「サーバー管理（Manage Server）」権限（または班長ロール以上）です。
+  bot があるサーバーから削除・権限剥奪されても、通知エラーはログに記録され
+  他サーバーの動作には影響しません。
 - **既存サーバー（旧・単一運用版）からの移行**: `.env` の `GUILD_ID` を設定したまま
   起動すれば自動移行されます。詳細は
   [`docs/MULTI_TENANT_MIGRATION.md`](docs/MULTI_TENANT_MIGRATION.md) を参照してください。

@@ -55,18 +55,32 @@
 
 ## A-2. Bot をサーバーに招待する
 
+**かんたんな方法**: bot を起動すると、最小権限の招待 URL が起動ログに
+出力されます（`招待リンク（最小権限）: https://discord.com/...`）。
+この URL をブラウザで開き、対象のサークルサーバーを選んで招待してください。
+
+手動で URL を作る場合は次の手順です。
+
 1. 左メニュー「**OAuth2**」→「**URL Generator**」。
 2. **SCOPES** で `bot` と `applications.commands` にチェック。
-3. **BOT PERMISSIONS** で以下にチェック。
+3. **BOT PERMISSIONS** で以下にチェック（最小構成）。
+   - View Channels（チャンネル閲覧）
    - Send Messages（メッセージ送信）
    - Embed Links（埋め込み表示）
    - Add Reactions（リアクション追加）
    - Read Message History（履歴の読み取り）
+   - Attach Files（CSV出力・進捗グラフ表示に必要）
+
+   以下は使う機能に応じて任意で追加します（無くても該当機能を
+   スキップして動作します）。
    - Manage Messages（投票の重複リアクション削除に必要）
    - Mention Everyone（未回答者への一斉通知に必要）
-   - Attach Files（CSV出力に必要）
    - Manage Roles（`/setup` での班ロール・管理者ロールの自動作成に必要）
+   - Manage Channels（`#bot-log` チャンネルの自動作成に必要）
 4. ページ下部に出る URL をコピーしてブラウザで開き、対象のサークルサーバーを選んで招待します。
+
+> スラッシュコマンドはグローバル登録のため、招待後の反映に最大1時間程度
+> かかることがあります。
 
 ## A-3. 各種 ID を取得する
 
@@ -442,7 +456,7 @@ $ sudo cp ~/club-bot/app/deploy/club-bot.logrotate /etc/logrotate.d/club-bot
 | 症状 | 確認すること |
 |---|---|
 | 起動時「必須設定が不足しています」 | `~/club-bot/.env` の `DISCORD_TOKEN` と `GUILD_ID` が埋まっているか |
-| スラッシュコマンドが Discord に出ない | 招待時に `applications.commands` を付けたか / `GUILD_ID` が正しいか / 数分待つ |
+| スラッシュコマンドが Discord に出ない | 招待時に `applications.commands` を付けたか / コマンドはグローバル登録のため反映に最大1時間程度かかることがある（Ctrl+R でクライアント再起動も試す） |
 | メンバー一覧が取れない | Developer Portal で **SERVER MEMBERS INTENT** が ON か |
 | 投票のリアクションが反映されない | Bot に **Manage Messages** 権限があるか / **MESSAGE CONTENT INTENT** が ON か |
 | `/health` で Todoist が「未登録」 | そのサーバーで `/todoist-setup` を実行したか。`ENCRYPTION_KEY` が `.env` に正しく設定されているか |
