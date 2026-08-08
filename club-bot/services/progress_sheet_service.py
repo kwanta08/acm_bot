@@ -52,7 +52,8 @@ PROGRESS_HEADER = [
     "進捗率(手入力)", "集計進捗率", "進捗バー", "ソース",
     "TodoistタスクID", "更新日時",
 ]
-MAPPING_HEADER = ["Todoistプロジェクト名", "紐付け先ノードID", "通知チャンネルID"]
+MAPPING_HEADER = ["Todoistプロジェクト名", "紐付け先ノードID", "通知チャンネルID",
+                  "登録ギルドID"]
 SETTINGS_HEADER = ["キー", "値", "メモ"]
 SPAR_MAPPING_HEADER = ["桁巻きファイル内の識別子", "紐付け先ノードID"]
 
@@ -183,11 +184,13 @@ def build_writeback_ranges(grid: list[list], tree: ProgressTree,
 
 def parse_mapping_grid(grid: list[list]) -> list[dict[str, str]]:
     """Todoist対応表のグリッドを
-    [{project_name, node_id, notify_channel_id}] へ変換する。
+    [{project_name, node_id, notify_channel_id, guild_id}] へ変換する。
 
     プロジェクト名・ノード ID のどちらかが空の行はスキップする。
-    通知チャンネルID 列（3列目）は任意（旧2列シートも読める）。
-    空欄は「設定」タブのデフォルト通知チャンネルへのフォールバックを意味する。
+    通知チャンネルID（3列目）・登録ギルドID（4列目）は任意
+    （旧2〜3列シートも読める）。通知チャンネルID の空欄は「設定」タブの
+    デフォルト通知チャンネルへのフォールバックを意味する。
+    登録ギルドID はどのサーバーの /progress setup で登録されたかの追跡用。
     """
     out: list[dict[str, str]] = []
     for row in grid[1:]:
@@ -195,7 +198,8 @@ def parse_mapping_grid(grid: list[list]) -> list[dict[str, str]]:
         node_id = _cell(row, 1)
         if project and node_id:
             out.append({"project_name": project, "node_id": node_id,
-                        "notify_channel_id": _cell(row, 2)})
+                        "notify_channel_id": _cell(row, 2),
+                        "guild_id": _cell(row, 3)})
     return out
 
 
@@ -243,14 +247,14 @@ def dashboard_cells() -> list[dict[str, Any]]:
         {"range": f"'{DASHBOARD_SHEET}'!A1:B2", "values": [
             ["機体全体の進捗", ""],
             [f"=IFERROR(AVERAGE(FILTER({q}!I2:I, {q}!D2:D=0)), 0)",
-             f'=SPARKLINE(A2, {{"charttype","bar";"max",1;"color1","#4a86e8"}})'],
+             '=SPARKLINE(A2, {"charttype","bar";"max",1;"color1","#4a86e8"})'],
         ]},
         {"range": f"'{DASHBOARD_SHEET}'!A4:B4", "values": [
             ["パーツ別進捗（深さ=1）", ""],
         ]},
         {"range": f"'{DASHBOARD_SHEET}'!A5", "values": [
-            [f"=IFERROR(SORT(FILTER({{{q}!E2:E, {q}!I2:I}}, "
-             f"{q}!D2:D=1), 2, TRUE), \"（データなし）\")"],
+            [(f"=IFERROR(SORT(FILTER({{{q}!E2:E, {q}!I2:I}}, "
+              f"{q}!D2:D=1), 2, TRUE), \"（データなし）\")")],
         ]},
         {"range": f"'{DASHBOARD_SHEET}'!D4:E7", "values": [
             ["状態別内訳", ""],
@@ -341,7 +345,7 @@ class ProgressSheetClient:
                    rows: int = 200, cols: int = 15) -> Any:
         try:
             return book.worksheet(title), False
-        except Exception:  # noqa: BLE001  (gspread.WorksheetNotFound 等)
+        except Exception:
             if not create:
                 raise
             return book.add_worksheet(title=title, rows=rows, cols=cols), True
@@ -398,11 +402,17 @@ class ProgressSheetClient:
         ws.append_rows(rows, value_input_option="USER_ENTERED")
 
     def append_mapping_row(self, spreadsheet_id: str, project_name: str,
-                           node_id: str, notify_channel_id: str = "") -> None:
-        """Todoist対応表に1行追加する（/progress setup 用）。"""
+                           node_id: str, notify_channel_id: str = "",
+                           guild_id: str = "") -> None:
+        """Todoist対応表に1行追加する（/progress setup 用）。
+
+        guild_id にはどのサーバーから登録されたかを記録する
+        （空文字なら未記録。旧仕様との互換のため必須にはしない）。
+        """
         ws, _ = self._worksheet(self._open(spreadsheet_id), MAPPING_SHEET)
-        ws.append_rows([[project_name, node_id, notify_channel_id]],
-                       value_input_option="USER_ENTERED")
+        ws.append_rows(
+            [[project_name, node_id, notify_channel_id, guild_id]],
+            value_input_option="USER_ENTERED")
 
     # ---------- 初期セットアップ ----------
     def setup_book(self, spreadsheet_id: str) -> dict[str, bool]:
@@ -428,6 +438,20 @@ class ProgressSheetClient:
         created[MAPPING_SHEET] = is_new
         if is_new:
             ws_mapping.update([MAPPING_HEADER])
+        else:
+            # 旧シート（登録ギルドID 列なし）にはヘッダー行のみ追記する（冪等。
+            # データ行には触れない。旧行の 4 列目は空欄のまま = 未記録扱い）
+            values = ws_mapping.get_all_values()
+            header = values[0] if values else []
+            if len(header) < len(MAPPING_HEADER) or not str(
+                    header[len(MAPPING_HEADER) - 1]).strip():
+                book.values_batch_update(body={
+                    "valueInputOption": "USER_ENTERED",
+                    "data": [{
+                        "range": f"'{MAPPING_SHEET}'!A1:D1",
+                        "values": [MAPPING_HEADER],
+                    }],
+                })
 
         ws_settings, is_new = self._worksheet(
             book, SETTINGS_SHEET, create=True, rows=50, cols=5)

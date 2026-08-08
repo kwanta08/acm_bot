@@ -9,8 +9,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from services import progress_sheet_service as pss  # noqa: E402
-from services.progress_tree import build_and_aggregate  # noqa: E402
+from services import progress_sheet_service as pss
+from services.progress_tree import build_and_aggregate
 
 HEADER = pss.PROGRESS_HEADER
 
@@ -122,17 +122,20 @@ def test_writeback_empty_grid():
 def test_parse_mapping_grid():
     grid = [
         pss.MAPPING_HEADER,
-        ["主翼班", "p1", "111"],
+        ["主翼班", "p1", "111", "222"],
         ["", "x"],           # 名前欠落はスキップ
         ["尾翼班", ""],      # ノード ID 欠落はスキップ
-        ["電装班", "p2"],    # 旧2列形式（通知チャンネル列なし）も読める
+        ["電装班", "p2"],    # 旧2列形式（通知チャンネル・ギルド列なし）も読める
+        ["桁班", "p3", "333"],  # 旧3列形式（ギルド列なし）も読める
     ]
     mapping = pss.parse_mapping_grid(grid)
     assert mapping == [
         {"project_name": "主翼班", "node_id": "p1",
-         "notify_channel_id": "111"},
+         "notify_channel_id": "111", "guild_id": "222"},
         {"project_name": "電装班", "node_id": "p2",
-         "notify_channel_id": ""},
+         "notify_channel_id": "", "guild_id": ""},
+        {"project_name": "桁班", "node_id": "p3",
+         "notify_channel_id": "333", "guild_id": ""},
     ]
 
 
@@ -250,8 +253,17 @@ def test_client_append_mapping_row():
     ws = FakeWorksheet(pss.MAPPING_SHEET, values=[pss.MAPPING_HEADER])
     book = FakeBook([ws])
     client = pss.ProgressSheetClient(client=FakeClient(book))
-    client.append_mapping_row("sid", "主翼班", "wing", "999")
-    assert ws.appended == [["主翼班", "wing", "999"]]
+    client.append_mapping_row("sid", "主翼班", "wing", "999", "12345")
+    assert ws.appended == [["主翼班", "wing", "999", "12345"]]
+
+
+def test_client_append_mapping_row_without_guild_id():
+    """guild_id 省略時は空欄で追記される（後方互換）。"""
+    ws = FakeWorksheet(pss.MAPPING_SHEET, values=[pss.MAPPING_HEADER])
+    book = FakeBook([ws])
+    client = pss.ProgressSheetClient(client=FakeClient(book))
+    client.append_mapping_row("sid", "主翼班", "wing")
+    assert ws.appended == [["主翼班", "wing", "", ""]]
 
 
 def test_client_read_grid_and_titles():
@@ -299,6 +311,38 @@ def test_setup_book_creates_sheets_idempotently():
                         pss.DASHBOARD_SHEET: False}
     assert len(book.format_batches) == 1
     assert len(book.sheets[pss.PROGRESS_SHEET].updates) == 1
+
+
+def _mapping_header_batches(book):
+    return [d for batch in book.value_batches for d in batch["data"]
+            if d["range"] == f"'{pss.MAPPING_SHEET}'!A1:D1"]
+
+
+def test_setup_book_extends_legacy_mapping_header():
+    """旧3列の Todoist対応表に「登録ギルドID」ヘッダーだけを追記する。"""
+    legacy_header = pss.MAPPING_HEADER[:3]
+    ws = FakeWorksheet(pss.MAPPING_SHEET,
+                       values=[legacy_header, ["主翼班", "wing", "999"]])
+    book = FakeBook([ws])
+    client = pss.ProgressSheetClient(client=FakeClient(book))
+
+    client.setup_book("sid")
+    batches = _mapping_header_batches(book)
+    assert batches == [{"range": f"'{pss.MAPPING_SHEET}'!A1:D1",
+                        "values": [pss.MAPPING_HEADER]}]
+    # データ行には触れない（append も update もされない）
+    assert ws.appended == []
+    assert ws.updates == []
+
+
+def test_setup_book_keeps_current_mapping_header():
+    """4列ヘッダー済みのシートにはヘッダーを書き直さない。"""
+    ws = FakeWorksheet(pss.MAPPING_SHEET, values=[list(pss.MAPPING_HEADER)])
+    book = FakeBook([ws])
+    client = pss.ProgressSheetClient(client=FakeClient(book))
+
+    client.setup_book("sid")
+    assert _mapping_header_batches(book) == []
 
 
 def test_client_unavailable_without_credentials(monkeypatch):

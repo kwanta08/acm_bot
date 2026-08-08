@@ -498,7 +498,8 @@ class ProjectSetupWizard(discord.ui.View):
                                   self.new_part_root_id, now_text)])
             await asyncio.to_thread(
                 client.append_mapping_row, self.spreadsheet_id,
-                self.project_name, self.anchor_id, notify_channel_id)
+                self.project_name, self.anchor_id, notify_channel_id,
+                str(self.guild_id))
         except Exception as e:  # noqa: BLE001  (gspread の API エラー等)
             log.warning("対応表への登録失敗 (guild=%s): %s",
                         self.guild_id, type(e).__name__)
