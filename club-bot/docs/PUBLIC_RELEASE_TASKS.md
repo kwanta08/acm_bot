@@ -20,7 +20,7 @@
 - [x] **P0-2** `README.md` を全面書き換え。「各サークルが自分で Bot を立てる」前提を捨て、
       「公開招待URLを踏むだけ」の導入手順にする。対象が鳥人間サークルであることを明示し、
       `/layer`（桁巻き積層記録）と `/progress`（機体進捗管理）が何をする機能かを説明する
-- [ ] **P0-3** `docs/TERMS.md`（利用規約）と `docs/PRIVACY.md`（プライバシーポリシー）を作成する。
+- [x] **P0-3** `docs/TERMS.md`（利用規約）と `docs/PRIVACY.md`（プライバシーポリシー）を作成する。
       収集するデータ（Discord ユーザーID・表示名・所属班・出欠・作業記録）、
       保存場所、削除請求の方法を明記する
 - [ ] **P0-4** `ENCRYPTION_KEY` のバックアップとローテーション方針を `docs/OPERATION.md` に追記する。
@@ -71,3 +71,4 @@
 | （方針確認） | 2026-08-08 ユーザー判断: Phase 2/3 の要望があったが、**Phase 1 を先に完走**し、**1タスクずつ**進める方針を維持する（`migrations/` が 008 までで `progress_nodes` 未作成のため P2-4 の progress グリッドと P3-2 が Phase 1 なしでは完成しないことを確認） |
 | P0-1 | intents 構築を `bot.build_intents()` に切り出して `message_content` を削除。特権インテントは `members` のみに（`presences` も不要）。`tests/test_intents.py` で intents の検証に加え、`on_message` / `message.content` / prefix コマンド / `message_content =` のソース再混入を走査（コメント・文字列リテラルは `tokenize` で除外）。`docs/SETUP.md` の Portal 手順も MESSAGE CONTENT を OFF に更新。**申し送り**: `command_prefix="!club "` は `commands.Bot` の必須引数のため残置（prefix コマンドは未定義で機能しない）。P0-2 の README 書き換え時に、必要インテントは SERVER MEMBERS のみと明記すること |
 | P0-2 | README を招待URL前提の3ステップ導入（招待 → `/setup` → 運用開始）へ全面書き換え。冒頭で対象＝鳥人間サークルを明示し、`/layer` `/progress` はサブコマンド単位の専用セクションに。`/progress` の Sheets 共有が残る制約と、`message_content` を要求しない旨も記載。**設計判断**: 招待URLは P0-5（人間タスク）完了まで確定しないため、URL 欄は「公開準備中」のプレースホルダとし HTML コメントで差し替え箇所を明示した。**申し送り**: (1) P0-5 完了後に README の招待URLを差し替えること。(2) README から `docs/TERMS.md` / `docs/PRIVACY.md` へのリンクは未設置 — P0-3 で作成したら「よくある質問」の該当箇所とドキュメント表にリンクを追加すること。(3) `docs/DESIGN_PUBLIC_DISTRIBUTION.md` は git 未追跡のままなので、コミットしないと README のリンクが GitHub 上で切れる |
+| P0-3 | `docs/TERMS.md` と `docs/PRIVACY.md` を作成し、README からリンク（招待をもって規約同意）。収集項目は `utils/db.py` の `TABLE_DDL` を実地確認して 12 テーブル分を列挙。**設計判断**: (1) 運営者名・連絡先・サーバー所在地は P0-5 まで確定しないため `〈…〉` プレースホルダとし、各文書冒頭に「公開前に記入が必要な項目」として明示。(2) `on_guild_remove` ハンドラが存在せず**キックしてもデータは消えない**ことを確認したため、その事実を規約・ポリシー・README の3箇所に明記し、削除請求フロー（サーバー単位 / 個人単位 / 自分で消せるコマンド）を用意。(3) `guild_directus_access` のメールアドレス欄は現在 Bot から書き込まれないため、その旨を注記して列挙。**申し送り**: P0-5 完了時にプレースホルダ3種を全文書で置換すること |
