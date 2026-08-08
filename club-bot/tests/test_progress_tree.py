@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from services.progress_tree import (  # noqa: E402
+from services.progress_tree import (
     ProgressNode,
     build_and_aggregate,
     build_tree,

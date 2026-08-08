@@ -136,8 +136,8 @@ async def collect_spar_progress(
         master_grid = await asyncio.to_thread(
             client.read_grid, spar_book_id, SPAR_MASTER_SHEET)
     except Exception:  # noqa: BLE001  (シート不在・権限エラー等)
-        return {}, [f"桁巻きブックの「{SPAR_MASTER_SHEET}」シートを"
-                    "読み込めません（シート名・共有設定を確認してください）"]
+        return {}, [(f"桁巻きブックの「{SPAR_MASTER_SHEET}」シートを"
+                     "読み込めません（シート名・共有設定を確認してください）")]
     master = parse_master_grid(master_grid)
 
     out: dict[str, float] = {}

@@ -7,8 +7,8 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from services import progress_sheet_service as pss  # noqa: E402
-from services import spar_winding_service as spar  # noqa: E402
+from services import progress_sheet_service as pss
+from services import spar_winding_service as spar
 
 HEADER = pss.PROGRESS_HEADER
 
@@ -170,6 +170,6 @@ def test_sync_spar_winding_caps_progress_at_100_percent():
             ],
         })
     settings = {pss.SHEET_KEY_SPAR_BOOK: "SPAR_BOOK"}
-    plan = run(spar.sync_spar_winding(client, "CENTRAL", settings))
+    run(spar.sync_spar_winding(client, "CENTRAL", settings))
     ranges = {r["range"]: r["values"] for r in client.applied[0]}
     assert ranges[f"'{pss.PROGRESS_SHEET}'!G3:H3"] == [["完了", 1.0]]

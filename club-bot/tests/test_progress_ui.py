@@ -9,7 +9,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from cogs.progress import (  # noqa: E402
+from cogs.progress import (
     CHART_FILENAME,
     anchor_candidates,
     breadcrumb,
@@ -19,8 +19,8 @@ from cogs.progress import (  # noqa: E402
     new_part_row,
     unmapped_projects,
 )
-from services.progress_tree import ProgressNode, build_and_aggregate  # noqa: E402
-from utils.progress_chart import render_progress_bars  # noqa: E402
+from services.progress_tree import ProgressNode, build_and_aggregate
+from utils.progress_chart import render_progress_bars
 
 
 def _node(node_id, parent=None, *, name=None, progress=None, order=0.0,
