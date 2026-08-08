@@ -12,10 +12,12 @@ from typing import Any
 
 import discord
 
-from config import config
 from repositories.schedule_repository import ScheduleRepository
 from utils.embeds import schedule_embed
+from utils.logger import get_logger
 from utils.parser import fmt_jp, from_iso
+
+log = get_logger("schedule_service")
 
 DEFAULT_STATUS_TO_EMOJI = {
     "ok": "✅",
@@ -37,33 +39,50 @@ def parse_options(options_str: str) -> list[str]:
     return [p.strip() for p in options_str.split(";") if p.strip()]
 
 
-def get_schedule_emojis(bot, guild: discord.Guild | None = None) -> dict[str, str | discord.PartialEmoji]:
-    """スケジュール用絵文字を返す。custom emoji が取れなければ既定絵文字へフォールバック。"""
-    resolved = {}
+def get_schedule_emojis(gconf, guild: discord.Guild | None = None) -> dict[str, Any]:
+    """スケジュール用絵文字を返す（ステータス → 絵文字）。
+
+    ギルド別設定（gconf.schedule_emoji_*_id。DB > 環境変数の順で解決済み）の
+    カスタム絵文字 ID を guild.get_emoji() で実在検証して使う。
+    未設定・検証不能（設定後にサーバーから削除された等）の場合は
+    既定絵文字（✅❓❌）へフォールバックし、警告ログを残す。
+    guild.get_emoji() は animated フラグ込みの discord.Emoji を返すため、
+    アニメーション絵文字でもそのままリアクション付与できる。
+    """
+    resolved: dict[str, Any] = {}
     mapping = {
-        "ok": config.schedule_emoji_ok_id,
-        "maybe": config.schedule_emoji_maybe_id,
-        "ng": config.schedule_emoji_ng_id,
+        "ok": getattr(gconf, "schedule_emoji_ok_id", None),
+        "maybe": getattr(gconf, "schedule_emoji_maybe_id", None),
+        "ng": getattr(gconf, "schedule_emoji_ng_id", None),
     }
     for status, emoji_id in mapping.items():
-        if emoji_id:
-            resolved[status] = discord.PartialEmoji(name=status, id=emoji_id)
-        else:
-            resolved[status] = DEFAULT_STATUS_TO_EMOJI[status]
+        emoji = None
+        if emoji_id and guild is not None:
+            emoji = guild.get_emoji(emoji_id)
+            if emoji is None:
+                log.warning(
+                    "設定された絵文字が見つかりません"
+                    " (status=%s, emoji_id=%s, guild=%s)。"
+                    "既定絵文字へフォールバックします",
+                    status, emoji_id, getattr(guild, "id", "?"))
+        resolved[status] = emoji or DEFAULT_STATUS_TO_EMOJI[status]
     return resolved
 
 
-def build_emoji_maps(bot, guild: discord.Guild | None = None) -> dict:
-    status_to_emoji = get_schedule_emojis(bot, guild)
+def emoji_key(emoji: Any) -> str:
+    """集計用のキー（カスタム絵文字は ID、Unicode 絵文字はそのもの）。"""
+    emoji_id = getattr(emoji, "id", None)
+    return str(emoji_id) if emoji_id else str(emoji)
+
+
+def build_emoji_maps(gconf, guild: discord.Guild | None = None) -> dict:
+    status_to_emoji = get_schedule_emojis(gconf, guild)
     emoji_to_status = {}
     all_emojis = []
 
     for status, emoji in status_to_emoji.items():
         all_emojis.append(emoji)
-        if isinstance(emoji, discord.PartialEmoji) and emoji.id:
-            emoji_to_status[str(emoji.id)] = status
-        else:
-            emoji_to_status[str(emoji)] = status
+        emoji_to_status[emoji_key(emoji)] = status
 
     return {
         "status_to_emoji": status_to_emoji,
