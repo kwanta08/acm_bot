@@ -289,7 +289,8 @@ class ProgressView(discord.ui.View):
             return
         await interaction.response.defer()
         try:
-            self.tree = await self.cog.load_tree(self.guild_id)
+            self.tree = await self.cog.load_tree(self.guild_id,
+                                                 force_refresh=True)
         except Exception as e:  # noqa: BLE001
             log.warning("進捗ツリー再読込失敗 (guild=%s): %s",
                         self.guild_id, type(e).__name__)
@@ -540,6 +541,9 @@ class Progress(commands.Cog):
         self.bot = bot
         self.db: Database = bot.db  # type: ignore
         self._client_factory = client_factory or pss.ProgressSheetClient
+        # 定期同期が構築したツリーのメモリキャッシュ（spreadsheet_id キー）。
+        # /progress の表示はこれを参照し、コマンドの都度シートを読まない
+        self._tree_cache: dict[str, ProgressTree] = {}
 
     def _client(self) -> pss.ProgressSheetClient:
         return self._client_factory()
@@ -553,22 +557,41 @@ class Progress(commands.Cog):
         self.daily_project_notify.cancel()
 
     # ---------- 共通処理 ----------
-    async def load_tree(self, guild_id: int) -> ProgressTree:
-        """シートを読み込んでツリーを構築する（書き戻しはしない）。"""
+    async def load_tree(self, guild_id: int, *,
+                        force_refresh: bool = False) -> ProgressTree:
+        """進捗ツリーを返す（書き戻しはしない）。
+
+        通常は定期同期が構築したメモリキャッシュを返し、シートは読まない。
+        キャッシュが無い場合（起動直後等）と force_refresh=True
+        （🔄 再読込ボタン）のときだけシートを読み、キャッシュを更新する。
+        """
         spreadsheet_id = await progress_sync_service.get_spreadsheet_id(
             self.db, guild_id)
         if spreadsheet_id is None:
             raise ProgressSheetUnavailable(_NOT_CONFIGURED_DESC)
+        if not force_refresh:
+            cached = self._tree_cache.get(spreadsheet_id)
+            if cached is not None:
+                return cached
         client = self._client()
         grid = await asyncio.to_thread(
             client.read_progress_grid, spreadsheet_id)
         from services.progress_tree import build_and_aggregate
-        return build_and_aggregate(pss.grid_to_nodes(grid))
+        tree = build_and_aggregate(pss.grid_to_nodes(grid))
+        self._tree_cache[spreadsheet_id] = tree
+        return tree
+
+    def _cache_tree(self, result) -> None:
+        """同期結果のツリーをキャッシュへ反映する。"""
+        if result is not None and result.tree is not None:
+            self._tree_cache[result.spreadsheet_id] = result.tree
 
     async def _run_sync(self, guild_id: int):
         svc = await self.bot.todoist_manager.for_guild(guild_id)
-        return await progress_sync_service.sync_guild(
+        result = await progress_sync_service.sync_guild(
             self.db, guild_id, svc, self._client())
+        self._cache_tree(result)
+        return result
 
     # ---------- 定期同期（20分ごと・bot全体で単一ジョブ） ----------
     @tasks.loop(minutes=SYNC_INTERVAL_MINUTES)
@@ -587,6 +610,7 @@ class Progress(commands.Cog):
             return
         for outcome in outcomes:
             result = outcome.result
+            self._cache_tree(result)
             if result is None or not result.errors:
                 continue
             lines = "\n".join(f"- {e}" for e in result.errors[:10])

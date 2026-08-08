@@ -62,7 +62,11 @@ class UpsertPlan:
 
 @dataclass
 class SyncResult:
-    """1ギルド分の同期結果（通知・ログ用）。"""
+    """1シート分の同期結果（通知・ログ用）。
+
+    tree には再集計後の進捗ツリーを保持する（Discord 表示用の
+    メモリキャッシュに使う。クリックの都度シートを読みに行かない）。
+    """
     spreadsheet_id: str
     projects: int = 0
     added: int = 0
@@ -70,6 +74,7 @@ class SyncResult:
     completed: int = 0
     spar_updated: int = 0
     errors: list[str] = field(default_factory=list)
+    tree: ProgressTree | None = None
 
 
 def _descendant_todoist_rows(tree: ProgressTree,
@@ -274,6 +279,7 @@ async def sync_sheet(spreadsheet_id: str, todoist_svc: Any,
         result.errors.extend(spar_plan.errors)
 
     tree = await recalculate(client, spreadsheet_id)
+    result.tree = tree
     result.errors.extend(
         f"行スキップ: {e.node_id or '(ID なし)'} — {e.reason}"
         for e in tree.errors)
