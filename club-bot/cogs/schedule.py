@@ -17,6 +17,7 @@ from discord.ext import commands
 
 from config import config
 from repositories.schedule_repository import ScheduleRepository
+from repositories.settings_repository import SettingsRepository
 from services import schedule_service as svc
 from services.schedule_service import build_emoji_maps
 from utils.embeds import error_embed, info_embed, schedule_embed, success_embed
@@ -29,9 +30,56 @@ from utils.parser import (
     parse_deadline,
     to_iso,
 )
-from utils.permissions import Level, ensure_guild, require
+from utils.permissions import Level, ensure_guild, is_admin, require
 
 log = get_logger("schedule")
+
+# 出欠ステータスの表示名と、ギルド別設定（settings テーブル）のキー
+STATUS_LABELS = {"ok": "参加", "maybe": "未定", "ng": "不参加"}
+EMOJI_SETTING_KEYS = {
+    "ok": "SCHEDULE_EMOJI_OK_ID",
+    "maybe": "SCHEDULE_EMOJI_MAYBE_ID",
+    "ng": "SCHEDULE_EMOJI_NG_ID",
+}
+
+STATUS_CHOICES = [
+    app_commands.Choice(name="参加（既定 ✅）", value="ok"),
+    app_commands.Choice(name="未定（既定 ❓）", value="maybe"),
+    app_commands.Choice(name="不参加（既定 ❌）", value="ng"),
+]
+
+
+def filter_emoji_choices(emojis, current: str) -> list[app_commands.Choice[str]]:
+    """サーバーのカスタム絵文字を名前で部分一致フィルタし Choice を返す。
+
+    Discord の制約（候補は最大25件）に合わせて切り詰める。
+    Choice の value には絵文字 ID を持たせ、実行時に
+    guild.get_emoji(int(value)) で解決する。
+    """
+    query = (current or "").strip().strip(":").lower()
+    out: list[app_commands.Choice[str]] = []
+    for emoji in emojis:
+        name = str(getattr(emoji, "name", ""))
+        if query and query not in name.lower():
+            continue
+        out.append(app_commands.Choice(name=f":{name}:"[:100],
+                                       value=str(emoji.id)))
+        if len(out) >= 25:
+            break
+    return out
+
+
+def resolve_emoji_input(guild: discord.Guild, raw: str) -> discord.Emoji | None:
+    """emoji オプションの入力値をサーバーのカスタム絵文字へ解決する。
+
+    オートコンプリート選択時は絵文字 ID（数字）。候補を選ばず名前を
+    手入力した場合にも対応する（`:name:` / name）。解決できなければ None。
+    """
+    value = (raw or "").strip()
+    if value.isdigit():
+        return guild.get_emoji(int(value))
+    name = value.strip(":")
+    return discord.utils.get(guild.emojis, name=name)
 
 
 class Schedule(commands.Cog):
@@ -40,6 +88,9 @@ class Schedule(commands.Cog):
         self.repo = ScheduleRepository(bot.db)
 
     group = app_commands.Group(name="schedule", description="日程調整・出欠管理")
+    emoji_group = app_commands.Group(
+        name="emoji", parent=group,
+        description="出欠リアクション絵文字のサーバー別設定（管理者）")
 
     # ---------- create ----------
     @group.command(name="create", description="新規日程調整を作成します。")
@@ -133,6 +184,51 @@ class Schedule(commands.Cog):
                                 f"ID: `{schedule_id}`\n候補数: {len(parsed_options)}\n"
                                 f"締切: {fmt_jp(deadline_dt)}\n投稿先: {target_channel.mention}",
                                 executor=interaction.user.display_name),
+            ephemeral=True)
+
+    # ==================================================================
+    # /schedule emoji — 出欠リアクション絵文字のサーバー別設定
+    # ==================================================================
+    async def _emoji_ac(self, interaction: discord.Interaction,
+                        current: str) -> list[app_commands.Choice[str]]:
+        if interaction.guild is None:
+            return []
+        return filter_emoji_choices(interaction.guild.emojis, current)
+
+    @emoji_group.command(
+        name="set",
+        description="出欠リアクションにサーバーのカスタム絵文字を設定します（管理者）。")
+    @app_commands.describe(
+        status="どの出欠ステータスの絵文字を変更するか",
+        emoji="カスタム絵文字（名前の一部を入力して候補から選択）")
+    @app_commands.choices(status=STATUS_CHOICES)
+    @app_commands.autocomplete(emoji=_emoji_ac)
+    @app_commands.check(is_admin)
+    async def emoji_set(self, interaction: discord.Interaction,
+                        status: str, emoji: str):
+        await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        resolved = resolve_emoji_input(interaction.guild, emoji)
+        if resolved is None:
+            await interaction.followup.send(
+                embed=error_embed(
+                    "このサーバーのカスタム絵文字が見つかりません。\n"
+                    "絵文字名の一部を入力し、候補から選択してください。"),
+                ephemeral=True)
+            return
+
+        await SettingsRepository(self.bot.db).set(
+            guild_id, EMOJI_SETTING_KEYS[status], str(resolved.id))
+        config.invalidate_guild(guild_id)
+        await interaction.followup.send(
+            embed=success_embed(
+                "リアクション絵文字を設定しました",
+                f"{STATUS_LABELS[status]}: {resolved}\n"
+                "この後に作成する日程調整から適用されます"
+                "（投稿済みの投票メッセージは変わりません）。",
+                executor=interaction.user.display_name),
             ephemeral=True)
 
     # ---------- list ----------

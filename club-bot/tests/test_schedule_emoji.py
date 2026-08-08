@@ -12,6 +12,11 @@ from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from cogs.schedule import (
+    EMOJI_SETTING_KEYS,
+    filter_emoji_choices,
+    resolve_emoji_input,
+)
 from config import GuildConfig
 from services.schedule_service import (
     DEFAULT_STATUS_TO_EMOJI,
@@ -83,3 +88,48 @@ def test_build_emoji_maps_keys_match_reaction_payload():
     assert maps["emoji_to_status"]["❌"] == "ng"
     assert maps["all_emojis"] == [OK_EMOJI, "❓", "❌"]
     assert maps["status_to_emoji"]["ok"] is OK_EMOJI
+
+
+# ---------------------------------------------------------------------
+# /schedule emoji set（オートコンプリート・入力解決）
+# ---------------------------------------------------------------------
+def _emojis(n=3, prefix="tori"):
+    return [FakeEmoji(id=2000 + i, name=f"{prefix}{i}", animated=False)
+            for i in range(n)]
+
+
+def test_filter_emoji_choices_filters_by_name():
+    emojis = [*_emojis(3), FakeEmoji(id=3000, name="hikouki", animated=False)]
+    choices = filter_emoji_choices(emojis, "tori")
+    assert [c.name for c in choices] == [":tori0:", ":tori1:", ":tori2:"]
+    # value は絵文字 ID（実行時に guild.get_emoji(int(value)) で解決）
+    assert [c.value for c in choices] == ["2000", "2001", "2002"]
+
+
+def test_filter_emoji_choices_strips_colons_and_ignores_case():
+    emojis = [FakeEmoji(id=1, name="ToriSan", animated=False)]
+    assert len(filter_emoji_choices(emojis, ":tori")) == 1
+    assert len(filter_emoji_choices(emojis, "SAN")) == 1
+
+
+def test_filter_emoji_choices_caps_at_25():
+    choices = filter_emoji_choices(_emojis(40), "")
+    assert len(choices) == 25
+
+
+def test_resolve_emoji_input_by_id_and_name():
+    guild = FakeGuild([OK_EMOJI])
+    assert resolve_emoji_input(guild, "1001") is OK_EMOJI       # ID（候補選択）
+    assert resolve_emoji_input(guild, "sanka") is OK_EMOJI      # 名前手入力
+    assert resolve_emoji_input(guild, ":sanka:") is OK_EMOJI
+    assert resolve_emoji_input(guild, "9999") is None           # 不在 ID
+    assert resolve_emoji_input(guild, "ghost") is None          # 不在名
+
+
+def test_emoji_setting_keys_match_guild_config_resolution():
+    """設定キーが config.for_guild の解決キーと一致している。"""
+    assert EMOJI_SETTING_KEYS == {
+        "ok": "SCHEDULE_EMOJI_OK_ID",
+        "maybe": "SCHEDULE_EMOJI_MAYBE_ID",
+        "ng": "SCHEDULE_EMOJI_NG_ID",
+    }
