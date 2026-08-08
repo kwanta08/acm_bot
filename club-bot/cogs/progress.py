@@ -570,21 +570,30 @@ class Progress(commands.Cog):
         return await progress_sync_service.sync_guild(
             self.db, guild_id, svc, self._client())
 
-    # ---------- 定期同期（20分ごと） ----------
+    # ---------- 定期同期（20分ごと・bot全体で単一ジョブ） ----------
     @tasks.loop(minutes=SYNC_INTERVAL_MINUTES)
     async def periodic_sync(self):
-        for guild in list(self.bot.guilds):
-            try:
-                result = await self._run_sync(guild.id)
-            except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
-                log.warning("進捗定期同期失敗 (guild=%s): %s",
-                            guild.id, type(e).__name__)
+        """全ギルドの進捗シートを一意なシートごとに1回だけ同期する。
+
+        複数サーバーが中央シートを共有していても Sheets API の消費は
+        シート数分で済む。エラーはそのシートを使う全ギルドの #bot-log へ。
+        """
+        guild_ids = [g.id for g in self.bot.guilds]
+        try:
+            outcomes = await progress_sync_service.sync_all(
+                self.db, guild_ids, self.bot.todoist_manager, self._client())
+        except Exception as e:  # noqa: BLE001  (次周期でリトライ)
+            log.warning("進捗定期同期失敗: %s", type(e).__name__)
+            return
+        for outcome in outcomes:
+            result = outcome.result
+            if result is None or not result.errors:
                 continue
-            if result and result.errors:
-                lines = "\n".join(f"- {e}" for e in result.errors[:10])
+            lines = "\n".join(f"- {e}" for e in result.errors[:10])
+            for guild_id in outcome.group.guild_ids:
                 await self.bot.log_to_channel(
                     f"[進捗同期] シートに問題があります:\n{lines}",
-                    guild_id=guild.id)
+                    guild_id=guild_id)
 
     @periodic_sync.before_loop
     async def _before_sync(self):

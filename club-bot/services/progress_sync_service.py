@@ -204,7 +204,7 @@ async def recalculate(client: pss.ProgressSheetClient,
 
 async def sync_guild(db: Database, guild_id: int, todoist_svc: Any,
                      client: pss.ProgressSheetClient) -> SyncResult | None:
-    """1ギルド分の Todoist 同期＋再集計を行う。
+    """1ギルド分の Todoist 同期＋再集計を行う（/progress sync 等の手動実行用）。
 
     進捗シート未設定のギルドは None を返して自動スキップする（例外にしない）。
     Todoist 未設定のギルドは再集計のみ行う。
@@ -213,7 +213,16 @@ async def sync_guild(db: Database, guild_id: int, todoist_svc: Any,
     spreadsheet_id = await get_spreadsheet_id(db, guild_id)
     if spreadsheet_id is None:
         return None
+    return await sync_sheet(spreadsheet_id, todoist_svc, client)
 
+
+async def sync_sheet(spreadsheet_id: str, todoist_svc: Any,
+                     client: pss.ProgressSheetClient) -> SyncResult:
+    """1スプレッドシート分の Todoist 同期＋再集計を行う。
+
+    中央シートを複数ギルドで共有している場合も、シート単位で1回だけ
+    呼べばよい（ギルド数に比例して Sheets API を消費しない）。
+    """
     result = SyncResult(spreadsheet_id=spreadsheet_id)
 
     if todoist_svc is not None and getattr(todoist_svc, "enabled", False):
@@ -268,7 +277,77 @@ async def sync_guild(db: Database, guild_id: int, todoist_svc: Any,
     result.errors.extend(
         f"行スキップ: {e.node_id or '(ID なし)'} — {e.reason}"
         for e in tree.errors)
-    log.info("進捗同期完了 (guild=%s): +%d行 / 更新%d / 完了%d / 桁巻き%d /"
-             " エラー%d", guild_id, result.added, result.updated,
+    log.info("進捗同期完了 (sheet=%s): +%d行 / 更新%d / 完了%d / 桁巻き%d /"
+             " エラー%d", spreadsheet_id, result.added, result.updated,
              result.completed, result.spar_updated, len(result.errors))
     return result
+
+
+# ---------------------------------------------------------------------
+# 全ギルド一括同期（単一の定期ジョブ用）
+# ---------------------------------------------------------------------
+@dataclass
+class SheetGroup:
+    """同じ進捗シートを登録しているギルドのグループ。"""
+    spreadsheet_id: str
+    guild_ids: list[int] = field(default_factory=list)
+
+
+@dataclass
+class GroupSyncOutcome:
+    """1シート分の同期結果（失敗した場合は error に例外を保持）。"""
+    group: SheetGroup
+    result: SyncResult | None = None
+    error: Exception | None = None
+
+
+async def collect_sheet_groups(db: Database,
+                               guild_ids: list[int]) -> list[SheetGroup]:
+    """ギルド一覧を進捗シート ID でグルーピングする（未設定ギルドは除外）。"""
+    groups: dict[str, SheetGroup] = {}
+    for guild_id in guild_ids:
+        spreadsheet_id = await get_spreadsheet_id(db, guild_id)
+        if spreadsheet_id is None:
+            continue
+        group = groups.setdefault(spreadsheet_id, SheetGroup(spreadsheet_id))
+        group.guild_ids.append(guild_id)
+    return list(groups.values())
+
+
+async def _pick_todoist_service(todoist_manager: Any,
+                                guild_ids: list[int]) -> Any:
+    """グループ内で Todoist が有効な最初のギルドのサービスを返す。"""
+    for guild_id in guild_ids:
+        try:
+            svc = await todoist_manager.for_guild(guild_id)
+        except Exception as e:  # noqa: BLE001  (トークン復号失敗等)
+            log.warning("Todoist サービス取得失敗 (guild=%s): %s",
+                        guild_id, type(e).__name__)
+            continue
+        if svc is not None and getattr(svc, "enabled", False):
+            return svc
+    return None
+
+
+async def sync_all(db: Database, guild_ids: list[int], todoist_manager: Any,
+                   client: pss.ProgressSheetClient) -> list[GroupSyncOutcome]:
+    """参加中ギルドの進捗シートを一意なシートごとに1回だけ同期する。
+
+    複数サーバーが中央シートを共有していてもシート単位で1回の
+    読み書きに集約され、Sheets API のクォータ消費がサーバー数に
+    比例しない。1シートの失敗は他シートの同期を止めない。
+    """
+    outcomes: list[GroupSyncOutcome] = []
+    for group in await collect_sheet_groups(db, guild_ids):
+        todoist_svc = await _pick_todoist_service(todoist_manager,
+                                                  group.guild_ids)
+        try:
+            result = await sync_sheet(group.spreadsheet_id, todoist_svc,
+                                      client)
+        except Exception as e:  # noqa: BLE001  (シート間の影響を遮断)
+            log.warning("進捗同期失敗 (sheet=%s): %s",
+                        group.spreadsheet_id, type(e).__name__)
+            outcomes.append(GroupSyncOutcome(group, error=e))
+            continue
+        outcomes.append(GroupSyncOutcome(group, result=result))
+    return outcomes
