@@ -51,14 +51,28 @@ def has_level(member: discord.Member, gconf: GuildConfig, required: Level) -> bo
     return get_level(member, gconf) >= required
 
 
+def has_manage_guild_or_level(member: discord.Member, gconf: GuildConfig,
+                              required: Level) -> bool:
+    """Discord 標準の「サーバー管理（Manage Server）」権限、
+    またはロール階層で required 以上なら True。
+
+    ロール未設定の新規サーバーでも Manage Server 保持者は
+    追加設定なしでコマンドを実行できる（マルチサーバー対応のデフォルト権限）。
+    """
+    if member.guild_permissions.manage_guild:
+        return True
+    return has_level(member, gconf, required)
+
+
 class PermissionDenied(app_commands.CheckFailure):
     """
     権限不足を表す例外（PERMISSION_DENIED）
     """
 
-    def __init__(self, required: Level):
+    def __init__(self, required: Level, message: str | None = None):
         self.required = required
-        super().__init__(f"この操作には L{int(required)} 以上の権限が必要です。")
+        super().__init__(
+            message or f"この操作には L{int(required)} 以上の権限が必要です。")
 
 
 async def _guild_config_for(interaction: discord.Interaction) -> GuildConfig:
@@ -79,6 +93,27 @@ def require(level: Level):
         gconf = await _guild_config_for(interaction)
         if not has_level(member, gconf, level):
             raise PermissionDenied(level)
+        return True
+
+    return app_commands.check(predicate)
+
+
+def require_manage_guild_or(level: Level):
+    """「サーバー管理」権限またはロール階層 level 以上で通す権限チェック。
+
+    /progress setup 等、サーバーごとのセルフサービス設定コマンド用。
+    """
+
+    async def predicate(interaction: discord.Interaction) -> bool:
+        member = interaction.user
+        if not isinstance(member, discord.Member) or interaction.guild is None:
+            raise PermissionDenied(level)
+        gconf = await _guild_config_for(interaction)
+        if not has_manage_guild_or_level(member, gconf, level):
+            raise PermissionDenied(
+                level,
+                "この操作には「サーバー管理（Manage Server）」権限、"
+                f"または L{int(level)} 以上の権限が必要です。")
         return True
 
     return app_commands.check(predicate)

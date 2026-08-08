@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import io
-from datetime import time as dtime, timedelta
+from datetime import time as dtime
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import discord
@@ -27,18 +28,23 @@ from discord.ext import commands, tasks
 
 # タスク一覧の整形は既存の Reminders 通知とスタイルを揃える
 from cogs.reminders import _build_grouped_description
-
+from config import config
 from services import progress_sheet_service as pss
 from services import progress_sync_service
 from services.progress_sheet_service import ProgressSheetUnavailable
 from services.progress_tree import ProgressNode, ProgressTree
 from services.todoist_service import TodoistError
-from config import config
 from utils import progress_chart
 from utils.embeds import error_embed, info_embed, success_embed, task_embed
 from utils.logger import get_logger
 from utils.parser import TZ, now
-from utils.permissions import Level, ensure_guild, is_admin, require
+from utils.permissions import (
+    Level,
+    ensure_guild,
+    is_admin,
+    require,
+    require_manage_guild_or,
+)
 
 if TYPE_CHECKING:
     from utils.db import Database
@@ -123,7 +129,7 @@ def build_level_embed(tree: ProgressTree,
             detail.append(f"内訳 {len(child.children)} 件")
         embed.add_field(
             name=f"{child.name or child.node_id} — {percent(child)}",
-            value=" / ".join(detail) or "​",  # 空はゼロ幅スペース
+            value=" / ".join(detail) or "\u200b",  # 空はゼロ幅スペース
             inline=False)
     if len(children) > 25:
         embed.set_footer(text=f"他 {len(children) - 25} 件（シートを参照）")
@@ -772,8 +778,9 @@ class Progress(commands.Cog):
     # ---------- /progress setup ----------
     @group.command(
         name="setup",
-        description="Todoist プロジェクトを進捗ツリーに紐付けます（班長以上）。")
-    @require(Level.L2)
+        description="Todoist プロジェクトを進捗ツリーに紐付けます"
+                    "（サーバー管理権限 or 班長以上）。")
+    @require_manage_guild_or(Level.L2)
     async def progress_setup(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
