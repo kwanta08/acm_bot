@@ -112,7 +112,8 @@ class Schedule(commands.Cog):
         scoped_repo = self.repo.for_guild(guild_id)
 
         # 候補ごとに1メッセージ投稿（仕様 11.2.3）
-        emoji_maps = build_emoji_maps(self.bot, interaction.guild)
+        # リアクション絵文字はギルド別設定（/schedule emoji set）を参照
+        emoji_maps = build_emoji_maps(gconf, interaction.guild)
         all_emojis = emoji_maps["all_emojis"]
 
         for label, start in parsed_options:
@@ -368,7 +369,8 @@ class Schedule(commands.Cog):
 
         guild_id = payload.guild_id
         guild = self.bot.get_guild(guild_id)
-        emoji_maps = build_emoji_maps(self.bot, guild)
+        gconf = await config.for_guild(guild_id)
+        emoji_maps = build_emoji_maps(gconf, guild)
         emoji_to_status = emoji_maps["emoji_to_status"]
         status_to_emoji = emoji_maps["status_to_emoji"]
 
@@ -400,7 +402,7 @@ class Schedule(commands.Cog):
 
     async def _remove_other_reactions(self, payload: discord.RawReactionActionEvent,
                                       keep_status: str,
-                                      status_to_emoji: dict[str, str | discord.PartialEmoji]):
+                                      status_to_emoji: dict[str, str | discord.Emoji]):
         channel = self.bot.get_channel(payload.channel_id) or \
             await self.bot.fetch_channel(payload.channel_id)
         try:
@@ -412,13 +414,8 @@ class Schedule(commands.Cog):
         if member is None:
             return
 
-        keep_emoji = status_to_emoji[keep_status]
-        keep_key = str(keep_emoji.id) if isinstance(keep_emoji, discord.PartialEmoji) else str(keep_emoji)
-
-        schedule_keys = set()
-        for emoji in status_to_emoji.values():
-            key = str(emoji.id) if isinstance(emoji, discord.PartialEmoji) else str(emoji)
-            schedule_keys.add(key)
+        keep_key = svc.emoji_key(status_to_emoji[keep_status])
+        schedule_keys = {svc.emoji_key(e) for e in status_to_emoji.values()}
 
         for reaction in message.reactions:
             reaction_key = (str(reaction.emoji.id)

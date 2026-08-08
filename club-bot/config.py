@@ -129,6 +129,11 @@ class GuildConfig:
     # サークル名（未設定時は汎用表現にフォールバック）
     club_name: str | None = None
 
+    # 日程調整のリアクション絵文字（カスタム絵文字 ID。未設定は既定 ✅❓❌）
+    schedule_emoji_ok_id: int | None = None
+    schedule_emoji_maybe_id: int | None = None
+    schedule_emoji_ng_id: int | None = None
+
     @property
     def today_channel_id(self) -> int | None:
         return self.today_label_channel_id or self.default_task_channel_id
@@ -261,6 +266,9 @@ class Config:
             leader_role_ids=list(self.leader_role_ids),
             primary_team_role_ids=dict(self.primary_team_role_ids),
             secondary_team_role_ids=dict(self.secondary_team_role_ids),
+            schedule_emoji_ok_id=self.schedule_emoji_ok_id,
+            schedule_emoji_maybe_id=self.schedule_emoji_maybe_id,
+            schedule_emoji_ng_id=self.schedule_emoji_ng_id,
         )
 
         if db is not None:
@@ -276,6 +284,9 @@ class Config:
                 ("TODAY_LABEL_CHANNEL_ID", "today_label_channel_id"),
                 ("EXEC_ROLE_ID", "exec_role_id"),
                 ("ADMIN_ROLE_ID", "admin_role_id"),
+                ("SCHEDULE_EMOJI_OK_ID", "schedule_emoji_ok_id"),
+                ("SCHEDULE_EMOJI_MAYBE_ID", "schedule_emoji_maybe_id"),
+                ("SCHEDULE_EMOJI_NG_ID", "schedule_emoji_ng_id"),
             ):
                 val = await repo.get_int(guild_id, key)
                 if val is not None:
