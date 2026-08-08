@@ -59,6 +59,27 @@ BOT_LOG_CHANNEL_NAME = "bot-log"
 EXEC_ROLE_NAME = "幹部"
 ADMIN_ROLE_NAME = "Bot管理者"
 
+# 招待リンクに含める最小権限（Administrator・Manage 系は要求しない）。
+# ロール・ログチャンネルの自動作成を使う場合のみ、招待後に手動で
+# Manage Roles / Manage Channels を付与する（README 参照）。
+INVITE_PERMISSIONS = discord.Permissions(
+    view_channel=True,
+    send_messages=True,
+    embed_links=True,
+    attach_files=True,
+    add_reactions=True,
+    read_message_history=True,
+)
+
+
+def build_invite_url(client_id: int) -> str:
+    """最小権限の OAuth2 招待 URL を返す（bot + applications.commands）。"""
+    return discord.utils.oauth_url(
+        client_id,
+        permissions=INVITE_PERMISSIONS,
+        scopes=("bot", "applications.commands"),
+    )
+
 
 class ClubBot(commands.Bot):
     def __init__(self):
@@ -244,6 +265,9 @@ class ClubBot(commands.Bot):
     # ------------------------------------------------------------------
     async def on_ready(self) -> None:
         log.info("ログイン完了: %s (id=%s)", self.user, self.user.id if self.user else "?")
+        app_id = self.application_id or (self.user.id if self.user else None)
+        if app_id:
+            log.info("招待リンク（最小権限）: %s", build_invite_url(app_id))
         await self.change_presence(activity=discord.Game(name="鳥人間サークル運営"))
 
         # 参加中の全ギルドをセットアップ（ギルド登録とデフォルト設定の投入）し、
