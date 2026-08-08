@@ -16,7 +16,8 @@ import matplotlib
 
 matplotlib.use("Agg")  # ヘッドレス環境用（import 直後・pyplot より先に設定）
 
-from matplotlib import font_manager, pyplot as plt  # noqa: E402
+from matplotlib import font_manager
+from matplotlib import pyplot as plt
 
 # 優先順の日本語フォント候補（Linux / Windows / macOS）
 _JP_FONT_CANDIDATES = [
