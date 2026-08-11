@@ -460,6 +460,19 @@ $ sudo cp ~/club-bot/app/deploy/club-bot.logrotate /etc/logrotate.d/club-bot
 
 ---
 
+# 【STEP6・任意】Web ダッシュボードを公開する
+
+ブラウザから表形式でデータを閲覧・編集できる Web ダッシュボードを
+公開できます（**任意**。動かさなくても bot は通常どおり動きます）。
+
+必要なもの: ドメイン1つ（例 `dashboard.example.com`）と、80/443 の開放。
+
+手順は [`DASHBOARD_SETUP.md`](DASHBOARD_SETUP.md) にまとめています
+（Discord Developer Portal の OAuth2 設定 → 依存インストール → 設定ファイル →
+動作確認 → DNS → Caddy で HTTPS → systemd 常駐 → ログイン確認）。
+
+---
+
 # トラブルシューティング
 
 | 症状 | 確認すること |

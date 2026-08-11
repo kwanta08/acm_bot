@@ -11,10 +11,17 @@
 
 ## セットアップ
 
+**手順の詳細は [`../docs/DASHBOARD_SETUP.md`](../docs/DASHBOARD_SETUP.md) にあります**
+（Discord Developer Portal の OAuth2 設定・Caddy での HTTPS 公開・systemd 常駐・
+トラブルシューティング・公開前チェックリスト）。
+
+最短の流れ:
+
 ```bash
 cd club-bot
 venv/bin/pip install -r dashboard/requirements.txt
 cp dashboard/.env.example dashboard/.env   # 値を埋める
+venv/bin/uvicorn dashboard.main:app --host 127.0.0.1 --port 8000
 ```
 
 ### 環境変数
@@ -42,8 +49,9 @@ venv/bin/uvicorn dashboard.main:app --host 127.0.0.1 --port 8000
 ```
 
 本番は Caddy 等のリバースプロキシ経由で HTTPS 配信します
-（`deploy/` を参照）。`127.0.0.1` にバインドし、直接インターネットへ
-公開しないでください。
+（`deploy/Caddyfile`・`deploy/club-bot-dashboard.service`）。
+`127.0.0.1` にバインドし、直接インターネットへ公開しないでください。
+手順は [`../docs/DASHBOARD_SETUP.md`](../docs/DASHBOARD_SETUP.md) を参照。
 
 ## 構成
 
