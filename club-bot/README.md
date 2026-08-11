@@ -67,7 +67,10 @@ Botが要求する権限は最小限です（`Administrator` は要求しませ�
 
 `/schedule create` で日程調整、`/task add` でタスク登録、
 `/layer start` で積層記録、`/progress view` で機体進捗の確認。
-日常の使い方は [`docs/OPERATION.md`](docs/OPERATION.md) を参照してください。
+
+**導入から日々の運用までは [取扱説明書](docs/GUIDE.md) にまとめてあります**
+（役割別の「最初に覚えること」・場面別の使い方・困ったときの対処・
+年度替わりの引き継ぎ）。
 
 ---
 
@@ -225,6 +228,7 @@ docker compose up -d --build
 
 | ファイル | 内容 |
 |---|---|
+| [`docs/GUIDE.md`](docs/GUIDE.md) | **取扱説明書（導入するサークル向け）** — 導入手順・場面別の使い方・引き継ぎ |
 | [`docs/TERMS.md`](docs/TERMS.md) | 利用規約 |
 | [`docs/PRIVACY.md`](docs/PRIVACY.md) | プライバシーポリシー（収集データ・保存場所・削除請求） |
 | [`docs/OPERATION.md`](docs/OPERATION.md) | 運用マニュアル（全コマンド一覧・権限・ダッシュボード運用・トラブル対応） |
