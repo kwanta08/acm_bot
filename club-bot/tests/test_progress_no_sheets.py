@@ -1,10 +1,10 @@
-"""GOOGLE_CREDENTIALS_PATH なしで /progress が完全動作することの回帰テスト（P1-6）。
+"""重い依存なしで /progress が完全動作することの回帰テスト（P1-6 / P3-1）。
 
 公開配布の要件「導入サークルが .env を編集しなくてよい」を崩していた唯一の
 箇所が /progress の Google Sheets 依存だった。DB 移行後は次を保証する。
 
-1. /progress の実行経路が services/progress_sheet_service（gspread 依存）を
-   import していないこと — 再混入するとここで落ちる
+1. /progress の実行経路が services/progress_sheet_service（gspread 依存）や
+   matplotlib を import していないこと — 再混入するとここで落ちる
 2. GOOGLE_CREDENTIALS_PATH が未設定でも、機体の追加 → 表示 → Todoist 同期 →
    桁巻き反映 → 集計まで一通り動くこと
 """
@@ -37,7 +37,9 @@ RUNTIME_MODULES = [
 ]
 
 FORBIDDEN_IMPORTS = ("gspread", "google", "google.oauth2",
-                     "services.progress_sheet_service")
+                     "services.progress_sheet_service",
+                     # matplotlib は撤去済み（常駐 37.5MB。描画はブラウザ側）
+                     "matplotlib")
 
 G1 = 111
 NOW = "2026-08-11 10:00"
@@ -213,3 +215,34 @@ def test_spar_sync_needs_no_external_book(monkeypatch):
             await db.close()
 
     run(_main())
+
+
+# ---------------------------------------------------------------------
+# 3. 重い依存が requirements から消えていること（P3-1）
+# ---------------------------------------------------------------------
+def test_matplotlib_is_not_a_dependency():
+    """進捗グラフの描画をブラウザ側へ移し、matplotlib を撤去した。"""
+    with open(os.path.join(BOT_ROOT, "requirements.txt"), encoding="utf-8") as f:
+        requirements = f.read().lower()
+    assert "matplotlib" not in requirements
+
+
+def test_progress_chart_module_is_removed():
+    assert not os.path.exists(os.path.join(BOT_ROOT, "utils", "progress_chart.py"))
+
+
+def test_no_module_imports_matplotlib():
+    """bot 本体のどのモジュールも matplotlib を import しない。"""
+    violations: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(BOT_ROOT):
+        dirnames[:] = [d for d in dirnames
+                       if d not in {"venv", "__pycache__", ".git", "tests",
+                                    "node_modules", "data", "logs"}]
+        for filename in filenames:
+            if not filename.endswith(".py"):
+                continue
+            rel = os.path.relpath(os.path.join(dirpath, filename), BOT_ROOT)
+            for name in _imported_modules(rel):
+                if name == "matplotlib" or name.startswith("matplotlib."):
+                    violations.append(rel)
+    assert not violations, "matplotlib が再混入しています: " + ", ".join(violations)

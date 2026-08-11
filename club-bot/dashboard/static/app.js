@@ -177,6 +177,63 @@ function editableCell(td, row, column, data) {
   });
 }
 
+// 進捗グラフ（インライン SVG。ライブラリも外部 CDN も使わない）。
+// bot 側の matplotlib を撤去し、描画はここへ移した。
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function svg(tag, attrs = {}, children = []) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+  for (const child of [].concat(children)) if (child) node.append(child);
+  return node;
+}
+
+function progressChart(rows, { max = 25 } = {}) {
+  const items = rows
+    .filter((r) => r.manual_progress !== null && r.manual_progress !== undefined)
+    .slice(0, max)
+    .map((r) => ({
+      label: String(r.name || r.node_id || ""),
+      value: Math.min(Math.max(Number(r.manual_progress) || 0, 0), 1),
+    }));
+  if (items.length === 0) return null;
+
+  const rowH = 24;
+  const labelW = 160;
+  const barW = 320;
+  const height = items.length * rowH + 8;
+  const chart = svg("svg", {
+    width: labelW + barW + 56,
+    height,
+    viewBox: `0 0 ${labelW + barW + 56} ${height}`,
+    role: "img",
+    "aria-label": "進捗グラフ",
+  });
+
+  items.forEach((item, i) => {
+    const y = i * rowH + 4;
+    const label = item.label.length > 18 ? `${item.label.slice(0, 17)}…` : item.label;
+    chart.append(
+      svg("text", {
+        x: labelW - 8, y: y + 14, "text-anchor": "end",
+        "font-size": "12", fill: "currentColor",
+      }, [document.createTextNode(label)]),
+      svg("rect", {
+        x: labelW, y: y + 4, width: barW, height: 14, rx: 3,
+        fill: "currentColor", "fill-opacity": "0.12",
+      }),
+      svg("rect", {
+        x: labelW, y: y + 4, width: Math.max(barW * item.value, 1), height: 14,
+        rx: 3, fill: "var(--accent)",
+      }),
+      svg("text", {
+        x: labelW + barW + 8, y: y + 15, "font-size": "12", fill: "currentColor",
+      }, [document.createTextNode(`${Math.round(item.value * 100)}%`)]),
+    );
+  });
+  return chart;
+}
+
 function renderGrid(data) {
   const grid = document.getElementById("grid");
   if (!grid) return;
@@ -198,8 +255,11 @@ function renderGrid(data) {
     ? "✎ の付いた列はクリックして編集できます（変更は監査ログに記録されます）。"
     : "閲覧のみの権限です（編集には班長以上の権限が必要です）。";
 
+  const chart = data.table.key === "progress" ? progressChart(data.rows) : null;
+
   grid.replaceChildren(
     el("p", { class: "empty", text: `${data.total} 件中 ${data.rows.length} 件を表示 — ${hint}` }),
+    chart ? el("div", { class: "chart-wrap" }, [chart]) : null,
     el("div", { class: "grid-wrap" }, [
       el("table", { class: "grid" }, [
         el("thead", {}, [head]),

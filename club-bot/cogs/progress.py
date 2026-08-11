@@ -5,7 +5,7 @@ Progress コグ（機体進捗管理・DB 正本）
 進捗を、Discord 上でドリルダウン表示する。データの正本は DB の
 progress_nodes テーブル（ギルドごとに独立）。Google Sheets は不要。
 
-- /progress view       : ドリルダウン表示（全員）
+- /progress view       : ドリルダウン表示（全員。進捗バーは Embed 内テキスト）
 - /progress add        : 機体・パーツ・部品を追加（班長以上）
 - /progress edit       : 名前・担当・状態・進捗率を変更（班長以上）
 - /progress remove     : ノードを配下ごと削除（班長以上）
@@ -17,8 +17,6 @@ progress_nodes テーブル（ギルドごとに独立）。Google Sheets は不
 """
 from __future__ import annotations
 
-import asyncio
-import io
 import uuid
 from datetime import time as dtime
 from datetime import timedelta
@@ -36,7 +34,7 @@ from services import progress_sync_service
 from services import progress_tree as pt
 from services.progress_tree import ProgressNode, ProgressTree
 from services.todoist_service import TodoistError
-from utils import progress_chart
+from utils import progress_bar
 from utils.embeds import error_embed, info_embed, success_embed, task_embed
 from utils.logger import get_logger
 from utils.parser import TZ, now
@@ -48,7 +46,8 @@ if TYPE_CHECKING:
 log = get_logger("progress")
 
 SYNC_INTERVAL_MINUTES = 20
-CHART_FILENAME = "progress.png"
+# Embed 内テキストバーの幅（詳細なグラフは Web ダッシュボード側で描画する）
+BAR_WIDTH = 12
 
 # 手入力ノードの ID プレフィックス（Todoist 由来 td_ / プロジェクト pj_ と区別）
 MANUAL_ID_PREFIX = "n_"
@@ -145,8 +144,11 @@ def build_level_embed(tree: ProgressTree,
             inline=False)
     if len(children) > 25:
         embed.set_footer(text=f"他 {len(children) - 25} 件")
-    if children:
-        embed.set_image(url=f"attachment://{CHART_FILENAME}")
+    block = progress_bar.render_block(chart_items(tree, node_id),
+                                      width=BAR_WIDTH)
+    if block:
+        head = embed.description or ""
+        embed.description = f"{head}\n{block}".strip()
     return embed
 
 
@@ -337,19 +339,13 @@ class ProgressView(discord.ui.View):
                       deferred: bool = False) -> None:
         self._rebuild_items()
         embed = build_level_embed(self.tree, self.node_id)
-        attachments = []
-        items = chart_items(self.tree, self.node_id)
-        if items:
-            png = await asyncio.to_thread(
-                progress_chart.render_progress_bars, items)
-            attachments.append(discord.File(
-                io.BytesIO(png), filename=CHART_FILENAME))
+        # 進捗バーは Embed 内のテキスト。画像の生成・添付は行わない
         if deferred:
             await interaction.edit_original_response(
-                embed=embed, attachments=attachments, view=self)
+                embed=embed, attachments=[], view=self)
         else:
             await interaction.response.edit_message(
-                embed=embed, attachments=attachments, view=self)
+                embed=embed, attachments=[], view=self)
 
     async def on_timeout(self) -> None:
         for item in self.children:
@@ -1019,15 +1015,8 @@ class Progress(commands.Cog):
             return
 
         embed = build_level_embed(tree, None)
-        files = []
-        items = chart_items(tree, None)
-        if items:
-            png = await asyncio.to_thread(
-                progress_chart.render_progress_bars, items)
-            files.append(discord.File(io.BytesIO(png),
-                                      filename=CHART_FILENAME))
         view = ProgressView(self, tree, None, interaction.user.id, guild_id)
-        await interaction.followup.send(embed=embed, files=files, view=view)
+        await interaction.followup.send(embed=embed, view=view)
 
 
 # ノード指定を受け取るコマンドへオートコンプリートを紐付ける

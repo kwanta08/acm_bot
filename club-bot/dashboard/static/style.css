@@ -134,3 +134,11 @@ td input {
 }
 
 .cell-error { color: var(--danger); font-size: 0.85em; }
+
+.chart-wrap {
+  overflow-x: auto;
+  margin-bottom: 0.9rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
