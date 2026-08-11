@@ -42,19 +42,19 @@
 
 ## Phase 2: Web ダッシュボード
 
-- [ ] **P2-1** bot とは別プロセスの FastAPI アプリの雛形を `dashboard/` に作る。
+- [x] **P2-1** bot とは別プロセスの FastAPI アプリの雛形を `dashboard/` に作る。
       requirements を bot 本体と分離する
-- [ ] **P2-2** Discord OAuth2（`identify` + `guilds` スコープ）ログインと署名付きセッションを実装する
-- [ ] **P2-3** 【最重要】`guild_id` スコープ強制のアクセス制御層を実装する。
+- [x] **P2-2** Discord OAuth2（`identify` + `guilds` スコープ）ログインと署名付きセッションを実装する
+- [x] **P2-3** 【最重要】`guild_id` スコープ強制のアクセス制御層を実装する。
       セッションで検証済みの `guild_id` 以外を絶対にリポジトリへ渡さない設計にし、
       「他ギルドのデータが取得できないこと」のテストを必ず書く
-- [ ] **P2-4** 読み取り専用の表グリッド画面を作る
+- [x] **P2-4** 読み取り専用の表グリッド画面を作る
       （tasks / members / teams / schedules・schedule_votes / layer_records / progress）
-- [ ] **P2-5** 表グリッドからの編集機能を追加する。監査ログ（`audit_log`）に必ず記録する
-- [ ] **P2-6** PostgreSQL の LISTEN/NOTIFY で、ダッシュボードの `settings` 更新を
+- [x] **P2-5** 表グリッドからの編集機能を追加する。監査ログ（`audit_log`）に必ず記録する
+- [x] **P2-6** PostgreSQL の LISTEN/NOTIFY で、ダッシュボードの `settings` 更新を
       bot プロセスの config キャッシュへ伝播させる
-- [ ] **P2-7** `utils/db.py` の asyncpg プール（現状 `max_size=5`）を見直す
-- [ ] **P2-8** Caddy によるリバースプロキシと HTTPS 化の deploy 構成を追加する
+- [x] **P2-7** `utils/db.py` の asyncpg プール（現状 `max_size=5`）を見直す
+- [x] **P2-8** Caddy によるリバースプロキシと HTTPS 化の deploy 構成を追加する
 
 ## Phase 3: 依存削減
 
@@ -79,3 +79,11 @@
 | P1-4 | `cogs/progress.py` を DB ベースへ。`/progress view` のドリルダウンと `/progress setup` ウィザードの挙動は維持（setup は `progress_todoist_links` へ upsert）。**設計判断**: (1) シートという編集 UI が無くなるため、代替として `/progress add` `/progress edit` `/progress remove` `/progress spar-link` を新設（Phase 2 のダッシュボードが来るまで /progress が使えなくなるのを防ぐ）。(2) `/progress init`（シート登録）は不要になったため削除。(3) DB 読み取りは軽いのでツリーのメモリキャッシュを廃止し常に最新を返す。(4) 通知先は「紐付け行 → settings の `PROGRESS_DEFAULT_CHANNEL_ID` → ギルド既定」の順に解決 |
 | P1-5 | `scripts/migrate_progress_sheet_to_db.py`（dry-run 既定 / `--apply`）。進捗管理・Todoist対応表・桁巻き対応表＋桁マスタ・設定タブのデフォルト通知チャンネルを取り込む。node_id 等をキーに upsert するため冪等、`--replace` でやり直し可。**設計判断**: 対応表の「登録ギルドID」が別サーバーの行はスキップし、1枚のシートを共有していた場合はサーバーごとに実行する運用とした |
 | P1-6 | `progress_sheet_service.py` を読み取り専用アダプタへ縮小し、シート版の同期コードを全削除。bot 本体が Sheets を一切 import しない状態にした。`tests/test_progress_no_sheets.py` で (1) 実行経路に gspread / progress_sheet_service の import が無いことを AST 検査、(2) `GOOGLE_CREDENTIALS_PATH` 未設定のまま 機体追加 → 表示 → Todoist 同期 → 桁巻き反映 → 集計が通ることを検証。README / OPERATION.md / .env.example も更新。**申し送り**: Phase 2 の P2-4 で読む progress テーブルは `progress_nodes` / `progress_todoist_links` / `progress_spar_links` の3つ。P3-2（gspread 撤去）は `/set_sheet` `/sheet_sync` と移行スクリプトが残る点の判断が必要 |
+| P2-1 | `club-bot/dashboard/` に FastAPI 雛形を追加（アプリファクトリ・lifespan での DB 接続・/healthz・静的配信）。`dashboard/requirements.txt` で依存を分離し、CI にインストール手順を追加（未インストール環境ではダッシュボードのテストは自動スキップ）。**設計判断**: (1) 配置は `club-bot/dashboard/`（リポジトリ層を素直に import でき、CI の lint/test 対象にも入る）。(2) OpenAPI ドキュメントは非公開（攻撃面を増やさない）。(3) 静的ファイルはパッケージ相対で解決しカレント依存を排除 |
+| P2-2 | Discord OAuth2（`identify` + `guilds`）と署名付きセッション。`/auth/login` → state 検証 → `/auth/callback` → `/api/me`。**設計判断**: (1) アクセストークンはセッションに保存せず、ログイン時に一度だけ使って破棄。(2) アクセス候補は「利用者が所属し、かつ bot も参加している」サーバーのみで、後者は `guilds` 台帳で判定するため **Bot トークンが不要**。(3) Cookie 4KB 制限の保険としてセッションのサーバー数を 50 で打ち切り |
+| P2-3 | **【最重要】** `dashboard/security.py` で guild_id スコープを強制。`GuildScope` はセッション照合を通った場合のみ生成され、ルートは `ScopedGuild` / `EditorGuild` / `AdminGuild` の Annotated 依存性しか受け取らない。リポジトリへは `scope.bind(repo)`（＝`for_guild`）経由のみ。権限は L4=サーバー管理権限 / L2=班長 / L1=参加者の3段階（ロール ID による L3 判定は Bot トークンなしでは不可能）。テストで「A大学の利用者が B大学の URL を叩いて 403、本文に B大学の情報が出ない」「件数が必ず自サーバー分だけ（B大学は件数を変えて配置し混入を検出）」を検証し、AST・型注釈でハンドラが生の guild_id を受け取らないことも静的検査 |
+| P2-4 | 読み取り専用の表グリッド（tasks / members / teams / schedules / schedule_votes / layer_records / progress）。`repositories/table_repository.py` は**ホワイトリスト方式**でテーブル・列・並び順・編集可否を定義し、リクエスト由来の文字列を SQL へ入れない。フロントは素の JS のみ（外部 CDN なし）。`guild_id` 列は列定義から除外 |
+| P2-5 | 表グリッドからの編集（PATCH）。班長以上のみ、編集可能列のみ。変更前後を `audit_log` に `dashboard.update` として記録し、編集不可列への試みも `dashboard.update.rejected` として残す。**設計判断**: 監査ログの記録失敗で編集自体は失敗させない。他サーバーの行 ID を混ぜても `guild_id` 条件付き SELECT で 404 になる |
+| P2-6 | `set_setting` / `delete_setting` が `pg_notify('clubbot_settings', guild_id)` を送り、bot が LISTEN 専用接続で購読して `config.invalidate_guild` を呼ぶ。ダッシュボード側に設定 API（GET/PATCH）を追加し、編集キーはホワイトリスト（Todoist トークン等の機密値は一覧にも値にも出さない）。**設計判断**: (1) LISTEN はプール枠を使わない別接続。(2) SQLite では通知も購読も行わない（単一プロセス前提）ため、ダッシュボード併用の本番は PostgreSQL が必須 |
+| P2-7 | プール既定を `max_size=5` → `1〜10` に引き上げ、`DB_POOL_MIN_SIZE` / `DB_POOL_MAX_SIZE`（ダッシュボードは `DASHBOARD_DB_POOL_*`）で調整可能に。`command_timeout=30` と `max_inactive_connection_lifetime=300` を追加。`pool_stats()` を `/healthz` で公開（接続文字列は含めない）。接続数の目安は bot(10) + ダッシュボード(10) + LISTEN(1) |
+| P2-8 | `deploy/Caddyfile`（Let's Encrypt 自動取得 + HSTS/CSP 等のセキュリティヘッダ。CSP は `default-src 'self'`）、`club-bot-dashboard.service`（127.0.0.1 バインド・権限最小化）、`dashboard.Dockerfile`（bot と別イメージ）、`docker-compose.dashboard.yml`。`docs/OPERATION.md` に 8 章「ダッシュボードの運用」を新設。**申し送り**: Phase 3 の P3-1（matplotlib 撤去）はダッシュボード側にグラフ描画を置く前提が整った。P3-2（gspread 撤去）は `/set_sheet` `/sheet_sync` と移行スクリプトの扱いを決める必要がある |
