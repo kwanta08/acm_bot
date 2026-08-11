@@ -1,35 +1,43 @@
-"""機体進捗ツリーの構築・集計ロジック（純粋関数群）。
+"""機体進捗ツリーの構築・集計ロジック。
 
-Google Sheets 上の進捗管理シート（隣接リスト形式）を読み込んだ行データから
+正本は DB の progress_nodes テーブル（隣接リスト形式）。その行データから
 メモリ上にツリーを構築し、集計進捗率・深さを計算する。
 
-- Sheets / Discord には依存しない（シート I/O は progress_sheet_service が担当）
+- 構築・集計は純粋関数（DB / Discord に依存しない）。DB からの読み込みは
+  load_tree() が ProgressRepository 経由で行う
 - 深さは無制限（機体 → パーツ → 部品 → サブタスク → …）
 - 葉ノード: 進捗率(手入力) をそのまま集計進捗率に採用
 - 親ノード: 子の集計進捗率の加重平均（現状は全ノード weight=1.0 の単純平均。
-  将来シートに重み列を足す場合は ProgressNode.weight に読み込むだけで
-  重み付け平均へ拡張できる）
+  progress_nodes.weight に 1 以外を入れれば重み付け平均になる）
 - 進捗率は内部的に 0.0〜1.0 の小数で扱う
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
+
+# 進捗ノードの由来（progress_nodes.source）
+SOURCE_MANUAL = "manual"
+SOURCE_TODOIST = "todoist"
+SOURCE_SPAR_WINDING = "spar_winding"
 
 
 @dataclass
 class ProgressNode:
-    """進捗管理シートの1行に対応するノード。"""
+    """progress_nodes の1行に対応するノード。"""
     node_id: str
     parent_id: str | None = None
-    order: float = 0.0            # 表示順（兄弟間の並び）
+    order: float = 0.0            # 表示順（兄弟間の並び。DB の sort_order）
     name: str = ""
     assignee: str = ""
     status: str = ""
     manual_progress: float | None = None  # 進捗率(手入力)。0.0〜1.0
-    source: str = "manual"        # "manual" | "todoist"
+    source: str = SOURCE_MANUAL   # manual / todoist / spar_winding
     todoist_task_id: str = ""
-    row_index: int | None = None  # シート上の行番号（書き戻し用。1始まり）
-    weight: float = 1.0           # 集計時の重み（将来の重み列拡張用フック）
+    # 旧・中央スプレッドシート上の行番号（1始まり）。
+    # 移行スクリプトがシートを読むときだけ設定する。DB 経路では常に None
+    row_index: int | None = None
+    weight: float = 1.0           # 集計時の重み
 
     # 計算結果（compute_tree が設定する）
     depth: int | None = None
@@ -57,8 +65,9 @@ class ProgressTree:
 
 
 def parse_progress(value: object) -> float | None:
-    """シートのセル値を 0.0〜1.0 の進捗率に正規化する。
+    """入力値を 0.0〜1.0 の進捗率に正規化する。
 
+    スラッシュコマンドの引数と、移行時に読む旧シートのセル値の両方を扱う。
     受け付ける形式: 0.5 / "0.5" / "50%" / "50"（1 より大きい数値は % とみなす）。
     空・解釈不能は None（未入力扱い）。範囲外は 0.0〜1.0 にクランプする。
     """
@@ -205,3 +214,42 @@ def build_and_aggregate(nodes: list[ProgressNode]) -> ProgressTree:
     tree = build_tree(nodes)
     aggregate(tree)
     return tree
+
+
+# ---------------------------------------------------------------------
+# DB（progress_nodes）との橋渡し
+# ---------------------------------------------------------------------
+def node_from_row(row: dict[str, Any]) -> ProgressNode:
+    """progress_nodes の1行を ProgressNode へ変換する。
+
+    NULL 許容列（assignee / status / todoist_task_id）は空文字に正規化し、
+    表示側で `or "—"` の判定をそのまま使えるようにする。
+    """
+    return ProgressNode(
+        node_id=str(row["node_id"]),
+        parent_id=(row.get("parent_id") or None),
+        order=float(row.get("sort_order") or 0.0),
+        name=row.get("name") or "",
+        assignee=row.get("assignee") or "",
+        status=row.get("status") or "",
+        manual_progress=(None if row.get("manual_progress") is None
+                         else float(row["manual_progress"])),
+        source=row.get("source") or SOURCE_MANUAL,
+        todoist_task_id=row.get("todoist_task_id") or "",
+        weight=float(row["weight"]) if row.get("weight") is not None else 1.0,
+    )
+
+
+def nodes_from_rows(rows: list[dict[str, Any]]) -> list[ProgressNode]:
+    """progress_nodes の行一覧を ProgressNode 一覧へ変換する。"""
+    return [node_from_row(row) for row in rows]
+
+
+async def load_tree(repo: Any, guild_id: int) -> ProgressTree:
+    """DB からギルドの進捗ツリーを読み込み、集計まで済ませて返す。
+
+    repo は ProgressRepository（または for_guild プロキシではない生の
+    リポジトリ）。ノードが1件も無いギルドでは空のツリーを返す
+    （例外にはしない。/progress view 側で案内する）。
+    """
+    return build_and_aggregate(nodes_from_rows(await repo.list_nodes(guild_id)))
