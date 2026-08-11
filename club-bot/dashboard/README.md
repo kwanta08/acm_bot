@@ -29,6 +29,7 @@ cp dashboard/.env.example dashboard/.env   # 値を埋める
 | `DASHBOARD_SESSION_MAX_AGE` | | セッション有効期間（秒。既定 7 日） |
 | `DASHBOARD_SECURE_COOKIE` | | `0` で Secure 属性を外す（**ローカル開発のみ**） |
 | `DATABASE_URL` / `DB_PATH` | | bot と同じ DB を指す |
+| `DASHBOARD_DB_POOL_MAX_SIZE` | | 接続プールの上限（既定 10。bot とは独立） |
 
 **Discord Bot トークンは不要です。** ダッシュボードは Discord へ
 ログイン用の OAuth2 リクエストしか送りません。

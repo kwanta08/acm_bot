@@ -103,9 +103,12 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         """死活監視用（認証不要・情報を漏らさない）。"""
         db = get_database(required=False)
         healthy = bool(db and await db.is_healthy())
-        return JSONResponse(
-            {"status": "ok" if healthy else "degraded"},
-            status_code=200 if healthy else 503)
+        body: dict = {"status": "ok" if healthy else "degraded"}
+        pool = db.pool_stats() if db else None
+        if pool is not None:
+            # 接続文字列は含めない（枯渇の監視用に使用状況だけ出す）
+            body["pool"] = pool
+        return JSONResponse(body, status_code=200 if healthy else 503)
 
     @app.get("/", include_in_schema=False)
     async def index() -> FileResponse:

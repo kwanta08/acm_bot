@@ -20,7 +20,9 @@ async def open_database(config: DashboardConfig) -> Database:
     global _db
     if _db is not None:
         return _db
-    db = Database(config.db_path, database_url=config.database_url)
+    db = Database(config.db_path, database_url=config.database_url,
+                  pool_min_size=config.db_pool_min_size,
+                  pool_max_size=config.db_pool_max_size)
     await db.connect()
     _db = db
     return db

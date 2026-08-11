@@ -44,6 +44,49 @@ _GUILD_COL = f"guild_id {GUILD_ID_TYPE} NOT NULL CHECK (guild_id >= 0)"
 SETTINGS_CHANNEL = "clubbot_settings"
 
 # ---------------------------------------------------------------------------
+# asyncpg コネクションプールの既定値
+#
+# bot とダッシュボードは別プロセスで、それぞれ独立したプールを持つ。
+# 旧既定の max_size=5 は、20分ごとの同期ジョブとダッシュボードの同時読み取りが
+# 重なると枯渇しうるため引き上げた（設計方針 2.2）。
+#
+# 目安: PostgreSQL の max_connections（既定 100）に対し
+#   bot(10) + ダッシュボード(10) + LISTEN 用(1) + 保守用の余裕
+# で十分収まる。小さな VPS で絞りたい場合は環境変数で下げられる。
+# ---------------------------------------------------------------------------
+DEFAULT_POOL_MIN_SIZE = 1
+DEFAULT_POOL_MAX_SIZE = 10
+# 1クエリの上限時間（秒）。異常時に接続を握り続けないための保険
+POOL_COMMAND_TIMEOUT = 30.0
+# 使われていない接続を解放するまでの秒数（PostgreSQL 側の接続数を節約）
+POOL_MAX_INACTIVE_LIFETIME = 300.0
+
+
+def resolve_pool_size(min_size: int | None, max_size: int | None,
+                      env: dict[str, str] | None = None) -> tuple[int, int]:
+    """プールサイズを決める（引数 > 環境変数 > 既定値）。
+
+    min <= max、いずれも 1 以上になるよう正規化する。
+    """
+    src = os.environ if env is None else env
+
+    def _from_env(name: str, fallback: int) -> int:
+        raw = (src.get(name) or "").strip()
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return fallback
+
+    resolved_min = (min_size if min_size is not None
+                    else _from_env("DB_POOL_MIN_SIZE", DEFAULT_POOL_MIN_SIZE))
+    resolved_max = (max_size if max_size is not None
+                    else _from_env("DB_POOL_MAX_SIZE", DEFAULT_POOL_MAX_SIZE))
+    resolved_min = max(1, resolved_min)
+    resolved_max = max(1, resolved_max)
+    resolved_min = min(resolved_min, resolved_max)
+    return resolved_min, resolved_max
+
+# ---------------------------------------------------------------------------
 # テーブル定義（テーブル名 → CREATE TABLE 文）
 # init_schema と既存 DB のマイグレーション（テーブル再作成）の両方から参照する。
 # すべてのテーブルが guild_id を保持し、複合キー/ユニーク制約の先頭に置く。
@@ -552,9 +595,13 @@ class Database:
     リポジトリ層は SQLite 方言（? プレースホルダ）のまま利用できる。
     """
 
-    def __init__(self, path: str, database_url: str | None = None):
+    def __init__(self, path: str, database_url: str | None = None,
+                 pool_min_size: int | None = None,
+                 pool_max_size: int | None = None):
         self.path = path
         self.database_url = (database_url or "").strip() or None
+        self.pool_min_size, self.pool_max_size = resolve_pool_size(
+            pool_min_size, pool_max_size)
         self._conn: aiosqlite.Connection | None = None
         self._pool = None  # asyncpg.Pool
         self._listener_conn = None  # asyncpg.Connection（LISTEN 専用）
@@ -597,7 +644,11 @@ class Database:
                 "DATABASE_URL が設定されていますが asyncpg がありません。"
                 " pip install asyncpg を実行してください。")
         self._pool = await asyncpg.create_pool(
-            dsn=self.database_url, min_size=1, max_size=5)
+            dsn=self.database_url,
+            min_size=self.pool_min_size,
+            max_size=self.pool_max_size,
+            command_timeout=POOL_COMMAND_TIMEOUT,
+            max_inactive_connection_lifetime=POOL_MAX_INACTIVE_LIFETIME)
         # スキーマ作成（冪等）→ バージョン付きマイグレーション → シーケンス修復
         try:
             async with self._pool.acquire() as con:
@@ -611,8 +662,9 @@ class Database:
             raise
         await self._migrate_versioned()
         await self._pg_fix_sequences()
-        log.info("PostgreSQL に接続しました（%s）",
-                 re.sub(r"://[^@]*@", "://***@", self.database_url))
+        log.info("PostgreSQL に接続しました（%s / プール %d〜%d）",
+                 re.sub(r"://[^@]*@", "://***@", self.database_url),
+                 self.pool_min_size, self.pool_max_size)
 
     async def _pg_exec_ddl(self, con, label: str, sql: str) -> None:
         """DDL を実行し、失敗時は失敗した SQL を安全に記録する。
@@ -639,6 +691,27 @@ class Database:
         if self._conn is not None:
             await self._conn.close()
             self._conn = None
+
+    def pool_stats(self) -> dict[str, int] | None:
+        """プールの利用状況（監視用）。SQLite では None。
+
+        接続文字列・認証情報は一切含めない。
+        """
+        if not self._is_pg or self._pool is None:
+            return None
+        try:
+            size = self._pool.get_size()
+            idle = self._pool.get_idle_size()
+        except Exception:  # noqa: BLE001  (asyncpg の版差)
+            return {"min_size": self.pool_min_size,
+                    "max_size": self.pool_max_size}
+        return {
+            "min_size": self.pool_min_size,
+            "max_size": self.pool_max_size,
+            "size": size,
+            "idle": idle,
+            "in_use": max(size - idle, 0),
+        }
 
     async def is_healthy(self) -> bool:
         """接続確認（/health 用）。"""

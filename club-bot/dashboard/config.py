@@ -31,6 +31,14 @@ def _clean(value: str | None) -> str:
     return (value or "").strip().strip('"').strip("'")
 
 
+def _optional_int(value: str | None) -> int | None:
+    """未指定・不正値は None（呼び出し先の既定値を使う）。"""
+    try:
+        return int(_clean(value))
+    except (TypeError, ValueError):
+        return None
+
+
 def _int(value: str | None, default: int) -> int:
     try:
         return int(_clean(value))
@@ -49,9 +57,11 @@ class DashboardConfig:
     secret_key: str = ""
     session_max_age: int = DEFAULT_SESSION_MAX_AGE
 
-    # --- DB（bot と共有） ---
+    # --- DB（bot と共有。プールはプロセスごとに独立） ---
     db_path: str = "./data/club.db"
     database_url: str | None = None
+    db_pool_min_size: int | None = None
+    db_pool_max_size: int | None = None
 
     # --- 動作 ---
     base_url: str = "http://127.0.0.1:8000"
@@ -92,6 +102,10 @@ def load_config(env: dict[str, str] | None = None) -> DashboardConfig:
                              DEFAULT_SESSION_MAX_AGE),
         db_path=_clean(src.get("DB_PATH")) or "./data/club.db",
         database_url=database_url,
+        # ダッシュボード側のプールは bot と独立に調整できる
+        # （未指定なら utils/db.py の DB_POOL_* / 既定値にフォールバック）
+        db_pool_min_size=_optional_int(src.get("DASHBOARD_DB_POOL_MIN_SIZE")),
+        db_pool_max_size=_optional_int(src.get("DASHBOARD_DB_POOL_MAX_SIZE")),
         base_url=_clean(src.get("DASHBOARD_BASE_URL")) or "http://127.0.0.1:8000",
         secure_cookie=_clean(src.get("DASHBOARD_SECURE_COOKIE")).lower()
         not in ("0", "false", "no"),

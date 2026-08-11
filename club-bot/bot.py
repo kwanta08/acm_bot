@@ -107,6 +107,7 @@ class ClubBot(commands.Bot):
         super().__init__(command_prefix="!club ", intents=build_intents(),
                          help_command=None)
 
+        # プールサイズは環境変数 DB_POOL_MIN_SIZE / DB_POOL_MAX_SIZE で調整できる
         self.db = Database(config.db_path, database_url=config.database_url)
         self.todoist_manager = TodoistServiceManager(self.db)
         self._initial_guild_setup_done = False
