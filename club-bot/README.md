@@ -96,18 +96,23 @@ Botが要求する権限は最小限です（`Administrator` は要求しませ�
 | コマンド | 内容 |
 |---|---|
 | `/progress view` | 進捗ツリーをドリルダウン表示（機体からパーツ、パーツから部品へボタンで降りていく）。進捗グラフ画像も表示 |
-| `/progress setup` | Todoist プロジェクトを進捗ツリーのノードに紐付ける（サーバー管理権限または班長以上）。プロジェクトの親子構造は自動で同期されます |
+| `/progress add` | 機体・パーツ・部品を追加（班長以上）。親を指定しなければ機体（最上位）になります |
+| `/progress edit` | 名前・担当・状態・進捗率・親を変更（班長以上） |
+| `/progress remove` | ノードを配下ごと削除（班長以上） |
+| `/progress spar-link` | 桁と目標層数を進捗ノードへ紐付ける（班長以上）。`/layer` の記録から進捗率が自動計算されます |
+| `/progress setup` | Todoist プロジェクトを進捗ツリーのノードに紐付ける（班長以上）。プロジェクトの親子構造は自動で同期されます |
 | `/progress sync` | Todoist 同期と進捗の再集計を今すぐ実行（管理者。通常は20分ごとに自動実行） |
-| `/progress init` | 進捗管理シートの登録・初期化（管理者） |
+
+ノードを指定する引数はツリーを字下げ表示するオートコンプリート付きなので、
+ID を覚える必要はありません。
 
 Todoist のタスク完了状況と `/layer` の桁巻き記録が進捗に反映されるため、
 「Todoist は埋まっているのに機体全体で何%なのか分からない」状態を解消できます。
+例えば `/progress spar-link keta:主桁1 node:主桁 target_layers:20` と登録すれば、
+`/layer end` で積層を記録するたびに主桁の進捗率が更新されます。
 
-> ⚠️ **現状の制約**: `/progress` だけは進捗データの正本が Google スプレッドシートで、
-> 導入サークルがシートをサービスアカウントに共有する手作業が必要です。
-> 正本を他機能と同じ DB へ移す作業を進めており、完了後はこの手作業が不要になります
-> （[`docs/DESIGN_PUBLIC_DISTRIBUTION.md`](docs/DESIGN_PUBLIC_DISTRIBUTION.md) Phase 1）。
-> それまでの間、`/progress` 以外の機能は招待するだけで利用できます。
+進捗データはサーバーごとに独立して保存されます（Google スプレッドシートも
+サービスアカウントの共有作業も不要です）。
 
 ---
 
@@ -224,10 +229,12 @@ docker compose up -d --build
 - **Todoist 連携**: サーバーごとに独立。トークンは `/todoist-setup` の Modal から
   登録し、Fernet で暗号化してDBに保存します（暗号鍵 `ENCRYPTION_KEY` はホスト側の
   `.env` のみに保持）
-- **機体進捗管理**: 現状は中央 Google Sheets 1枚を正本とし、Botは深さ・集計進捗率の
-  再帰計算と Todoist・桁巻きの同期（20分ごと）を行います。複数サーバーが同じシートIDを
-  登録しても、同期ジョブはシート単位で1回だけ実行されるため Sheets API のクォータは
-  サーバー数に比例しません。DB移行後にこの構成は置き換わります
+- **機体進捗管理**: 正本は DB の `progress_nodes`（サーバーごとに独立した隣接リスト。
+  深さ無制限）。Botは深さ・集計進捗率の再帰計算と、Todoist・桁巻き（`layer_records`）の
+  同期を20分ごとに行います。Google Sheets とサービスアカウントは不要です
+  （旧・中央スプレッドシートからの取り込みは
+  `scripts/migrate_progress_sheet_to_db.py`）。
+  Sheets 依存の再混入は `tests/test_progress_no_sheets.py` の回帰テストで検出します
 - **モジュール構成**: 13 Cog（Core / Schedule / Tasks / Members / Reminders /
   Reports / LayerTracking / Settings / SetupWizard / Teams / Sheets /
   TodoistAdmin / Progress）

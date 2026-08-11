@@ -115,6 +115,70 @@ def test_plan_does_not_touch_manual_nodes():
     assert plan.creates == []
 
 
+def _node_row(node_id: str, parent_id: str | None = None, *,
+              name: str = "", source: str = "manual",
+              progress=None, status=None, td_id=None) -> dict:
+    return {"node_id": node_id, "parent_id": parent_id, "sort_order": 0,
+            "name": name or node_id, "assignee": None, "status": status,
+            "manual_progress": progress, "source": source,
+            "todoist_task_id": td_id, "weight": 1}
+
+
+def test_plan_orphan_subtask_falls_back_to_anchor():
+    """親タスクがアクティブにもツリーにも無ければアンカー直下へぶら下げる。"""
+    nodes = nodes_from_rows([_node_row("wing", name="主翼")])
+    plan = pss_db.plan_todoist_sync(
+        nodes, [("wing", [FakeTask("5", "子タスク", parent_id="999")])])
+    assert plan.creates[0]["parent_id"] == "wing"
+
+
+def test_plan_already_completed_nodes_not_rewritten():
+    nodes = nodes_from_rows([
+        _node_row("wing", name="主翼"),
+        _node_row("td_1", "wing", name="リブ", source="todoist",
+                  progress=1.0, status="完了", td_id="1"),
+    ])
+    plan = pss_db.plan_todoist_sync(nodes, [("wing", [])])
+    assert plan.completions == []
+
+
+def test_plan_never_touches_spar_winding_nodes():
+    """アンカー配下に桁巻きノードがあっても完了扱い・更新の対象にしない。"""
+    nodes = nodes_from_rows([
+        _node_row("wing", name="主翼"),
+        _node_row("spar1", "wing", name="主桁", source="spar_winding",
+                  progress=0.5),
+    ])
+    plan = pss_db.plan_todoist_sync(nodes, [("wing", [])])
+    assert plan.completions == []
+    assert plan.updates == []
+
+
+def test_plan_completion_limited_to_anchored_subtrees():
+    """紐付けから外れた別サブツリーの td_ ノードは完了扱いしない。"""
+    nodes = nodes_from_rows([
+        _node_row("wing", name="主翼"),
+        _node_row("tail", name="尾翼"),
+        _node_row("td_9", "tail", name="別プロジェクトのタスク",
+                  source="todoist", td_id="9"),
+    ])
+    plan = pss_db.plan_todoist_sync(nodes, [("wing", [])])
+    assert plan.completions == []
+
+
+def test_plan_updates_renamed_and_reparented_nodes():
+    nodes = nodes_from_rows([
+        _node_row("wing", name="主翼"),
+        _node_row("tail", name="尾翼"),
+        _node_row("td_1", "tail", name="古い名前", source="todoist",
+                  td_id="1"),
+    ])
+    plan = pss_db.plan_todoist_sync(
+        nodes, [("wing", [FakeTask("1", "新しい名前")])])
+    assert plan.updates == [("td_1", {"parent_id": "wing",
+                                      "name": "新しい名前"})]
+
+
 def test_plan_marks_completed_tasks():
     nodes = nodes_from_rows([
         {"node_id": "wing", "parent_id": None, "sort_order": 0, "name": "主翼",
