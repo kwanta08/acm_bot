@@ -5,6 +5,7 @@
 ## 運用ルール
 
 - 1イテレーションにつき未完了で最も若い番号のタスクを **1つだけ** 実施する
+  （ユーザーの明示指示があればフェーズ単位でまとめて実施する）
 - 【人間タスク】と記されたものはエージェントは飛ばす
 - タスクごとに `feat/public-<タスクID>` ブランチを切る（例 `feat/public-P1-1`）
 - 完了時にチェックを入れ、「完了内容 / 設計判断 / 次タスクへの申し送り」を追記する
@@ -58,8 +59,8 @@
 
 ## Phase 3: 依存削減
 
-- [ ] **P3-1** 進捗グラフの描画をブラウザ側へ移し、matplotlib 依存を撤去する（実測 -37.5MB）
-- [ ] **P3-2** CSV エクスポートをダッシュボードへ移し、gspread / google-auth を撤去する（-11.1MB）
+- [x] **P3-1** 進捗グラフの描画をブラウザ側へ移し、matplotlib 依存を撤去する（実測 -37.5MB）
+- [x] **P3-2** CSV エクスポートをダッシュボードへ移し、gspread / google-auth を撤去する（-11.1MB）
 
 ---
 
@@ -87,3 +88,5 @@
 | P2-6 | `set_setting` / `delete_setting` が `pg_notify('clubbot_settings', guild_id)` を送り、bot が LISTEN 専用接続で購読して `config.invalidate_guild` を呼ぶ。ダッシュボード側に設定 API（GET/PATCH）を追加し、編集キーはホワイトリスト（Todoist トークン等の機密値は一覧にも値にも出さない）。**設計判断**: (1) LISTEN はプール枠を使わない別接続。(2) SQLite では通知も購読も行わない（単一プロセス前提）ため、ダッシュボード併用の本番は PostgreSQL が必須 |
 | P2-7 | プール既定を `max_size=5` → `1〜10` に引き上げ、`DB_POOL_MIN_SIZE` / `DB_POOL_MAX_SIZE`（ダッシュボードは `DASHBOARD_DB_POOL_*`）で調整可能に。`command_timeout=30` と `max_inactive_connection_lifetime=300` を追加。`pool_stats()` を `/healthz` で公開（接続文字列は含めない）。接続数の目安は bot(10) + ダッシュボード(10) + LISTEN(1) |
 | P2-8 | `deploy/Caddyfile`（Let's Encrypt 自動取得 + HSTS/CSP 等のセキュリティヘッダ。CSP は `default-src 'self'`）、`club-bot-dashboard.service`（127.0.0.1 バインド・権限最小化）、`dashboard.Dockerfile`（bot と別イメージ）、`docker-compose.dashboard.yml`。`docs/OPERATION.md` に 8 章「ダッシュボードの運用」を新設。**申し送り**: Phase 3 の P3-1（matplotlib 撤去）はダッシュボード側にグラフ描画を置く前提が整った。P3-2（gspread 撤去）は `/set_sheet` `/sheet_sync` と移行スクリプトの扱いを決める必要がある |
+| P3-1 | `utils/progress_chart.py`（matplotlib で PNG 生成）を削除し、`utils/progress_bar.py`（標準ライブラリのみのテキストバー）へ置き換え。`/progress view` は画像添付をやめ Embed 内に `████░░░░ 75%` を表示する。詳細な横棒グラフは Web ダッシュボードでインライン SVG として描画（ライブラリも CDN も不使用）。**副次的な改善**: 画像を作らなくなったため **CJK フォント（fonts-noto-cjk）の導入が不要**になった。`requirements.txt` から matplotlib を削除し、再混入検出テスト（requirements・import 経路・ファイル存在）を追加 |
+| P3-2 | CSV ダウンロード `GET /api/guilds/{guild_id}/tables/{table_key}/export.csv` をダッシュボードに追加（7テーブル対応・表示名見出し・BOM 付き UTF-8・監査ログ `dashboard.export`）。`cogs/sheets.py`（`/set_sheet` `/sheet_sync`）と `services/sheets_service.py` を削除し COGS を 12 に。`requirements.txt` から gspread / google-auth を撤去。**設計判断**: (1) 一覧 API が `members.csv` を拾ってしまうため CSV は `/export.csv` の独立パスにした。(2) 移行スクリプトと読み取り専用アダプタは gspread を遅延 import するため、移行時だけ `pip install gspread google-auth` する運用とし、それ以外への依存拡散をテストで検出する。**確認**: 全 Cog を import しても matplotlib / gspread / google.oauth2 が `sys.modules` に載らないことを実測 |
