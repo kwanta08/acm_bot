@@ -135,5 +135,7 @@ def require_level(level: Level):
 # ルートハンドラはこの型注釈だけを受け取る（生の guild_id を受け取らない）。
 # ScopedGuild : 閲覧（サーバー参加者なら誰でも）
 # EditorGuild : 編集（班長以上）
+# AdminGuild  : サーバー設定の変更（サーバー管理権限）
 ScopedGuild = Annotated[GuildScope, Depends(require_guild_scope)]
 EditorGuild = Annotated[GuildScope, Depends(require_level(Level.L2))]
+AdminGuild = Annotated[GuildScope, Depends(require_level(Level.L4))]

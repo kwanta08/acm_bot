@@ -119,6 +119,13 @@ class ClubBot(commands.Bot):
         # GUILD_ID 指定時はそのギルドの設定をグローバル設定としても読み込む）
         await config.load_from_db(self.db)
 
+        # ダッシュボード（別プロセス）からの settings 更新を購読し、
+        # ギルド別設定のキャッシュを無効化する（PostgreSQL 構成のみ）。
+        # SQLite 構成では何もしない（単一プロセス運用が前提）。
+        if await self.db.start_settings_listener(config.invalidate_guild):
+            log.info("ダッシュボードからの設定変更を反映します"
+                     "（LISTEN/NOTIFY 有効）")
+
         # 暗号鍵チェック（Todoist トークン管理の前提）。
         # 未設定/不正でも Bot 自体は動作を継続するが、トークンの登録・利用は
         # 安全に拒否される（復号不可のため）。

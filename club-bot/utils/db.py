@@ -39,6 +39,10 @@ GUILD_ID_TYPE = "INTEGER"
 # guild_id カラム定義（CHECK で 0 以上に限定し、BIGINT 相当の非負整数を保証）
 _GUILD_COL = f"guild_id {GUILD_ID_TYPE} NOT NULL CHECK (guild_id >= 0)"
 
+# settings 更新をプロセス間で伝えるための PostgreSQL 通知チャンネル名。
+# ダッシュボード（別プロセス）の更新を bot の config キャッシュへ伝播させる。
+SETTINGS_CHANNEL = "clubbot_settings"
+
 # ---------------------------------------------------------------------------
 # テーブル定義（テーブル名 → CREATE TABLE 文）
 # init_schema と既存 DB のマイグレーション（テーブル再作成）の両方から参照する。
@@ -553,6 +557,7 @@ class Database:
         self.database_url = (database_url or "").strip() or None
         self._conn: aiosqlite.Connection | None = None
         self._pool = None  # asyncpg.Pool
+        self._listener_conn = None  # asyncpg.Connection（LISTEN 専用）
 
     @property
     def _is_pg(self) -> bool:
@@ -627,6 +632,7 @@ class Database:
         await self._conn.commit()
 
     async def close(self) -> None:
+        await self.stop_settings_listener()
         if self._pool is not None:
             await self._pool.close()
             self._pool = None
@@ -1166,6 +1172,7 @@ class Database:
                updated_at = {now_sql}""",
             (guild_id, key, value)
         )
+        await self.notify_settings_changed(guild_id)
 
     async def delete_setting(self, guild_id: int, key: str) -> bool:
         """設定値を削除する"""
@@ -1173,7 +1180,75 @@ class Database:
             "DELETE FROM settings WHERE guild_id = ? AND setting_key = ?",
             (guild_id, key),
         )
+        if cur.rowcount > 0:
+            await self.notify_settings_changed(guild_id)
         return cur.rowcount > 0
+
+    # ------------------------------------------------------------------
+    # 設定変更のプロセス間通知（PostgreSQL LISTEN/NOTIFY）
+    #
+    # bot は config.for_guild() の結果をプロセス内にキャッシュしている。
+    # 別プロセスのダッシュボードが settings を更新しても bot 側は気づかない
+    # ため、PostgreSQL の NOTIFY でキャッシュ無効化を伝播させる
+    # （docs/DESIGN_PUBLIC_DISTRIBUTION.md 2.2）。
+    #
+    # SQLite（ローカル開発）では何もしない。単一プロセス運用が前提で、
+    # ダッシュボードを併用する本番構成は PostgreSQL のため。
+    # ------------------------------------------------------------------
+    async def notify_settings_changed(self, guild_id: int) -> None:
+        """settings 更新を他プロセスへ通知する（PostgreSQL のみ）。"""
+        if not self._is_pg or self._pool is None:
+            return
+        try:
+            async with self._pool.acquire() as con:
+                await con.execute("SELECT pg_notify($1, $2)",
+                                  SETTINGS_CHANNEL, str(guild_id))
+        except Exception as e:  # noqa: BLE001  (通知失敗で更新自体は壊さない)
+            log.warning("設定変更の通知に失敗しました (guild=%s): %s",
+                        guild_id, type(e).__name__)
+
+    async def start_settings_listener(self, callback) -> bool:
+        """settings 更新の通知を購読する（bot プロセスで1回だけ呼ぶ）。
+
+        callback(guild_id: int) が通知のたびに呼ばれる。
+        購読を開始できたら True（PostgreSQL 以外・asyncpg 未導入は False）。
+
+        プール枠を占有しないよう、リスナー専用の接続を別に張る。
+        """
+        if not self._is_pg or asyncpg is None:
+            return False
+        if self._listener_conn is not None:
+            return True
+
+        def _on_notify(_conn, _pid, _channel, payload: str) -> None:
+            try:
+                guild_id = int(payload)
+            except (TypeError, ValueError):
+                return
+            try:
+                callback(guild_id)
+            except Exception as e:  # noqa: BLE001  (通知処理で bot を止めない)
+                log.warning("設定変更コールバックが失敗しました (guild=%s): %s",
+                            guild_id, type(e).__name__)
+
+        try:
+            con = await asyncpg.connect(dsn=self.database_url)
+            await con.add_listener(SETTINGS_CHANNEL, _on_notify)
+        except Exception as e:  # noqa: BLE001
+            log.warning("設定変更の購読を開始できませんでした: %s",
+                        type(e).__name__)
+            return False
+        self._listener_conn = con
+        log.info("設定変更の購読を開始しました（channel=%s）", SETTINGS_CHANNEL)
+        return True
+
+    async def stop_settings_listener(self) -> None:
+        if self._listener_conn is not None:
+            try:
+                await self._listener_conn.close()
+            except Exception:  # noqa: BLE001, S110
+                pass
+            self._listener_conn = None
 
     async def get_all_settings(self, guild_id: int) -> dict[str, str]:
         """指定ギルドの全ての設定を辞書で取得する"""
