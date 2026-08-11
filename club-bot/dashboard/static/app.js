@@ -256,9 +256,13 @@ function renderGrid(data) {
     : "閲覧のみの権限です（編集には班長以上の権限が必要です）。";
 
   const chart = data.table.key === "progress" ? progressChart(data.rows) : null;
+  const csvHref = `/api/guilds/${state.guildId}/tables/${data.table.key}/export.csv`;
 
   grid.replaceChildren(
-    el("p", { class: "empty", text: `${data.total} 件中 ${data.rows.length} 件を表示 — ${hint}` }),
+    el("div", { class: "toolbar" }, [
+      el("span", { class: "empty", text: `${data.total} 件中 ${data.rows.length} 件を表示 — ${hint}` }),
+      el("a", { class: "button", href: csvHref, download: "", text: "CSV をダウンロード" }),
+    ]),
     chart ? el("div", { class: "chart-wrap" }, [chart]) : null,
     el("div", { class: "grid-wrap" }, [
       el("table", { class: "grid" }, [

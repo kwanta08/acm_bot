@@ -284,3 +284,84 @@ def test_read_only_viewer_sees_can_edit_false():
         assert body["can_edit"] is False
     finally:
         client.__exit__(None, None, None)
+
+
+# ---------------------------------------------------------------------
+# CSV エクスポート（P3-2: Sheets 連携の置き換え）
+# ---------------------------------------------------------------------
+def test_csv_export_returns_labels_and_rows():
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    client = _logged_in_client(db_path)
+    try:
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/members/export.csv")
+        assert res.status_code == 200
+        assert res.headers["content-type"].startswith("text/csv")
+        assert "attachment" in res.headers["content-disposition"]
+        assert f"members_{GUILD_A}.csv" in res.headers["content-disposition"]
+        body = res.content.decode("utf-8-sig")
+        lines = body.strip().splitlines()
+        assert lines[0].startswith("ID,")        # 見出しは表示名
+        assert "表示名" in lines[0]
+        assert "A大学の部員" in body
+        # Excel 対策の BOM が付く
+        assert res.content.startswith(b"\xef\xbb\xbf")
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_csv_export_is_guild_scoped():
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    client = _logged_in_client(db_path)
+    try:
+        for key in sorted(EXPECTED_TABLES):
+            res = client.get(f"/api/guilds/{GUILD_A}/tables/{key}/export.csv")
+            assert res.status_code == 200, key
+            assert "B大学" not in res.content.decode("utf-8-sig"), key
+        # 他サーバーの CSV は取得できない
+        assert client.get(
+            f"/api/guilds/{GUILD_B}/tables/members/export.csv").status_code == 403
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_csv_export_requires_login():
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    app = create_app(_config(db_path))
+    with TestClient(app) as anon:
+        assert anon.get(
+            f"/api/guilds/{GUILD_A}/tables/members/export.csv").status_code == 401
+
+
+def test_csv_export_unknown_table_is_404():
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    client = _logged_in_client(db_path)
+    try:
+        assert client.get(
+            f"/api/guilds/{GUILD_A}/tables/settings/export.csv").status_code == 404
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_csv_export_is_audited():
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    client = _logged_in_client(db_path)
+    try:
+        client.get(f"/api/guilds/{GUILD_A}/tables/members/export.csv")
+    finally:
+        client.__exit__(None, None, None)
+
+    async def _entries():
+        db = Database(db_path)
+        await db.connect()
+        try:
+            from repositories.audit_log_repository import AuditLogRepository
+            return await AuditLogRepository(db).list_recent(GUILD_A)
+        finally:
+            await db.close()
+
+    assert any(e["action"] == "dashboard.export" for e in asyncio.run(_entries()))

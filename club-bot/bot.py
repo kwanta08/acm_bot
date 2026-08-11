@@ -44,9 +44,8 @@ COGS = [
     "cogs.settings",      # 設定管理コグを追加
     "cogs.setup_wizard",  # /setup 設定ウィザードコグ
     "cogs.teams",         # 班・技能タグ管理コグ
-    "cogs.sheets",        # Google Sheets エクスポート連携コグ
     "cogs.todoist_admin",  # Todoist トークン管理コグ
-    "cogs.progress",      # 機体進捗管理コグ（Google Sheets 正本）
+    "cogs.progress",      # 機体進捗管理コグ（DB 正本）
 ]
 
 # on_guild_join / 起動時の自動セットアップで投入するギルド別デフォルト設定

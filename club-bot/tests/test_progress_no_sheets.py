@@ -246,3 +246,53 @@ def test_no_module_imports_matplotlib():
                 if name == "matplotlib" or name.startswith("matplotlib."):
                     violations.append(rel)
     assert not violations, "matplotlib が再混入しています: " + ", ".join(violations)
+
+
+# ---------------------------------------------------------------------
+# 4. Google Sheets 連携の撤去（P3-2）
+# ---------------------------------------------------------------------
+def test_gspread_is_not_a_dependency():
+    """CSV 出力をダッシュボードへ移し、gspread / google-auth を撤去した。"""
+    with open(os.path.join(BOT_ROOT, "requirements.txt"), encoding="utf-8") as f:
+        lines = [ln.strip() for ln in f
+                 if ln.strip() and not ln.strip().startswith("#")]
+    joined = " ".join(lines).lower()
+    assert "gspread" not in joined
+    assert "google-auth" not in joined
+
+
+def test_sheets_export_modules_are_removed():
+    for rel in ("cogs/sheets.py", "services/sheets_service.py"):
+        assert not os.path.exists(os.path.join(BOT_ROOT, rel)), rel
+
+
+def test_sheets_cog_is_not_loaded():
+    import bot as bot_module
+
+    assert "cogs.sheets" not in bot_module.COGS
+
+
+def test_only_migration_scripts_touch_gspread():
+    """gspread を import するのは移行スクリプトと読み取り専用アダプタのみ。"""
+    allowed = {
+        "scripts/migrate_sheets_to_db.py",
+        "scripts/migrate_progress_sheet_to_db.py",
+        "services/progress_sheet_service.py",
+    }
+    offenders: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(BOT_ROOT):
+        dirnames[:] = [d for d in dirnames
+                       if d not in {"venv", "__pycache__", ".git", "tests",
+                                    "node_modules", "data", "logs"}]
+        for filename in filenames:
+            if not filename.endswith(".py"):
+                continue
+            rel = os.path.relpath(os.path.join(dirpath, filename),
+                                  BOT_ROOT).replace("\\", "/")
+            names = _imported_modules(rel)
+            uses = any(n == "gspread"
+                       or n.startswith(("gspread.", "google.oauth2"))
+                       for n in names)
+            if uses and rel not in allowed:
+                offenders.append(rel)
+    assert not offenders, "gspread への依存が広がっています: " + ", ".join(offenders)

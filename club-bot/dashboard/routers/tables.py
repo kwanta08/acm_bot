@@ -1,4 +1,4 @@
-"""表グリッド API（P2-4: 参照 / P2-5: 編集）。
+"""表グリッド API（P2-4: 参照 / P2-5: 編集 / P3-2: CSV 出力）。
 
 すべてのハンドラは検証済みの `GuildScope` だけを受け取り、
 `scope.bind(TableRepository(db))` 経由でしかデータへ触れない。
@@ -9,9 +9,11 @@
 """
 from __future__ import annotations
 
+import csv
+import io
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query, Response
 
 from dashboard.db import get_database
 from dashboard.security import EditorGuild, GuildScope, ScopedGuild
@@ -79,6 +81,42 @@ async def read_table(
         "offset": offset,
         "can_edit": scope.level >= 2,
     }
+
+
+# 一覧 API と紛れないよう独立したパスにする
+# （/tables/{table_key} が "members.csv" を拾ってしまうため）
+@router.get("/tables/{table_key}/export.csv")
+async def export_table_csv(scope: ScopedGuild, table_key: str):
+    """表を CSV でダウンロードする（このサーバーの行のみ）。
+
+    Google Sheets へのエクスポート連携（旧 /sheet_sync）の置き換え。
+    列見出しは表示名を使い、Excel でも文字化けしないよう BOM を付ける。
+    """
+    try:
+        spec = get_spec(table_key)
+    except UnknownTableError:
+        raise HTTPException(status_code=404,
+                            detail="その表は存在しません。") from None
+
+    repo = scope.bind(TableRepository(get_database()))
+    rows = await repo.list_rows(table_key, limit=MAX_LIMIT)
+
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow([column.label for column in spec.columns])
+    for row in rows:
+        writer.writerow(["" if row.get(c.name) is None else row[c.name]
+                         for c in spec.columns])
+
+    await _audit(scope, "dashboard.export", spec.table,
+                 f"{len(rows)} 行を CSV 出力")
+    # ファイル名にサーバー名を入れない（他者へ共有されたときの情報漏れを避ける）
+    filename = f"{spec.key}_{scope.guild_id}.csv"
+    return Response(
+        content="﻿" + buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 def _short(value: Any) -> str:
