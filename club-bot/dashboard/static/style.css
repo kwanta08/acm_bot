@@ -1,0 +1,101 @@
+/* ダッシュボードの最小スタイル（自己ホスト。外部 CDN に依存しない） */
+:root {
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #656d76;
+  --border: #d8dee4;
+  --accent: #4a86e8;
+  --accent-fg: #ffffff;
+  --row-alt: #f6f8fa;
+  --danger: #b42318;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --border: #30363d;
+    --accent: #4a86e8;
+    --accent-fg: #ffffff;
+    --row-alt: #161b22;
+    --danger: #ff7b72;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans",
+    "Noto Sans JP", sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar h1 { font-size: 1.05rem; margin: 0; }
+
+.account { color: var(--muted); font-size: 0.9rem; }
+
+main { padding: 1.25rem; }
+
+.footer {
+  padding: 1rem 1.25rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  border-top: 1px solid var(--border);
+}
+
+.loading, .empty { color: var(--muted); }
+
+.error {
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+}
+
+button, .button {
+  font: inherit;
+  padding: 0.35rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+
+button.primary, .button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* 表グリッド（横スクロールは表の中だけに閉じ込める） */
+.grid-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+
+table.grid { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+table.grid th, table.grid td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.4rem 0.65rem;
+  text-align: left;
+  white-space: nowrap;
+}
+table.grid thead th {
+  position: sticky;
+  top: 0;
+  background: var(--row-alt);
+  z-index: 1;
+}
+table.grid tbody tr:nth-child(even) { background: var(--row-alt); }
