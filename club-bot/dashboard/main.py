@@ -27,6 +27,7 @@ from dashboard.config import SESSION_COOKIE, DashboardConfig, get_config
 from dashboard.db import close_database, get_database, open_database
 from dashboard.routers import auth as auth_router
 from dashboard.routers import guilds as guilds_router
+from dashboard.routers import tables as tables_router
 from utils.logger import get_logger
 
 log = get_logger("dashboard")
@@ -93,6 +94,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
 
     app.include_router(auth_router.router)
     app.include_router(guilds_router.router)
+    app.include_router(tables_router.router)
 
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> JSONResponse:
