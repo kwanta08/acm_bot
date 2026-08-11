@@ -232,7 +232,8 @@ docker compose up -d --build
 | [`docs/TERMS.md`](docs/TERMS.md) | 利用規約 |
 | [`docs/PRIVACY.md`](docs/PRIVACY.md) | プライバシーポリシー（収集データ・保存場所・削除請求） |
 | [`docs/OPERATION.md`](docs/OPERATION.md) | 運用マニュアル（全コマンド一覧・権限・ダッシュボード運用・トラブル対応） |
-| [`dashboard/README.md`](dashboard/README.md) | Web ダッシュボードのセットアップ |
+| [`docs/DASHBOARD_SETUP.md`](docs/DASHBOARD_SETUP.md) | Web ダッシュボードのセットアップ手順書（OAuth2・HTTPS・常駐） |
+| [`dashboard/README.md`](dashboard/README.md) | Web ダッシュボードの構成概要 |
 | [`docs/SETUP.md`](docs/SETUP.md) | セットアップ手順書（セルフホスト・VPSデプロイ向け） |
 | [`docs/DESIGN_PUBLIC_DISTRIBUTION.md`](docs/DESIGN_PUBLIC_DISTRIBUTION.md) | 公開配布の設計方針 |
 | [`docs/PUBLIC_RELEASE_TASKS.md`](docs/PUBLIC_RELEASE_TASKS.md) | 公開配布の進捗管理表 |

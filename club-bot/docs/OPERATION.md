@@ -534,33 +534,28 @@ bot とは**別プロセス**で動く FastAPI アプリ。Discord でログイ�
 - ダッシュボードに **Discord Bot トークンは不要**（OAuth2 のクライアント
   ID / シークレットのみ）
 
-### 8.2 導入（systemd 構成）
+### 8.2 導入
+
+**手順の詳細は [`DASHBOARD_SETUP.md`](DASHBOARD_SETUP.md) にあります。**
+Discord Developer Portal の OAuth2 設定から、Caddy での HTTPS 公開、
+systemd 常駐、公開前チェックリストまでを順に追える形でまとめています。
+
+概要:
 
 ```bash
-# 1. 依存のインストール（bot 本体とは分離）
-venv/bin/pip install -r dashboard/requirements.txt
-
-# 2. 設定ファイル（bot の .env とは別ファイル）
-cp dashboard/.env.example ~/club-bot/dashboard.env
-python -c "import secrets; print(secrets.token_urlsafe(48))"  # SECRET_KEY
-
-# 3. サービス登録
+venv/bin/pip install -r dashboard/requirements.txt   # 依存（bot とは分離）
+nano ~/club-bot/dashboard.env                        # 設定（bot の .env とは別）
 sudo cp deploy/club-bot-dashboard.service /etc/systemd/system/
-sudo systemctl daemon-reload && sudo systemctl enable --now club-bot-dashboard
-
-# 4. Caddy
-sudo apt install caddy
-sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
-sudo sed -i 's/dashboard.example.com/実際のドメイン/' /etc/caddy/Caddyfile
-sudo systemctl reload caddy
+sudo systemctl enable --now club-bot-dashboard       # 127.0.0.1:8000 で常駐
+sudo cp deploy/Caddyfile /etc/caddy/Caddyfile        # HTTPS 公開（要ドメイン）
 ```
 
 Docker で動かす場合は `deploy/docker-compose.dashboard.yml`
 （Caddy + ダッシュボードのセット）を使う。
 
-**Discord Developer Portal 側の設定**: OAuth2 の Redirects に
-`https://<ドメイン>/auth/callback` を登録する（`DASHBOARD_REDIRECT_URI`
-と完全一致させること）。
+**間違いやすい点**: Discord Developer Portal の OAuth2 > Redirects に
+`https://<ドメイン>/auth/callback` を登録し、`DASHBOARD_REDIRECT_URI` と
+**1文字も違わず一致**させること。
 
 ### 8.3 権限
 

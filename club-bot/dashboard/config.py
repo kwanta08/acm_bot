@@ -67,8 +67,6 @@ class DashboardConfig:
     base_url: str = "http://127.0.0.1:8000"
     # HTTPS 配信時に Cookie へ Secure 属性を付ける（本番は必ず True）
     secure_cookie: bool = True
-    # 開発用: OAuth を経由せずログイン状態を作るためのダミーユーザー
-    dev_login_user_id: str = ""
 
     @property
     def oauth_ready(self) -> bool:
@@ -109,7 +107,6 @@ def load_config(env: dict[str, str] | None = None) -> DashboardConfig:
         base_url=_clean(src.get("DASHBOARD_BASE_URL")) or "http://127.0.0.1:8000",
         secure_cookie=_clean(src.get("DASHBOARD_SECURE_COOKIE")).lower()
         not in ("0", "false", "no"),
-        dev_login_user_id=_clean(src.get("DASHBOARD_DEV_LOGIN_USER_ID")),
     )
 
 
