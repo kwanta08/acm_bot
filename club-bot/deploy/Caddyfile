@@ -1,0 +1,72 @@
+# ダッシュボードの HTTPS 公開設定（Caddy）
+#
+# Caddy は Let's Encrypt から証明書を自動取得・自動更新する。
+# 事前に DNS の A/AAAA レコードをこの VPS へ向けておくこと。
+#
+# 配置:
+#   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+#   sudo sed -i 's/dashboard.example.com/実際のドメイン/' /etc/caddy/Caddyfile
+#   （または /etc/default/caddy に DASHBOARD_DOMAIN=実際のドメイン を設定）
+#   sudo systemctl reload caddy
+#
+# Docker で動かす場合は deploy/docker-compose.dashboard.yml を使う。
+#
+# 前提:
+#   - ダッシュボード（uvicorn）は 127.0.0.1:8000 で待ち受ける
+#     （直接インターネットへ公開しない）
+#   - ファイアウォールで開けるのは 80 / 443 のみ
+
+{
+	# 証明書の期限切れ通知先（任意だが設定を推奨）
+	# email admin@example.com
+
+	# 管理 API はローカルのみ（既定でも localhost だが明示する）
+	admin localhost:2019
+}
+
+{$DASHBOARD_DOMAIN:dashboard.example.com} {
+	encode zstd gzip
+
+	# --- セキュリティヘッダ ---
+	header {
+		# HTTPS を1年間強制（サブドメイン含む）。
+		# 一度有効にすると期間中は HTTP へ戻せないため、
+		# ドメイン運用が固まってから preload を検討すること
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		# MIME スニッフィング・クリックジャッキング対策
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# ダッシュボードは自己ホストの HTML/CSS/JS のみを読み込む
+		# （外部 CDN を使わないため default-src 'self' で足りる）
+		Content-Security-Policy "default-src 'self'; img-src 'self' data:; form-action 'self'; frame-ancestors 'none'; base-uri 'self'"
+		# 不要な機能を明示的に無効化
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
+		# サーバー実装を隠す
+		-Server
+	}
+
+	# --- 静的ファイルは長めにキャッシュ ---
+	@static path /static/*
+	header @static Cache-Control "public, max-age=3600"
+
+	# --- 死活監視はアクセスログから除外（ノイズ削減） ---
+	@healthz path /healthz
+	log_skip @healthz
+
+	# systemd 構成では 127.0.0.1:8000、Docker 構成では dashboard:8000
+	reverse_proxy {$DASHBOARD_UPSTREAM:127.0.0.1:8000} {
+		# X-Forwarded-* を付ける（uvicorn は --proxy-headers で解釈する）
+		header_up X-Real-IP {remote_host}
+		# アップストリームが落ちている間は 502 を返す
+		lb_try_duration 5s
+	}
+
+	log {
+		output file /var/log/caddy/dashboard.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+		format console
+	}
+}

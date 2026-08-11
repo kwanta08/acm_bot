@@ -1,38 +1,35 @@
-"""Todoist → 進捗管理シートの同期サービス。
+"""Todoist → 機体進捗ツリー（DB）の同期サービス。
 
-Todoist の親子構造（task.id / task.parent_id）を、シートの
-ID（`td_` プレフィックス付き）/ 親ID にそのままマッピングして upsert する。
+Todoist の親子構造（task.id / task.parent_id）を progress_nodes の
+node_id（`td_` プレフィックス付き）/ parent_id にそのままマッピングして
+upsert する。正本は DB であり、Google Sheets には一切依存しない。
 
-同期の流れ（sync_guild）:
-  1. Todoist対応表シートから「プロジェクト名 → 紐付け先ノードID」を取得
+同期の流れ（sync_guild_db）:
+  1. progress_todoist_links から「プロジェクト名 → 紐付け先ノードID」を取得
   2. 各プロジェクトのアクティブタスクを取得し、`td_<id>` で upsert
      （トップレベルタスクは対応ノードへ、サブタスクは親タスクへぶら下げる）
-  3. 前回シートに存在したのに今回アクティブに無い td_ 行は完了扱い
+  3. 前回 DB に存在したのに今回アクティブに無い td_ ノードは完了扱い
      （進捗率 100%・状態=完了）
-  4. ツリーを再構築し、深さ・集計進捗率・更新日時を書き戻す
+  4. 桁巻き（layer_records）の完了層数から該当ノードの進捗率を更新
+  5. ツリーを再構築して集計結果を返す（表示用）
 
 安全策:
-- `ソース=manual` の行は一切変更しない
-- 完了マーク付けは「現在対応表に載っているアンカー配下の td_ 行」に限定する
-  （対応表から外したプロジェクトの行を誤って完了扱いしない）
+- `source=manual` / `source=spar_winding` のノードは一切変更しない
+- 完了マーク付けは「現在紐付いているアンカー配下の todoist ノード」に限定する
+  （紐付けを外したプロジェクトのノードを誤って完了扱いしない）
 - いずれかのプロジェクトの取得に失敗した場合は同期全体を中断する
   （部分的なアクティブ一覧で誤完了させない）
 """
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
+from repositories.progress_repository import ProgressRepository
 from repositories.settings_repository import SettingsRepository
-from services import progress_sheet_service as pss
+from services import progress_tree as pt
 from services import spar_winding_service
-from services.progress_tree import (
-    ProgressNode,
-    ProgressTree,
-    build_and_aggregate,
-    build_tree,
-)
+from services.progress_tree import ProgressNode, ProgressTree, build_tree
 from utils.db import Database
 from utils.logger import get_logger
 from utils.parser import now
@@ -41,33 +38,48 @@ log = get_logger("progress_sync")
 
 STATUS_DONE = "完了"
 
+# Todoist 由来ノードの ID プレフィックス（旧シート版と同一。移行後も
+# 既存ノードの ID が変わらないようにするため値を変えないこと）
+TODOIST_ID_PREFIX = "td_"
 
-async def get_spreadsheet_id(db: Database, guild_id: int) -> str | None:
-    """ギルド別 settings から進捗シートの ID を取得する。未設定なら None。"""
-    value = await SettingsRepository(db).get(guild_id, pss.SETTINGS_KEY)
-    value = (value or "").strip()
-    return value or None
+
+# =====================================================================
+# DB ベースの同期（正本 = progress_nodes）
+# =====================================================================
+# 旧「設定」タブのデフォルト通知チャンネルに相当する settings キー。
+SETTINGS_DEFAULT_CHANNEL_KEY = "PROGRESS_DEFAULT_CHANNEL_ID"
+
+
+def _now_text() -> str:
+    """progress_nodes の created_at / updated_at に入れる時刻文字列。"""
+    return now().strftime("%Y-%m-%d %H:%M")
 
 
 @dataclass
-class UpsertPlan:
-    """Todoist 取得結果をシートへ反映するための更新計画（純粋データ）。"""
-    cell_ranges: list[dict[str, Any]] = field(default_factory=list)
-    new_rows: list[list[Any]] = field(default_factory=list)
-    added: int = 0
-    updated: int = 0
-    completed: int = 0
+class DbSyncPlan:
+    """Todoist 取得結果を progress_nodes へ反映するための更新計画（純粋データ）。"""
+    creates: list[dict[str, Any]] = field(default_factory=list)
+    updates: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
+    completions: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
+    @property
+    def added(self) -> int:
+        return len(self.creates)
+
+    @property
+    def updated(self) -> int:
+        return len(self.updates)
+
+    @property
+    def completed(self) -> int:
+        return len(self.completions)
+
 
 @dataclass
-class SyncResult:
-    """1シート分の同期結果（通知・ログ用）。
-
-    tree には再集計後の進捗ツリーを保持する（Discord 表示用の
-    メモリキャッシュに使う。クリックの都度シートを読みに行かない）。
-    """
-    spreadsheet_id: str
+class GuildSyncResult:
+    """1ギルド分の同期結果（通知・ログ用）。"""
+    guild_id: int
     projects: int = 0
     added: int = 0
     updated: int = 0
@@ -77,9 +89,9 @@ class SyncResult:
     tree: ProgressTree | None = None
 
 
-def _descendant_todoist_rows(tree: ProgressTree,
-                             anchor_ids: list[str]) -> dict[str, ProgressNode]:
-    """アンカー配下（自身を除く）の source=todoist 行を td_ ID で返す。"""
+def _descendant_todoist_nodes(tree: ProgressTree,
+                              anchor_ids: list[str]) -> dict[str, ProgressNode]:
+    """アンカー配下（自身を除く）の source=todoist ノードを返す。"""
     out: dict[str, ProgressNode] = {}
     for anchor_id in anchor_ids:
         anchor = tree.by_id.get(anchor_id)
@@ -89,20 +101,23 @@ def _descendant_todoist_rows(tree: ProgressTree,
         while stack:
             node = stack.pop()
             stack.extend(node.children)
-            if node.source == pss.SOURCE_TODOIST:
+            if node.source == pt.SOURCE_TODOIST:
                 out[node.node_id] = node
     return out
 
 
-def plan_todoist_upsert(nodes: list[ProgressNode],
-                        anchors: list[tuple[str, list[Any]]],
-                        now_text: str) -> UpsertPlan:
-    """アクティブタスク一覧からシート更新計画を組み立てる（純粋関数）。
+def plan_todoist_sync(nodes: list[ProgressNode],
+                      anchors: list[tuple[str, list[Any]]]) -> DbSyncPlan:
+    """アクティブタスク一覧から progress_nodes の更新計画を組み立てる（純粋関数）。
 
     anchors: [(紐付け先ノードID, そのプロジェクトのアクティブタスク一覧)]
-    タスクは todoist_api_python の Task 互換（id / content / parent_id）であればよい。
+    タスクは todoist_api_python の Task 互換（id / content / parent_id）でよい。
+
+    安全策（シート版から引き継ぐ）:
+    - source=manual / spar_winding のノードは絶対に上書きしない
+    - 完了マーク付けは「現在紐付いているアンカー配下の todoist ノード」に限定する
     """
-    plan = UpsertPlan()
+    plan = DbSyncPlan()
     tree = build_tree(nodes)
 
     valid_anchor_ids: list[str] = []
@@ -111,23 +126,21 @@ def plan_todoist_upsert(nodes: list[ProgressNode],
             valid_anchor_ids.append(anchor_id)
         else:
             plan.errors.append(
-                f"対応表の紐付け先ノード `{anchor_id}` がシートに見つかりません")
+                f"紐付け先ノード `{anchor_id}` が進捗ツリーに見つかりません")
 
-    # 現在アクティブな td_ ID の集合（全アンカー横断）
-    active_ids: set[str] = set()
-    for anchor_id, tasks in anchors:
-        for task in tasks:
-            active_ids.add(f"{pss.TODOIST_ID_PREFIX}{task.id}")
+    active_ids: set[str] = {
+        f"{TODOIST_ID_PREFIX}{task.id}"
+        for _anchor_id, tasks in anchors for task in tasks}
 
     for anchor_id, tasks in anchors:
         if anchor_id not in tree.by_id:
             continue
         for seq, task in enumerate(tasks, start=1):
-            node_id = f"{pss.TODOIST_ID_PREFIX}{task.id}"
+            node_id = f"{TODOIST_ID_PREFIX}{task.id}"
             raw_parent = getattr(task, "parent_id", None)
-            parent_td = (f"{pss.TODOIST_ID_PREFIX}{raw_parent}"
+            parent_td = (f"{TODOIST_ID_PREFIX}{raw_parent}"
                          if raw_parent else None)
-            # 親タスクがアクティブ一覧かシートに存在すればそこへ、
+            # 親タスクがアクティブかツリーに在ればそこへ、
             # 無ければ（親が先に完了した等）アンカー直下へぶら下げる
             if parent_td and (parent_td in active_ids
                               or parent_td in tree.by_id):
@@ -136,224 +149,141 @@ def plan_todoist_upsert(nodes: list[ProgressNode],
                 parent_id = anchor_id
 
             existing = tree.by_id.get(node_id)
-            if existing is None or existing.row_index is None:
-                plan.new_rows.append([
-                    node_id, parent_id, seq, "", str(task.content),
-                    "", "", 0, "", "", pss.SOURCE_TODOIST,
-                    str(task.id), now_text,
-                ])
-                plan.added += 1
+            if existing is None:
+                plan.creates.append({
+                    "node_id": node_id,
+                    "parent_id": parent_id,
+                    "sort_order": float(seq),
+                    "name": str(task.content),
+                    "manual_progress": 0.0,
+                    "source": pt.SOURCE_TODOIST,
+                    "todoist_task_id": str(task.id),
+                })
                 continue
-            if existing.source != pss.SOURCE_TODOIST:
-                continue  # manual 行は絶対に上書きしない
-            r = existing.row_index
-            changed = False
+            if existing.source != pt.SOURCE_TODOIST:
+                continue  # 手入力・桁巻き由来の行は上書きしない
+            fields: dict[str, Any] = {}
             if (existing.parent_id or None) != parent_id:
-                plan.cell_ranges.append({
-                    "range": f"'{pss.PROGRESS_SHEET}'!B{r}",
-                    "values": [[parent_id]]})
-                changed = True
+                fields["parent_id"] = parent_id
             if existing.name != str(task.content):
-                plan.cell_ranges.append({
-                    "range": f"'{pss.PROGRESS_SHEET}'!E{r}",
-                    "values": [[str(task.content)]]})
-                changed = True
-            if changed:
-                plan.updated += 1
+                fields["name"] = str(task.content)
+            if fields:
+                plan.updates.append((node_id, fields))
 
-    # 完了検知: 現在のアンカー配下の td_ 行のうちアクティブに無いもの
-    for node_id, node in _descendant_todoist_rows(tree, valid_anchor_ids).items():
-        if node_id in active_ids or node.row_index is None:
+    for node_id, node in _descendant_todoist_nodes(
+            tree, valid_anchor_ids).items():
+        if node_id in active_ids:
             continue
         if node.manual_progress == 1.0 and node.status == STATUS_DONE:
             continue  # 反映済み
-        r = node.row_index
-        plan.cell_ranges.append({
-            "range": f"'{pss.PROGRESS_SHEET}'!G{r}:H{r}",
-            "values": [[STATUS_DONE, 1]]})
-        plan.completed += 1
+        plan.completions.append(node_id)
 
     return plan
 
 
-def resolve_notify_channel_id(mapping_entry: dict[str, str],
-                              sheet_settings: dict[str, str]) -> int | None:
-    """タスク通知の送信先チャンネル ID を解決する。
+async def apply_todoist_plan(repo: Any, guild_id: int, plan: DbSyncPlan,
+                             now_text: str) -> None:
+    """更新計画を DB へ適用する。"""
+    for kwargs in plan.creates:
+        await repo.upsert_node(guild_id, now_text=now_text, **kwargs)
+    for node_id, fields in plan.updates:
+        await repo.update_node(guild_id, node_id, now_text, **fields)
+    for node_id in plan.completions:
+        await repo.set_progress(guild_id, node_id, 1.0, now_text,
+                                status=STATUS_DONE)
 
-    優先順: 対応表の通知チャンネルID（プロジェクト専用）>
-    「設定」タブのデフォルト通知チャンネルID。
-    どちらも無効・未設定なら None（呼び出し側でギルド既定へフォールバック）。
-    """
-    raw = (mapping_entry.get("notify_channel_id") or "").strip()
-    if not raw.isdigit():
-        raw = (sheet_settings.get(pss.SHEET_KEY_DEFAULT_CHANNEL) or "").strip()
+
+async def resolve_default_channel_id(db: Database,
+                                     guild_id: int) -> int | None:
+    """ギルドの既定通知チャンネル（settings）を返す。未設定なら None。"""
+    raw = (await SettingsRepository(db).get(
+        guild_id, SETTINGS_DEFAULT_CHANNEL_KEY) or "").strip()
     return int(raw) if raw.isdigit() else None
 
 
-def _now_text() -> str:
-    return now().strftime("%Y-%m-%d %H:%M")
+def resolve_link_channel_id(link: dict[str, Any],
+                            default_channel_id: int | None) -> int | None:
+    """タスク通知の送信先を解決する。
 
-
-async def recalculate(client: pss.ProgressSheetClient,
-                      spreadsheet_id: str) -> ProgressTree:
-    """シートを読み込み、集計・深さを計算して書き戻す。
-
-    戻り値のツリーには循環参照等のエラー一覧（tree.errors）が含まれる。
+    優先順: 紐付け行の通知チャンネル（プロジェクト専用）> ギルドの既定。
+    どちらも無ければ None（呼び出し側でギルドのタスクチャンネルへ）。
     """
-    grid = await asyncio.to_thread(client.read_progress_grid, spreadsheet_id)
-    tree = build_and_aggregate(pss.grid_to_nodes(grid))
-    ranges = pss.build_writeback_ranges(grid, tree, _now_text())
-    await asyncio.to_thread(client.apply_value_ranges, spreadsheet_id, ranges)
-    return tree
+    raw = str(link.get("notify_channel_id") or "").strip()
+    if raw.isdigit():
+        return int(raw)
+    return default_channel_id
 
 
-async def sync_guild(db: Database, guild_id: int, todoist_svc: Any,
-                     client: pss.ProgressSheetClient) -> SyncResult | None:
-    """1ギルド分の Todoist 同期＋再集計を行う（/progress sync 等の手動実行用）。
+async def sync_guild_db(db: Database, guild_id: int,
+                        todoist_svc: Any) -> GuildSyncResult:
+    """1ギルド分の Todoist 同期＋桁巻き反映＋再集計（DB 版）。
 
-    進捗シート未設定のギルドは None を返して自動スキップする（例外にしない）。
-    Todoist 未設定のギルドは再集計のみ行う。
-    Todoist API の失敗（TodoistError）・Sheets の失敗は呼び出し側へ伝播する。
+    - Todoist 未設定・紐付け0件のギルドは桁巻き反映と再集計だけ行う
+    - いずれかのプロジェクト取得に失敗した場合は例外を呼び出し側へ伝播する
+      （部分的なアクティブ一覧で誤完了させない）
     """
-    spreadsheet_id = await get_spreadsheet_id(db, guild_id)
-    if spreadsheet_id is None:
-        return None
-    return await sync_sheet(spreadsheet_id, todoist_svc, client)
+    repo = ProgressRepository(db)
+    result = GuildSyncResult(guild_id=guild_id)
+    now_text = _now_text()
 
+    links = await repo.list_todoist_links(guild_id)
+    if links and todoist_svc is not None and getattr(
+            todoist_svc, "enabled", False):
+        projects = await todoist_svc.get_projects()
+        project_ids = {getattr(p, "name", ""): str(p.id) for p in projects}
+        anchors: list[tuple[str, list[Any]]] = []
+        for link in links:
+            project_id = project_ids.get(link["project_name"])
+            if project_id is None:
+                result.errors.append(
+                    f"Todoist プロジェクト「{link['project_name']}」が"
+                    "見つかりません")
+                continue
+            anchors.append((link["node_id"],
+                            await todoist_svc.get_tasks(project_id=project_id)))
+        result.projects = len(anchors)
 
-async def sync_sheet(spreadsheet_id: str, todoist_svc: Any,
-                     client: pss.ProgressSheetClient) -> SyncResult:
-    """1スプレッドシート分の Todoist 同期＋再集計を行う。
+        if anchors:
+            nodes = pt.nodes_from_rows(await repo.list_nodes(guild_id))
+            plan = plan_todoist_sync(nodes, anchors)
+            await apply_todoist_plan(repo, guild_id, plan, now_text)
+            result.added = plan.added
+            result.updated = plan.updated
+            result.completed = plan.completed
+            result.errors.extend(plan.errors)
 
-    中央シートを複数ギルドで共有している場合も、シート単位で1回だけ
-    呼べばよい（ギルド数に比例して Sheets API を消費しない）。
-    """
-    result = SyncResult(spreadsheet_id=spreadsheet_id)
+    spar_plan = await spar_winding_service.sync_spar_winding_db(
+        repo, guild_id, now_text)
+    result.spar_updated = spar_plan.updated
+    result.errors.extend(spar_plan.errors)
 
-    if todoist_svc is not None and getattr(todoist_svc, "enabled", False):
-        mapping_grid = await asyncio.to_thread(
-            client.read_mapping_grid, spreadsheet_id)
-        mappings = pss.parse_mapping_grid(mapping_grid)
-        if mappings:
-            projects = await todoist_svc.get_projects()
-            project_ids = {getattr(p, "name", ""): str(p.id) for p in projects}
-            anchors: list[tuple[str, list[Any]]] = []
-            for m in mappings:
-                project_id = project_ids.get(m["project_name"])
-                if project_id is None:
-                    result.errors.append(
-                        f"Todoist プロジェクト「{m['project_name']}」が"
-                        "見つかりません")
-                    continue
-                tasks = await todoist_svc.get_tasks(project_id=project_id)
-                anchors.append((m["node_id"], tasks))
-            result.projects = len(anchors)
-
-            if anchors:
-                grid = await asyncio.to_thread(
-                    client.read_progress_grid, spreadsheet_id)
-                plan = plan_todoist_upsert(
-                    pss.grid_to_nodes(grid), anchors, _now_text())
-                result.errors.extend(plan.errors)
-                result.added = plan.added
-                result.updated = plan.updated
-                result.completed = plan.completed
-                await asyncio.to_thread(
-                    client.apply_value_ranges, spreadsheet_id,
-                    plan.cell_ranges)
-                await asyncio.to_thread(
-                    client.append_progress_rows, spreadsheet_id,
-                    plan.new_rows)
-
-    # 桁巻きブックの進捗反映（「設定」タブに桁巻きスプレッドシートID が
-    # ある場合のみ。設定タブが無い旧ブックでは黙ってスキップする）
-    try:
-        sheet_settings = pss.parse_settings_grid(await asyncio.to_thread(
-            client.read_settings_grid, spreadsheet_id))
-    except Exception:  # noqa: BLE001  (設定タブ未作成)
-        sheet_settings = {}
-    if sheet_settings:
-        spar_plan = await spar_winding_service.sync_spar_winding(
-            client, spreadsheet_id, sheet_settings)
-        result.spar_updated = spar_plan.updated
-        result.errors.extend(spar_plan.errors)
-
-    tree = await recalculate(client, spreadsheet_id)
+    tree = await pt.load_tree(repo, guild_id)
     result.tree = tree
     result.errors.extend(
-        f"行スキップ: {e.node_id or '(ID なし)'} — {e.reason}"
+        f"ノードをスキップ: {e.node_id or '(ID なし)'} — {e.reason}"
         for e in tree.errors)
-    log.info("進捗同期完了 (sheet=%s): +%d行 / 更新%d / 完了%d / 桁巻き%d /"
-             " エラー%d", spreadsheet_id, result.added, result.updated,
+    log.info("進捗同期完了 (guild=%s): +%d / 更新%d / 完了%d / 桁巻き%d /"
+             " エラー%d", guild_id, result.added, result.updated,
              result.completed, result.spar_updated, len(result.errors))
     return result
 
 
-# ---------------------------------------------------------------------
-# 全ギルド一括同期（単一の定期ジョブ用）
-# ---------------------------------------------------------------------
-@dataclass
-class SheetGroup:
-    """同じ進捗シートを登録しているギルドのグループ。"""
-    spreadsheet_id: str
-    guild_ids: list[int] = field(default_factory=list)
-
-
-@dataclass
-class GroupSyncOutcome:
-    """1シート分の同期結果（失敗した場合は error に例外を保持）。"""
-    group: SheetGroup
-    result: SyncResult | None = None
-    error: Exception | None = None
-
-
-async def collect_sheet_groups(db: Database,
-                               guild_ids: list[int]) -> list[SheetGroup]:
-    """ギルド一覧を進捗シート ID でグルーピングする（未設定ギルドは除外）。"""
-    groups: dict[str, SheetGroup] = {}
-    for guild_id in guild_ids:
-        spreadsheet_id = await get_spreadsheet_id(db, guild_id)
-        if spreadsheet_id is None:
-            continue
-        group = groups.setdefault(spreadsheet_id, SheetGroup(spreadsheet_id))
-        group.guild_ids.append(guild_id)
-    return list(groups.values())
-
-
-async def _pick_todoist_service(todoist_manager: Any,
-                                guild_ids: list[int]) -> Any:
-    """グループ内で Todoist が有効な最初のギルドのサービスを返す。"""
+async def sync_all_guilds(db: Database, guild_ids: list[int],
+                          todoist_manager: Any) -> list[GuildSyncResult]:
+    """参加中の全ギルドを順に同期する（1ギルドの失敗は他を止めない）。"""
+    results: list[GuildSyncResult] = []
     for guild_id in guild_ids:
         try:
             svc = await todoist_manager.for_guild(guild_id)
         except Exception as e:  # noqa: BLE001  (トークン復号失敗等)
             log.warning("Todoist サービス取得失敗 (guild=%s): %s",
                         guild_id, type(e).__name__)
-            continue
-        if svc is not None and getattr(svc, "enabled", False):
-            return svc
-    return None
-
-
-async def sync_all(db: Database, guild_ids: list[int], todoist_manager: Any,
-                   client: pss.ProgressSheetClient) -> list[GroupSyncOutcome]:
-    """参加中ギルドの進捗シートを一意なシートごとに1回だけ同期する。
-
-    複数サーバーが中央シートを共有していてもシート単位で1回の
-    読み書きに集約され、Sheets API のクォータ消費がサーバー数に
-    比例しない。1シートの失敗は他シートの同期を止めない。
-    """
-    outcomes: list[GroupSyncOutcome] = []
-    for group in await collect_sheet_groups(db, guild_ids):
-        todoist_svc = await _pick_todoist_service(todoist_manager,
-                                                  group.guild_ids)
+            svc = None
         try:
-            result = await sync_sheet(group.spreadsheet_id, todoist_svc,
-                                      client)
-        except Exception as e:  # noqa: BLE001  (シート間の影響を遮断)
-            log.warning("進捗同期失敗 (sheet=%s): %s",
-                        group.spreadsheet_id, type(e).__name__)
-            outcomes.append(GroupSyncOutcome(group, error=e))
-            continue
-        outcomes.append(GroupSyncOutcome(group, result=result))
-    return outcomes
+            results.append(await sync_guild_db(db, guild_id, svc))
+        except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
+            log.warning("進捗同期失敗 (guild=%s): %s", guild_id, type(e).__name__)
+            results.append(GuildSyncResult(
+                guild_id=guild_id,
+                errors=[f"同期に失敗しました（{type(e).__name__}）"]))
+    return results

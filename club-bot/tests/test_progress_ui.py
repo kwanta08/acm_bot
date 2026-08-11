@@ -1,6 +1,7 @@
-"""progress コグの表示ヘルパー・グラフ生成のユニットテスト。
+"""progress コグの表示ヘルパー・進捗バーのユニットテスト。
 
-Discord への接続は行わず、Embed 組み立て・パンくず・グラフ PNG 生成のみ検証する。
+Discord への接続は行わず、Embed 組み立て・パンくず・テキスト進捗バーのみ検証する。
+（matplotlib による PNG 生成は撤去され、詳細なグラフはブラウザ側で描画する）
 """
 from __future__ import annotations
 
@@ -10,17 +11,18 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from cogs.progress import (
-    CHART_FILENAME,
+    BAR_WIDTH,
     anchor_candidates,
     breadcrumb,
     build_level_embed,
     chart_items,
     child_nodes,
-    new_part_row,
+    new_part_node_id,
+    node_choices,
     unmapped_projects,
 )
 from services.progress_tree import ProgressNode, build_and_aggregate
-from utils.progress_chart import render_progress_bars
+from utils import progress_bar
 
 
 def _node(node_id, parent=None, *, name=None, progress=None, order=0.0,
@@ -71,7 +73,7 @@ def test_level_embed_lists_children_with_percent():
     names = [f.name for f in embed.fields]
     assert any("リブ" in n and "50%" in n for n in names)
     assert any("桁" in n and "100%" in n for n in names)
-    assert embed.image.url == f"attachment://{CHART_FILENAME}"
+    assert progress_bar.FILLED in (embed.description or "")
 
 
 def test_level_embed_leaf_details():
@@ -81,7 +83,7 @@ def test_level_embed_leaf_details():
     fields = {f.name: f.value for f in embed.fields}
     assert fields["ソース"] == "Todoist"
     assert "42" in fields["Todoist"]
-    assert embed.image.url is None  # 葉はグラフなし
+    assert progress_bar.FILLED not in (embed.description or "")  # 葉はバーなし
 
 
 def test_level_embed_root_listing():
@@ -108,9 +110,9 @@ class _Proj:
 
 def test_unmapped_projects_excludes_registered():
     projects = [_Proj("1", "主翼班"), _Proj("2", "尾翼班"), _Proj("3", "電装班")]
-    mappings = [{"project_name": "主翼班", "node_id": "wing",
-                 "notify_channel_id": ""}]
-    result = unmapped_projects(projects, mappings)
+    links = [{"project_name": "主翼班", "node_id": "wing",
+              "notify_channel_id": ""}]
+    result = unmapped_projects(projects, links)
     assert [p.name for p in result] == ["尾翼班", "電装班"]
 
 
@@ -121,14 +123,30 @@ def test_anchor_candidates_depth_limited_and_ordered():
     assert ids == ["m1", "wing", "tail"]
 
 
-def test_new_part_row_layout():
-    row = new_part_row("P1", "主翼班", "m1", "2026-08-08 12:00")
-    assert row[0] == "pj_P1"       # ID
-    assert row[1] == "m1"          # 親ID = 選択した機体
-    assert row[4] == "主翼班"      # 名前 = プロジェクト名
-    assert row[10] == "manual"     # ソース（同期処理の上書き対象にしない）
-    assert row[12] == "2026-08-08 12:00"
-    assert len(row) == 13          # 進捗管理シートの列数と一致
+def test_new_part_node_id_is_stable():
+    """プロジェクト ID から導くため、消して再登録しても同じノードに戻る。"""
+    assert new_part_node_id("P1") == "pj_P1"
+    assert new_part_node_id("P1") == new_part_node_id("P1")
+
+
+# ---------------------------------------------------------------------
+# ノード指定のオートコンプリート
+# ---------------------------------------------------------------------
+def test_node_choices_walks_tree_in_order():
+    choices = node_choices(_tree(), "")
+    ids = [node_id for _, node_id in choices]
+    labels = [label for label, _ in choices]
+    # ツリーの行きがけ順（機体 → 配下のパーツ → その配下 → 次のパーツ）
+    assert ids == ["m1", "wing", "rib", "spar", "tail"]
+    # 深さぶん全角スペースで字下げされる
+    assert labels[0] == "本機"
+    assert labels[1] == "　主翼"
+    assert labels[2] == "　　リブ"
+
+
+def test_node_choices_filters_by_input():
+    ids = [node_id for _, node_id in node_choices(_tree(), "spar")]
+    assert ids == ["spar"]
 
 
 # ---------------------------------------------------------------------
@@ -167,22 +185,45 @@ def test_due_items_filters_and_formats():
 
 
 # ---------------------------------------------------------------------
-# グラフ PNG 生成
+# テキスト進捗バー
 # ---------------------------------------------------------------------
-def test_render_progress_bars_returns_png():
-    png = render_progress_bars([("主翼", 0.75), ("尾翼", 0.0), ("胴体", 1.0)])
-    assert png[:8] == b"\x89PNG\r\n\x1a\n"
-    assert len(png) > 1000
+def test_render_block_contains_bars_and_percent():
+    block = progress_bar.render_block([("主翼", 0.75), ("尾翼", 0.0)])
+    assert block.startswith("```") and block.endswith("```")
+    assert "主翼" in block and "75%" in block
+    assert progress_bar.FILLED in block and progress_bar.EMPTY in block
 
 
-def test_render_progress_bars_clamps_and_truncates():
-    png = render_progress_bars([("と" * 40, 1.5), ("x", -0.5)])
-    assert png[:8] == b"\x89PNG\r\n\x1a\n"
+def test_render_block_is_empty_for_no_items():
+    assert progress_bar.render_block([]) == ""
 
 
-def test_render_progress_bars_rejects_empty():
-    try:
-        render_progress_bars([])
-        raise AssertionError("ValueError が送出されるべき")
-    except ValueError:
-        pass
+def test_bar_clamps_and_keeps_width():
+    assert progress_bar.bar(0.0, 10) == progress_bar.EMPTY * 10
+    assert progress_bar.bar(1.0, 10) == progress_bar.FILLED * 10
+    assert progress_bar.bar(1.5, 10) == progress_bar.FILLED * 10   # クランプ
+    assert progress_bar.bar(-0.5, 10) == progress_bar.EMPTY * 10
+    assert len(progress_bar.bar(0.37, 12)) == 12
+    assert len(progress_bar.bar(0.37, 0)) == 1                     # 最低1文字
+
+
+def test_render_lines_align_bars():
+    lines = progress_bar.render_lines([("主翼", 0.5), ("胴体フレーム", 0.25)])
+    # 名前の長さが違ってもバーの開始位置が揃う
+    assert len(lines) == 2
+    assert (lines[0].index(progress_bar.FILLED)
+            == lines[1].index(progress_bar.FILLED))
+
+
+def test_render_block_truncates_long_lists():
+    items = [(f"部品{i}", 0.5) for i in range(30)]
+    block = progress_bar.render_block(items, max_rows=25)
+    assert "他 5 件" in block
+
+
+def test_embed_contains_text_bar_instead_of_image():
+    """/progress view の Embed は画像添付ではなくテキストバーを持つ。"""
+    embed = build_level_embed(_tree(), "m1")
+    assert embed.image.url is None
+    assert progress_bar.FILLED in (embed.description or "")
+    assert BAR_WIDTH >= 8

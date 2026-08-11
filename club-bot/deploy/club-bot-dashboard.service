@@ -1,0 +1,47 @@
+# /etc/systemd/system/club-bot-dashboard.service
+# ダッシュボード（FastAPI）の常駐サービス定義。
+#
+# **bot とは別プロセス**として動かす。Web 層の不具合や再起動が
+# Discord 接続へ波及しないようにするため（設計方針 2.2）。
+#
+# このファイル内のパス・ユーザー名は「作業用ユーザーを ubuntu、
+# 配置先を /home/ubuntu/club-bot」とした場合の例です。
+#
+# 導入:
+#   /home/ubuntu/club-bot/venv/bin/pip install -r app/dashboard/requirements.txt
+#   sudo cp deploy/club-bot-dashboard.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now club-bot-dashboard
+[Unit]
+Description=Club Bot Dashboard (FastAPI)
+After=network-online.target
+Wants=network-online.target
+# DB が Docker Compose の場合は docker.service の後に起動する
+After=docker.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/club-bot/app
+# 127.0.0.1 にのみバインドする（公開は Caddy 経由。直接公開しない）。
+# --proxy-headers で Caddy の X-Forwarded-* を解釈する。
+ExecStart=/home/ubuntu/club-bot/venv/bin/uvicorn dashboard.main:app \
+    --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=always
+RestartSec=10
+# ダッシュボード専用の設定（DASHBOARD_SECRET_KEY / DISCORD_CLIENT_ID /
+# DISCORD_CLIENT_SECRET / DASHBOARD_REDIRECT_URI / DATABASE_URL）。
+# bot の .env とは分ける（ダッシュボードに Bot トークンは不要）。
+EnvironmentFile=/home/ubuntu/club-bot/dashboard.env
+StandardOutput=append:/home/ubuntu/club-bot/logs/dashboard.log
+StandardError=append:/home/ubuntu/club-bot/logs/dashboard.err
+
+# --- 権限の最小化 ---
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/home/ubuntu/club-bot/logs /home/ubuntu/club-bot/data
+
+[Install]
+WantedBy=multi-user.target

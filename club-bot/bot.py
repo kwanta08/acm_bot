@@ -44,9 +44,8 @@ COGS = [
     "cogs.settings",      # 設定管理コグを追加
     "cogs.setup_wizard",  # /setup 設定ウィザードコグ
     "cogs.teams",         # 班・技能タグ管理コグ
-    "cogs.sheets",        # Google Sheets エクスポート連携コグ
     "cogs.todoist_admin",  # Todoist トークン管理コグ
-    "cogs.progress",      # 機体進捗管理コグ（Google Sheets 正本）
+    "cogs.progress",      # 機体進捗管理コグ（DB 正本）
 ]
 
 # on_guild_join / 起動時の自動セットアップで投入するギルド別デフォルト設定
@@ -107,6 +106,7 @@ class ClubBot(commands.Bot):
         super().__init__(command_prefix="!club ", intents=build_intents(),
                          help_command=None)
 
+        # プールサイズは環境変数 DB_POOL_MIN_SIZE / DB_POOL_MAX_SIZE で調整できる
         self.db = Database(config.db_path, database_url=config.database_url)
         self.todoist_manager = TodoistServiceManager(self.db)
         self._initial_guild_setup_done = False
@@ -118,6 +118,13 @@ class ClubBot(commands.Bot):
         # データベースから設定を読み込む（環境変数が優先。
         # GUILD_ID 指定時はそのギルドの設定をグローバル設定としても読み込む）
         await config.load_from_db(self.db)
+
+        # ダッシュボード（別プロセス）からの settings 更新を購読し、
+        # ギルド別設定のキャッシュを無効化する（PostgreSQL 構成のみ）。
+        # SQLite 構成では何もしない（単一プロセス運用が前提）。
+        if await self.db.start_settings_listener(config.invalidate_guild):
+            log.info("ダッシュボードからの設定変更を反映します"
+                     "（LISTEN/NOTIFY 有効）")
 
         # 暗号鍵チェック（Todoist トークン管理の前提）。
         # 未設定/不正でも Bot 自体は動作を継続するが、トークンの登録・利用は

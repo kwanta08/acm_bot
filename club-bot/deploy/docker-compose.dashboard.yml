@@ -1,0 +1,67 @@
+# ダッシュボード + Caddy（HTTPS）を Docker で動かす構成
+#
+# 構成:
+#   - caddy     : 443/80 を受け、証明書を自動取得してダッシュボードへ中継
+#   - dashboard : FastAPI（uvicorn）。コンテナ内でのみ待ち受け、外部公開しない
+#   - postgres  : docker-compose.postgres.yml 側で起動する（本ファイルには含めない）
+#   - bot       : systemd で動かす（別プロセス。本ファイルには含めない）
+#
+# 使い方:
+#   1. DNS の A/AAAA レコードをこの VPS へ向ける
+#   2. deploy/Caddyfile の dashboard.example.com を実際のドメインへ書き換える
+#   3. deploy/dashboard.env を作成（値はコミットしない）:
+#        DASHBOARD_SECRET_KEY=<python -c "import secrets; print(secrets.token_urlsafe(48))">
+#        DISCORD_CLIENT_ID=...
+#        DISCORD_CLIENT_SECRET=...
+#        DASHBOARD_REDIRECT_URI=https://<ドメイン>/auth/callback
+#        DASHBOARD_BASE_URL=https://<ドメイン>
+#        DATABASE_URL=postgresql://clubbot:<パスワード>@host.docker.internal:5432/clubdb
+#   4. 起動:
+#        cd deploy && docker compose -f docker-compose.dashboard.yml up -d --build
+#
+# 注意:
+#   - Discord Developer Portal の OAuth2 Redirects にも
+#     https://<ドメイン>/auth/callback を登録すること
+#   - ダッシュボードのポートはホストへ公開しない（Caddy 経由のみ）
+services:
+  dashboard:
+    build:
+      context: ..
+      dockerfile: deploy/dashboard.Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./dashboard.env
+    # ホストの PostgreSQL（127.0.0.1:5432）へ接続するため
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - dashboard
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      # Caddyfile 内の {$...} を差し替える
+      DASHBOARD_DOMAIN: ${DASHBOARD_DOMAIN:?deploy/.env に公開ドメインを設定してください}
+      DASHBOARD_UPSTREAM: dashboard:8000
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # 証明書（消すと再取得が必要）
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+
+volumes:
+  caddy_data:
+  caddy_config:
+  caddy_logs:

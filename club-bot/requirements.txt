@@ -4,8 +4,10 @@ todoist-api-python>=2.1.0
 aiosqlite>=0.19.0
 cryptography>=42.0.0
 asyncpg>=0.29.0
-# Google Sheets エクスポート連携（/set_sheet /sheet_sync）・進捗管理（/progress）用
-gspread>=6.0.0
-google-auth>=2.29.0
-# 進捗グラフ画像の生成（/progress）用
-matplotlib>=3.8.0
+
+# 注: Google Sheets 連携は撤去しました。
+#     CSV 出力は Web ダッシュボード（dashboard/）と /report export-tasks が担います。
+#     旧シートからの一回限りの移行スクリプト
+#     （scripts/migrate_sheets_to_db.py / scripts/migrate_progress_sheet_to_db.py）を
+#     実行するときだけ、その場で次を追加インストールしてください:
+#       pip install gspread google-auth

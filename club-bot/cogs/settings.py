@@ -87,11 +87,12 @@ class Settings(commands.Cog):
                     # （/todoist-setup での暗号化登録に置き換わった）
                     categories["その他"].append((key, "（廃止: /todoist-setup で再登録してください）"))
                 elif key.startswith("SHEET_") or key in (
-                        "LAYER_SPREADSHEET_ID", "GOOGLE_CREDENTIALS_PATH"):
-                    # 旧 Sheets 常時同期の設定キーは廃止
-                    # （SPREADSHEET_ID はギルド別エクスポート連携として有効。
-                    #   /set_sheet で登録する）
-                    categories["その他"].append((key, "（廃止: Sheets 常時同期は廃止されました）"))
+                        "SPREADSHEET_ID", "LAYER_SPREADSHEET_ID",
+                        "PROGRESS_SPREADSHEET_ID", "GOOGLE_CREDENTIALS_PATH"):
+                    # 旧 Sheets 連携の設定キーは廃止（移行スクリプトでのみ使用）。
+                    # CSV 出力は Web ダッシュボードと /report export-tasks へ移行
+                    categories["その他"].append(
+                        (key, "（廃止: Sheets 連携は撤去されました）"))
                 else:
                     categories["その他"].append((key, value))
 

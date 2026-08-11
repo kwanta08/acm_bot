@@ -1,6 +1,7 @@
 """progress_tree（進捗ツリー構築・集計）のユニットテスト。"""
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 
@@ -10,6 +11,8 @@ from services.progress_tree import (
     ProgressNode,
     build_and_aggregate,
     build_tree,
+    load_tree,
+    node_from_row,
     parse_progress,
 )
 
@@ -193,3 +196,87 @@ def test_depth_computed_from_root():
     assert tree.by_id["a"].depth == 1
     assert tree.by_id["b"].depth == 2
     assert tree.by_id["c"].depth == 3
+
+
+# ---------------------------------------------------------------------
+# B4: DB（progress_nodes）からのツリー読み込み
+# ---------------------------------------------------------------------
+def test_node_from_row_normalizes_nulls():
+    """NULL 許容列は空文字・既定値へ正規化される。"""
+    node = node_from_row({
+        "node_id": "wing",
+        "parent_id": None,
+        "sort_order": None,
+        "name": None,
+        "assignee": None,
+        "status": None,
+        "manual_progress": None,
+        "source": None,
+        "todoist_task_id": None,
+        "weight": None,
+    })
+    assert node.node_id == "wing"
+    assert node.parent_id is None
+    assert node.order == 0.0
+    assert node.name == ""
+    assert node.assignee == ""
+    assert node.status == ""
+    assert node.manual_progress is None
+    assert node.source == "manual"
+    assert node.todoist_task_id == ""
+    assert node.weight == 1.0
+    assert node.row_index is None  # DB 経路ではシート行番号を持たない
+
+
+def test_node_from_row_maps_columns():
+    node = node_from_row({
+        "node_id": "spar", "parent_id": "wing", "sort_order": 2.5,
+        "name": "主桁", "assignee": "山田", "status": "製作中",
+        "manual_progress": 0.25, "source": "spar_winding",
+        "todoist_task_id": "999", "weight": 2.0,
+    })
+    assert (node.parent_id, node.order, node.name) == ("wing", 2.5, "主桁")
+    assert (node.assignee, node.status) == ("山田", "製作中")
+    assert node.manual_progress == 0.25
+    assert node.source == "spar_winding"
+    assert node.todoist_task_id == "999"
+    assert node.weight == 2.0
+
+
+class _FakeRepo:
+    """list_nodes だけを持つ最小のリポジトリ代役。"""
+
+    def __init__(self, rows_by_guild: dict[int, list[dict]]):
+        self._rows = rows_by_guild
+
+    async def list_nodes(self, guild_id: int) -> list[dict]:
+        return self._rows.get(guild_id, [])
+
+
+def _row(node_id: str, parent_id: str | None = None, progress=None,
+         order: float = 0.0) -> dict:
+    return {"node_id": node_id, "parent_id": parent_id, "sort_order": order,
+            "name": node_id, "assignee": None, "status": None,
+            "manual_progress": progress, "source": "manual",
+            "todoist_task_id": None, "weight": 1.0}
+
+
+def test_load_tree_builds_and_aggregates():
+    repo = _FakeRepo({1: [
+        _row("airframe"),
+        _row("wing", "airframe"),
+        _row("spar", "wing", progress=0.5),
+        _row("rib", "wing", progress=1.0),
+    ]})
+    tree = asyncio.run(load_tree(repo, 1))
+    assert [n.node_id for n in tree.roots] == ["airframe"]
+    assert tree.by_id["wing"].aggregated == 0.75   # (0.5 + 1.0) / 2
+    assert tree.by_id["airframe"].aggregated == 0.75
+    assert tree.by_id["spar"].depth == 2
+
+
+def test_load_tree_returns_empty_tree_for_unknown_guild():
+    tree = asyncio.run(load_tree(_FakeRepo({}), 999))
+    assert tree.roots == []
+    assert tree.by_id == {}
+    assert tree.errors == []
