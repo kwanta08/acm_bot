@@ -133,6 +133,21 @@ Todoist 連携を使う場合は、各サーバーの管理者が `/todoist-setu
 
 ---
 
+## Web ダッシュボード（任意）
+
+Discord でログインして、自分のサーバーのデータを**表形式で閲覧・編集**できる
+Web UI です。運営者が bot とは別プロセスで公開します。
+
+- タスク / メンバー / 班 / 日程調整・出欠 / 桁巻き積層記録 / 機体進捗 を一覧表示
+- 班長以上は表から直接編集可能（変更は監査ログに記録されます）
+- サーバー管理権限があれば通知チャンネル等の設定も変更できます
+- **表示・編集は自分のサーバーのデータだけ**に限定されます
+
+導入・運用は [`dashboard/README.md`](dashboard/README.md) と
+[`docs/OPERATION.md`](docs/OPERATION.md) の 8 章を参照してください。
+
+---
+
 ## よくある質問
 
 **Q. 自分たちでサーバーを借りたりBotを立てたりする必要はありますか？**
@@ -209,7 +224,8 @@ docker compose up -d --build
 |---|---|
 | [`docs/TERMS.md`](docs/TERMS.md) | 利用規約 |
 | [`docs/PRIVACY.md`](docs/PRIVACY.md) | プライバシーポリシー（収集データ・保存場所・削除請求） |
-| [`docs/OPERATION.md`](docs/OPERATION.md) | 運用マニュアル（全コマンド一覧・権限・トラブル対応） |
+| [`docs/OPERATION.md`](docs/OPERATION.md) | 運用マニュアル（全コマンド一覧・権限・ダッシュボード運用・トラブル対応） |
+| [`dashboard/README.md`](dashboard/README.md) | Web ダッシュボードのセットアップ |
 | [`docs/SETUP.md`](docs/SETUP.md) | セットアップ手順書（セルフホスト・VPSデプロイ向け） |
 | [`docs/DESIGN_PUBLIC_DISTRIBUTION.md`](docs/DESIGN_PUBLIC_DISTRIBUTION.md) | 公開配布の設計方針 |
 | [`docs/PUBLIC_RELEASE_TASKS.md`](docs/PUBLIC_RELEASE_TASKS.md) | 公開配布の進捗管理表 |

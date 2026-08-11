@@ -520,7 +520,101 @@ python -c "import os;from cryptography.fernet import Fernet;Fernet(os.environ['E
 
 ---
 
-## 8. よくある質問
+## 8. ダッシュボード（Web UI）の運用
+
+bot とは**別プロセス**で動く FastAPI アプリ。Discord でログインし、
+自分が所属するサーバーのデータだけを表形式で閲覧・編集できる。
+セットアップの詳細は [`../dashboard/README.md`](../dashboard/README.md)。
+
+### 8.1 構成
+
+```
+インターネット → Caddy(443/80) → uvicorn(127.0.0.1:8000) → PostgreSQL
+                                   ↑ bot とは別プロセス（同じ DB を共有）
+```
+
+- ダッシュボードは **127.0.0.1 にのみバインド**し、公開は Caddy 経由に限る
+- Caddy が Let's Encrypt から証明書を自動取得・自動更新する
+- ダッシュボードに **Discord Bot トークンは不要**（OAuth2 のクライアント
+  ID / シークレットのみ）
+
+### 8.2 導入（systemd 構成）
+
+```bash
+# 1. 依存のインストール（bot 本体とは分離）
+venv/bin/pip install -r dashboard/requirements.txt
+
+# 2. 設定ファイル（bot の .env とは別ファイル）
+cp dashboard/.env.example ~/club-bot/dashboard.env
+python -c "import secrets; print(secrets.token_urlsafe(48))"  # SECRET_KEY
+
+# 3. サービス登録
+sudo cp deploy/club-bot-dashboard.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now club-bot-dashboard
+
+# 4. Caddy
+sudo apt install caddy
+sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+sudo sed -i 's/dashboard.example.com/実際のドメイン/' /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+Docker で動かす場合は `deploy/docker-compose.dashboard.yml`
+（Caddy + ダッシュボードのセット）を使う。
+
+**Discord Developer Portal 側の設定**: OAuth2 の Redirects に
+`https://<ドメイン>/auth/callback` を登録する（`DASHBOARD_REDIRECT_URI`
+と完全一致させること）。
+
+### 8.3 権限
+
+| レベル | 判定 | できること |
+|---|---|---|
+| L4 | Discord の「サーバー管理」権限 | 表の編集 ＋ サーバー設定の変更 |
+| L2 | `members.is_leader`（班長） | 表の編集 |
+| L1 | サーバー参加者 | 閲覧のみ |
+
+ロール ID による L3（幹部）判定は Bot トークンなしでは行えないため、
+ダッシュボードでは 3 段階で扱う。
+
+### 8.4 安全性の要点
+
+- 表示・編集は**セッションで検証済みの `guild_id`** に固定される。
+  他サーバーのデータは URL を書き換えても取得できない（403）
+- 参照・編集できるテーブルと列はホワイトリスト方式
+  （`repositories/table_repository.py`）。`settings` や
+  `todoist_configs` は表グリッドの対象外
+- 設定変更で触れるキーもホワイトリスト（トークン類は対象外）
+- 編集は `audit_log` に必ず記録される（`/report audit` で確認できる）
+- API ドキュメント（`/docs`・`/openapi.json`）は配信しない
+
+### 8.5 設定変更の反映
+
+ダッシュボードから `settings` を更新すると、PostgreSQL の
+`NOTIFY clubbot_settings` により bot プロセスのギルド別設定キャッシュが
+無効化される（再起動不要）。**SQLite 構成では伝播しない**ため、
+ダッシュボードを併用する本番は PostgreSQL を使うこと。
+
+### 8.6 監視・トラブル対応
+
+- 死活: `curl -s https://<ドメイン>/healthz` → `{"status":"ok", "pool":{...}}`
+  `pool.in_use` が `max_size` に張り付く場合は
+  `DASHBOARD_DB_POOL_MAX_SIZE` を上げる
+- ログ: `journalctl -u club-bot-dashboard -f` / `/var/log/caddy/dashboard.log`
+- 接続数の目安: bot(10) + ダッシュボード(10) + LISTEN 用(1) で、
+  PostgreSQL の `max_connections`（既定 100）に十分収まる
+
+| 症状 | 確認すること |
+|---|---|
+| ログインが 503 | `DASHBOARD_SECRET_KEY` / `DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET` / `DASHBOARD_REDIRECT_URI` が設定されているか |
+| ログイン後にサーバーが1つも出ない | bot がそのサーバーに参加しているか（`guilds` 台帳に載っているか） |
+| ログインしてもすぐログアウトされる | HTTPS 配信になっているか（`DASHBOARD_SECURE_COOKIE=0` はローカル専用） |
+| 403「このサーバーのデータにはアクセスできません」 | 別サーバーの URL を開いていないか。所属し直した場合は再ログイン |
+| 編集できない | 権限が L1（閲覧のみ）。サーバー管理権限か班長フラグが必要 |
+
+---
+
+## 9. よくある質問
 
 **Q. Todoist を使わない運用はできますか？**
 A. はい。Todoist は `/todoist-setup` で登録しなければ自動的に無効です。
