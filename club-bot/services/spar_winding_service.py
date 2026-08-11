@@ -157,6 +157,71 @@ async def collect_spar_progress(
     return out, errors
 
 
+# ---------------------------------------------------------------------
+# DB ベース（正本 = progress_nodes / layer_records）
+#
+# 完了層数は /layer end が書き込む layer_records から数えるため、
+# 別ブックの桁巻きスプレッドシートは不要。目標層数は
+# progress_spar_links.target_layers が持つ。
+# ---------------------------------------------------------------------
+@dataclass
+class SparSyncPlan:
+    """桁巻き進捗を progress_nodes へ反映するための更新計画。"""
+    # (node_id, 進捗率 0.0〜1.0)
+    updates: list[tuple[str, float]] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+    @property
+    def updated(self) -> int:
+        return len(self.updates)
+
+
+def plan_spar_sync(node_ids: set[str], links: list[dict[str, Any]],
+                   completed_by_keta: dict[str, int]) -> SparSyncPlan:
+    """桁の紐付けと完了層数から進捗更新計画を組み立てる（純粋関数）。
+
+    進捗率 = 完了層数 ÷ 目標層数（1.0 でクランプ）。
+    紐付け先ノードが存在しない桁はエラーとして記録しスキップする。
+    まだ1層も記録が無い桁は進捗 0 として更新する（未着手の明示）。
+    """
+    plan = SparSyncPlan()
+    for link in links:
+        node_id = str(link["node_id"])
+        if node_id not in node_ids:
+            plan.errors.append(
+                f"桁「{link['keta_name']}」の紐付け先ノード `{node_id}` が"
+                "見つかりません")
+            continue
+        target = int(link["target_layers"])
+        if target <= 0:
+            plan.errors.append(
+                f"桁「{link['keta_name']}」の目標層数が不正です（{target}）")
+            continue
+        done = int(completed_by_keta.get(link["keta_name"], 0))
+        plan.updates.append((node_id, min(done / target, 1.0)))
+    return plan
+
+
+async def sync_spar_winding_db(repo: Any, guild_id: int,
+                               now_text: str) -> SparSyncPlan:
+    """桁巻きの進捗を該当ノードへ反映する（DB 版）。
+
+    桁の紐付けが1件も無いギルドでは何もしない（エラーにはしない）。
+    """
+    links = await repo.list_spar_links(guild_id)
+    if not links:
+        return SparSyncPlan()
+    node_ids = {row["node_id"] for row in await repo.list_nodes(guild_id)}
+    plan = plan_spar_sync(node_ids, links,
+                          await repo.count_completed_layers(guild_id))
+    for node_id, progress in plan.updates:
+        await repo.set_progress(
+            guild_id, node_id, progress, now_text,
+            status=progress_status(progress),
+            source=pss.SOURCE_SPAR_WINDING)
+    return plan
+
+
 async def sync_spar_winding(client: pss.ProgressSheetClient,
                             spreadsheet_id: str,
                             sheet_settings: dict[str, str]) -> SparPlan:

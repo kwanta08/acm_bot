@@ -16,7 +16,8 @@ from cogs.progress import (
     build_level_embed,
     chart_items,
     child_nodes,
-    new_part_row,
+    new_part_node_id,
+    node_choices,
     unmapped_projects,
 )
 from services.progress_tree import ProgressNode, build_and_aggregate
@@ -108,9 +109,9 @@ class _Proj:
 
 def test_unmapped_projects_excludes_registered():
     projects = [_Proj("1", "主翼班"), _Proj("2", "尾翼班"), _Proj("3", "電装班")]
-    mappings = [{"project_name": "主翼班", "node_id": "wing",
-                 "notify_channel_id": ""}]
-    result = unmapped_projects(projects, mappings)
+    links = [{"project_name": "主翼班", "node_id": "wing",
+              "notify_channel_id": ""}]
+    result = unmapped_projects(projects, links)
     assert [p.name for p in result] == ["尾翼班", "電装班"]
 
 
@@ -121,14 +122,30 @@ def test_anchor_candidates_depth_limited_and_ordered():
     assert ids == ["m1", "wing", "tail"]
 
 
-def test_new_part_row_layout():
-    row = new_part_row("P1", "主翼班", "m1", "2026-08-08 12:00")
-    assert row[0] == "pj_P1"       # ID
-    assert row[1] == "m1"          # 親ID = 選択した機体
-    assert row[4] == "主翼班"      # 名前 = プロジェクト名
-    assert row[10] == "manual"     # ソース（同期処理の上書き対象にしない）
-    assert row[12] == "2026-08-08 12:00"
-    assert len(row) == 13          # 進捗管理シートの列数と一致
+def test_new_part_node_id_is_stable():
+    """プロジェクト ID から導くため、消して再登録しても同じノードに戻る。"""
+    assert new_part_node_id("P1") == "pj_P1"
+    assert new_part_node_id("P1") == new_part_node_id("P1")
+
+
+# ---------------------------------------------------------------------
+# ノード指定のオートコンプリート
+# ---------------------------------------------------------------------
+def test_node_choices_walks_tree_in_order():
+    choices = node_choices(_tree(), "")
+    ids = [node_id for _, node_id in choices]
+    labels = [label for label, _ in choices]
+    # ツリーの行きがけ順（機体 → 配下のパーツ → その配下 → 次のパーツ）
+    assert ids == ["m1", "wing", "rib", "spar", "tail"]
+    # 深さぶん全角スペースで字下げされる
+    assert labels[0] == "本機"
+    assert labels[1] == "　主翼"
+    assert labels[2] == "　　リブ"
+
+
+def test_node_choices_filters_by_input():
+    ids = [node_id for _, node_id in node_choices(_tree(), "spar")]
+    assert ids == ["spar"]
 
 
 # ---------------------------------------------------------------------
