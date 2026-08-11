@@ -111,6 +111,72 @@ function formatCell(value, column) {
   return String(value);
 }
 
+function parseInput(raw, column) {
+  if (raw === "") return null;
+  if (column.type === "number") {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) throw new Error("数値を入力してください。");
+    return n;
+  }
+  if (column.type === "bool") return raw === "1" || raw === "true" || raw === "はい";
+  if (column.type === "progress") {
+    const text = raw.trim().replace("％", "%");
+    const n = Number(text.endsWith("%") ? text.slice(0, -1) : text);
+    if (!Number.isFinite(n)) throw new Error("0.5 または 50% の形式で入力してください。");
+    const value = text.endsWith("%") || n > 1 ? n / 100 : n;
+    return Math.min(Math.max(value, 0), 1);
+  }
+  return raw;
+}
+
+function editableCell(td, row, column, data) {
+  td.classList.add("editable");
+  td.title = "クリックして編集";
+  td.addEventListener("click", () => {
+    if (td.querySelector("input")) return;
+    const current = row[column.name];
+    const input = el("input", {
+      value: current === null || current === undefined ? "" : String(current),
+    });
+    const finish = async (commit) => {
+      if (!commit) {
+        td.replaceChildren(document.createTextNode(formatCell(row[column.name], column)));
+        return;
+      }
+      let value;
+      try {
+        value = parseInput(input.value, column);
+      } catch (e) {
+        td.replaceChildren(el("span", { class: "cell-error", text: e.message }));
+        return;
+      }
+      td.replaceChildren(document.createTextNode("保存中…"));
+      try {
+        const res = await api(
+          `/api/guilds/${state.guildId}/tables/${data.table.key}/${row[data.table.pk]}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ [column.name]: value }),
+          },
+        );
+        Object.assign(row, res.row);
+        td.replaceChildren(document.createTextNode(formatCell(row[column.name], column)));
+      } catch (e) {
+        td.replaceChildren(el("span", { class: "cell-error", text: e.message }));
+      }
+    };
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") finish(true);
+      if (ev.key === "Escape") finish(false);
+    });
+    input.addEventListener("blur", () => finish(true));
+    td.replaceChildren(input);
+    input.focus();
+    input.select();
+  });
+}
+
 function renderGrid(data) {
   const grid = document.getElementById("grid");
   if (!grid) return;
@@ -118,13 +184,22 @@ function renderGrid(data) {
     grid.replaceChildren(el("p", { class: "empty", text: "データがありません。" }));
     return;
   }
-  const head = el("tr", {}, data.columns.map((c) => el("th", { text: c.label })));
+  const head = el("tr", {}, data.columns.map((c) =>
+    el("th", { text: c.editable && data.can_edit ? `${c.label} ✎` : c.label })));
+
   const body = data.rows.map((row) =>
-    el("tr", {}, data.columns.map((c) =>
-      el("td", { text: formatCell(row[c.name], c) }))));
+    el("tr", {}, data.columns.map((c) => {
+      const td = el("td", { text: formatCell(row[c.name], c) });
+      if (c.editable && data.can_edit) editableCell(td, row, c, data);
+      return td;
+    })));
+
+  const hint = data.can_edit
+    ? "✎ の付いた列はクリックして編集できます（変更は監査ログに記録されます）。"
+    : "閲覧のみの権限です（編集には班長以上の権限が必要です）。";
 
   grid.replaceChildren(
-    el("p", { class: "empty", text: `${data.total} 件中 ${data.rows.length} 件を表示` }),
+    el("p", { class: "empty", text: `${data.total} 件中 ${data.rows.length} 件を表示 — ${hint}` }),
     el("div", { class: "grid-wrap" }, [
       el("table", { class: "grid" }, [
         el("thead", {}, [head]),

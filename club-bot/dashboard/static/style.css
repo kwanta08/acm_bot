@@ -118,3 +118,19 @@ table.grid tbody tr:nth-child(even) { background: var(--row-alt); }
 }
 
 a.button { text-decoration: none; display: inline-block; }
+
+td.editable { cursor: text; }
+td.editable:hover { outline: 1px dashed var(--accent); outline-offset: -1px; }
+
+td input {
+  font: inherit;
+  width: 100%;
+  min-width: 8rem;
+  padding: 0.15rem 0.3rem;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.cell-error { color: var(--danger); font-size: 0.85em; }
