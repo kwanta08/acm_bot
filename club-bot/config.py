@@ -220,20 +220,20 @@ class Config:
         return _loaded_env_path or ""
 
     # リアクション絵文字ID
+    # 他の設定値と同じく _get_int（_clean 経由）で読む。手書き .env の
+    # 囲い引用符・空白・不正値で例外を投げると for_guild() が失敗し、
+    # 権限チェックを含む全コマンドが動かなくなるため（不正値は未設定扱い）。
     @property
     def schedule_emoji_ok_id(self) -> int | None:
-        v = os.getenv("SCHEDULE_EMOJI_OK_ID")
-        return int(v) if v else None
+        return _get_int("SCHEDULE_EMOJI_OK_ID")
 
     @property
     def schedule_emoji_maybe_id(self) -> int | None:
-        v = os.getenv("SCHEDULE_EMOJI_MAYBE_ID")
-        return int(v) if v else None
+        return _get_int("SCHEDULE_EMOJI_MAYBE_ID")
 
     @property
     def schedule_emoji_ng_id(self) -> int | None:
-        v = os.getenv("SCHEDULE_EMOJI_NG_ID")
-        return int(v) if v else None
+        return _get_int("SCHEDULE_EMOJI_NG_ID")
 
     # ------------------------------------------------------------------
     # ギルド別設定解決

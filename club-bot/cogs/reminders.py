@@ -53,6 +53,16 @@ def _todoist_task_url(task_id: str) -> str:
     return f"https://app.todoist.com/app/task/{task_id}"
 
 
+def _channel_id_of(info: dict) -> int | None:
+    """班情報のチャンネル ID を int で返す。未設定・不正値は None。
+
+    teams.channel_id は TEXT 列で、旧データや手入力で数字以外が入りうる。
+    int() を直に呼ぶと通知ループが例外で停止するため、ここで吸収する。
+    """
+    raw = str(info.get("channel_id") or "").strip()
+    return int(raw) if raw.isdigit() else None
+
+
 def _build_grouped_description(period_start, period_end, period_desc: str,
                                items: list[dict]) -> str:
     """
@@ -103,8 +113,14 @@ class Reminders(commands.Cog):
     @tasks.loop(minutes=5)
     async def schedule_tick(self):
         for guild in list(self.bot.guilds):
-            await self._process_schedule_reminders(guild.id)
-            await self._process_schedule_close(guild.id)
+            # ギルド単位で握る。discord.ext.tasks は未処理例外でループ自体を
+            # 停止するため、1ギルドの失敗が全ギルドの自動通知を永久に止める
+            try:
+                await self._process_schedule_reminders(guild.id)
+                await self._process_schedule_close(guild.id)
+            except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
+                log.warning("日程調整の定期処理に失敗 (guild=%s): %s",
+                            guild.id, type(e).__name__)
 
     @schedule_tick.before_loop
     async def _before_tick(self):
@@ -158,13 +174,19 @@ class Reminders(commands.Cog):
     @tasks.loop(time=time(hour=8, minute=30, tzinfo=TZ))
     async def daily_morning(self):
         for guild in list(self.bot.guilds):
-            await self._notify_due_within_7days(guild.id)
-            await self._notify_today_label(guild.id)
-            # Todoist セクション別の期限7日以内/超過タスクを各班チャンネルへ
-            try:
-                await self.push_section_tasks(guild.id)
-            except Exception as e:  # noqa: BLE001
-                log.warning("セクション別通知失敗 (guild=%s): %s", guild.id, e)
+            # 各ジョブを個別に握る。1つの失敗で同じギルドの残りのジョブや
+            # 他ギルドの通知、ループ自体を止めない
+            for label, job in (
+                ("7日以内タスク通知", self._notify_due_within_7days),
+                ("今日やること通知", self._notify_today_label),
+                # Todoist セクション別の期限7日以内/超過タスクを各班チャンネルへ
+                ("セクション別通知", self.push_section_tasks),
+            ):
+                try:
+                    await job(guild.id)
+                except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
+                    log.warning("%s に失敗 (guild=%s): %s",
+                                label, guild.id, type(e).__name__)
 
     @daily_morning.before_loop
     async def _before_morning(self):
@@ -181,15 +203,19 @@ class Reminders(commands.Cog):
                 continue
             if not tasks_:
                 continue
-            await self._dispatch_by_team(
-                guild.id,
-                tasks_,
-                title="⚠️【期限超過タスク】対応をお願いします",
-                reminder_type="task_overdue",
-                period_desc="期限超過",
-                period_start=today,
-                period_end=today,
-            )
+            try:
+                await self._dispatch_by_team(
+                    guild.id,
+                    tasks_,
+                    title="⚠️【期限超過タスク】対応をお願いします",
+                    reminder_type="task_overdue",
+                    period_desc="期限超過",
+                    period_start=today,
+                    period_end=today,
+                )
+            except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
+                log.warning("超過タスク通知失敗 (guild=%s): %s",
+                            guild.id, type(e).__name__)
 
     @daily_night.before_loop
     async def _before_night(self):
@@ -281,8 +307,9 @@ class Reminders(commands.Cog):
 
             info = team_map.get(team_key, {})
             channel = None
-            if info.get("channel_id"):
-                channel = self.bot.get_channel(int(info["channel_id"]))
+            channel_id = _channel_id_of(info)
+            if channel_id is not None:
+                channel = self.bot.get_channel(channel_id)
             if channel is None:
                 channel = default_channel
             if channel is None:
@@ -416,7 +443,9 @@ class Reminders(commands.Cog):
         for t in tasks_:
             team_key = t.get("team_key") or None
             info = team_map.get(team_key) if team_key else None
-            if team_key and info and info.get("channel_id"):
+            # 班チャンネルは TEXT 列で、手入力・旧データに数字以外が入りうる。
+            # 数字として読めないものは既定チャンネル行きにまとめる
+            if team_key and info and _channel_id_of(info) is not None:
                 buckets.setdefault(team_key, []).append(t)
             else:
                 buckets.setdefault(None, []).append(t)
@@ -427,7 +456,9 @@ class Reminders(commands.Cog):
                 heading = title
             else:
                 info = team_map.get(bucket_key, {})
-                channel = self.bot.get_channel(int(info["channel_id"]))
+                channel_id = _channel_id_of(info)
+                channel = (self.bot.get_channel(channel_id)
+                           if channel_id is not None else None)
                 if channel is None:
                     channel = default_channel
                 heading = f"{title}｜{info.get('name', bucket_key)}班"
@@ -440,7 +471,13 @@ class Reminders(commands.Cog):
 
             items = []
             for t in bucket_tasks:
-                due_date = from_iso(t["due_date"]).date()
+                # due_date は TEXT 列。壊れた値の1件で通知全体を落とさない
+                try:
+                    due_date = from_iso(t["due_date"]).date()
+                except (TypeError, ValueError):
+                    log.warning("期限を解釈できないタスクをスキップ (guild=%s): %r",
+                                guild_id, t.get("due_date"))
+                    continue
                 url = _todoist_task_url(t["todoist_task_id"]) if t.get("todoist_task_id") else None
                 items.append({
                     "due_date": due_date,
@@ -449,6 +486,8 @@ class Reminders(commands.Cog):
                     "url": url,
                     "category": "班別タスク",
                 })
+            if not items:
+                continue
 
             desc = _build_grouped_description(period_start, period_end, period_desc, items)
             embed = task_embed(heading)
