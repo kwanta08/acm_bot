@@ -17,6 +17,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from repositories.base import BaseRepository
+
+# 進捗率の解釈は bot 側（/progress edit）と同じ規則を使う。
+# progress_tree は DB・Discord に依存しない純粋関数モジュールなので
+# ここから参照しても循環参照にはならない。
+from services.progress_tree import parse_progress
 from utils.db import Database
 
 MAX_LIMIT = 500
@@ -243,6 +248,10 @@ class UnknownColumnError(KeyError):
     """ホワイトリストに無い（または編集不可の）列が指定された。"""
 
 
+class InvalidValueError(ValueError):
+    """列の型に合わない値が指定された（例: 進捗率に数値でない文字列）。"""
+
+
 def get_spec(table_key: str) -> TableSpec:
     spec = TABLES.get(table_key)
     if spec is None:
@@ -277,6 +286,63 @@ def rows_to_csv(spec: TableSpec, rows: list[dict[str, Any]]) -> str:
     for row in rows:
         writer.writerow([csv_safe(row.get(column.name)) for column in spec.columns])
     return CSV_BOM + buf.getvalue()
+
+
+# ---------------------------------------------------------------------
+# 値の型変換
+#
+# SQLite は動的型付けなので、REAL 列にも文字列がそのまま保存できてしまう。
+# 進捗率に数値でない値が入ると bot 側の float() 変換が落ち、
+# そのサーバーの /progress view と定期同期がまとめて動かなくなる。
+# 書き込み口である本リポジトリで列の型に正規化しておく。
+# ---------------------------------------------------------------------
+_TRUE_VALUES = {"1", "true", "yes", "on", "はい"}
+_FALSE_VALUES = {"", "0", "false", "no", "off", "いいえ"}
+
+
+def _coerce(column: Column, value: Any) -> Any:
+    """列の型に合わせて値を正規化する。合わない値は InvalidValueError。"""
+    if value is None:
+        return None
+    if column.type == "number":
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            return value
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            return int(text)
+        except ValueError:
+            pass
+        try:
+            return float(text)
+        except ValueError:
+            raise InvalidValueError(
+                f"{column.label} には数値を入力してください。") from None
+    if column.type == "bool":
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            return 1 if value else 0
+        text = str(value).strip().lower()
+        if text in _TRUE_VALUES:
+            return 1
+        if text in _FALSE_VALUES:
+            return 0
+        raise InvalidValueError(
+            f"{column.label} には ON / OFF（1 または 0）を指定してください。")
+    if column.type == "progress":
+        text = str(value).strip()
+        if not text:
+            return None
+        parsed = parse_progress(value)
+        if parsed is None:
+            raise InvalidValueError(
+                f"{column.label} には 0.5 または 50% の形式で入力してください。")
+        return parsed
+    return value
 
 
 class TableRepository(BaseRepository):
@@ -422,18 +488,21 @@ class TableRepository(BaseRepository):
         """編集可能な列だけを更新する（P2-5）。
 
         編集不可・未知の列が含まれていれば UnknownColumnError。
+        列の型に合わない値は InvalidValueError。
         更新した行があれば True。
         """
         spec = get_spec(table_key)
-        editable = set(spec.editable_columns)
-        unknown = [name for name in values if name not in editable]
+        by_name = {c.name: c for c in spec.columns if c.editable}
+        unknown = [name for name in values if name not in by_name]
         if unknown:
             raise UnknownColumnError(", ".join(sorted(unknown)))
         if not values:
             return False
-        assignments = ", ".join(f"{name} = ?" for name in values)
+        coerced = {name: _coerce(by_name[name], value)
+                   for name, value in values.items()}
+        assignments = ", ".join(f"{name} = ?" for name in coerced)
         cur = await self.db.execute(
             f"UPDATE {spec.table} SET {assignments} WHERE guild_id = ? AND {spec.pk} = ?",
-            (*values.values(), guild_id, row_id),
+            (*coerced.values(), guild_id, row_id),
         )
         return cur.rowcount > 0

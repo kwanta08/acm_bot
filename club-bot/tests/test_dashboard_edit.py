@@ -284,6 +284,51 @@ def test_progress_value_round_trip():
         client.__exit__(None, None, None)
 
 
+def test_progress_value_is_normalised_like_the_bot():
+    """`50%` 等の入力は /progress edit と同じ 0.0〜1.0 に正規化される。"""
+    db_path = _tmp_db_path()
+    ids = asyncio.run(_seed(db_path))
+    client = _client(db_path)
+    try:
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/progress/{ids['node'][GUILD_A]}",
+            json={"manual_progress": "50%"})
+        assert res.status_code == 200
+        assert res.json()["row"]["manual_progress"] == 0.5
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_non_numeric_progress_is_rejected_and_not_stored():
+    """数値でない進捗率を保存させない。
+
+    保存されると bot 側の float() 変換が落ち、そのサーバーの
+    /progress view と定期同期がまとめて動かなくなる。
+    """
+    db_path = _tmp_db_path()
+    ids = asyncio.run(_seed(db_path))
+    client = _client(db_path)
+    try:
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/progress/{ids['node'][GUILD_A]}",
+            json={"manual_progress": "だいたい終わった"})
+        assert res.status_code == 400
+    finally:
+        client.__exit__(None, None, None)
+
+    async def _check():
+        db = Database(db_path)
+        await db.connect()
+        try:
+            # 元の値のまま。bot 側のツリー構築も通る
+            node = await ProgressRepository(db).get_node(GUILD_A, "m1")
+            assert float(node["manual_progress"]) == 0.1
+        finally:
+            await db.close()
+
+    asyncio.run(_check())
+
+
 # ---------------------------------------------------------------------
 # 監査ログ
 # ---------------------------------------------------------------------

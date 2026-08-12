@@ -38,6 +38,7 @@ from repositories.table_repository import (
     MAX_LIMIT,
     SHEET_TABLES,
     TABLES,
+    InvalidValueError,
     TableRepository,
     TableSpec,
     UnknownColumnError,
@@ -267,6 +268,11 @@ async def update_row(
             scope, "dashboard.update.rejected", f"{spec.table}#{row_id}", f"編集できない列: {e}"
         )
         raise HTTPException(status_code=400, detail="その列は編集できません。") from None
+    except InvalidValueError as e:
+        await _audit(
+            scope, "dashboard.update.rejected", f"{spec.table}#{row_id}", f"値の形式が不正: {e}"
+        )
+        raise HTTPException(status_code=400, detail=str(e)) from None
 
     if not changed:
         raise HTTPException(status_code=404, detail="対象の行がありません。")
