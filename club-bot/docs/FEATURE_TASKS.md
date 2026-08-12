@@ -93,7 +93,7 @@
 「キックしてもデータは消えない。削除は運営者へ連絡」と明記されている状態。
 公開配布で最もリスクの高い箇所。
 
-- [ ] **F2-1** スキーマ v11: ギルドのライフサイクルを記録する。
+- [x] **F2-1** スキーマ v11: ギルドのライフサイクルを記録する。
       - **変更ファイル**: `migrations/010_guild_lifecycle.sql`, `utils/db.py`(`SCHEMA_VERSION`=11,
         `_migrate_v11_guild_lifecycle()`), `repositories/guild_repository.py`, `bot.py`,
         `tests/test_guild_lifecycle.py`(新規)
@@ -107,7 +107,7 @@
       - **検証**: `tests/test_guild_lifecycle.py` — 退出 → 記録、再参加 → クリア、
         既存 v10 DB からのマイグレーションで既存行が保持されること
 
-- [ ] **F2-2** `/data export` — サーバー管理者が自サーバーの全データを ZIP（CSV 群）で受け取る。
+- [x] **F2-2** `/data export` — サーバー管理者が自サーバーの全データを ZIP（CSV 群）で受け取る。
       - **変更ファイル**: `cogs/data.py`(新規), `repositories/table_repository.py`(再利用),
         `bot.py`, `tests/test_data_export.py`(新規)
       - **受入**:
@@ -123,7 +123,7 @@
         (3) 権限不足で拒否される
       - **注意**: 新規依存を足さない（`zipfile` / `csv` は標準ライブラリ）
 
-- [ ] **F2-3** `/data delete` — サーバー管理者が自サーバーのデータを自分で削除する。
+- [x] **F2-3** `/data delete` — サーバー管理者が自サーバーのデータを自分で削除する。
       - **受入**:
         - L4 のみ。Modal で**サーバー名を打たせて確認**する（ボタン1つで消えない）
         - 実行すると `purge_after` を即時（= 現在時刻）に設定し、F2-4 のジョブで削除される。
@@ -134,7 +134,7 @@
         取り消しで `purge_after` が NULL に戻ること
       - **注意**: この時点では**実削除を行わない**（実削除は F2-4）。1周を小さく保つ
 
-- [ ] **F2-4** 自動パージジョブと文書の更新。
+- [x] **F2-4** 自動パージジョブと文書の更新。
       - **変更ファイル**: `cogs/reminders.py`(日次ループへ追加), `repositories/guild_repository.py`,
         `docs/PRIVACY.md`, `docs/TERMS.md`, `README.md`, `tests/test_data_purge.py`(新規)
       - **受入**:
@@ -321,3 +321,7 @@
 | F0-1 | `scripts/loop_check.sh` / `.ps1` を `club-bot/scripts/` へ配置。**設計判断**: (1) `.ps1` は UTF-8 **BOM 付き**で保存する — Windows PowerShell 5.1 は BOM 無し UTF-8 を CP932 と誤読し、日本語メッセージでパースエラーになる（スキル同梱版はこれで起動不能だった）。(2) `-PytestArgs` は名前付きではなく `ValueFromRemainingArguments` で受ける — `powershell -File` 経由では配列パラメータが `-k ,progress` に壊れるため。これで `-k progress` と sh 版の書き味が揃う。(3) `.sh` は `${PYTEST_ARGS[@]+...}` で `set -u` 下の空配列展開を保護（bash 4.3 以前対策）。**申し送り**: 本ブランチは `main`(2c15601) 基点。スキル同梱の `.claude/skills/acm-bot-loop/scripts/` も同内容へ同期した（同梱版は上記 (1)(2) の不具合を抱えており PowerShell から起動できなかったため）。ruff の既定 select は `E4/E7/E9/F` のみで `E501`（行長）は検出されない — `line-length = 100` は formatter にしか効いていないので、行長を lint で縛りたいなら明示的な `select` 追加が要る（現状 32 件 / 16 ファイルが該当） |
 | F1-1 | `cogs/help.py` を新設し `/help` を実装。一覧は `bot.tree.walk_commands()` から動的生成し、カテゴリは Cog 名から導出する（`CATEGORY_BY_COG`）。**設計判断**: (1) 必要権限が `require()` のクロージャに閉じていて外から読めなかったため、`utils/permissions.py` に `REQUIRED_LEVEL_ATTR` と `command_required_level()` を追加し、`require()` / `require_manage_guild_or()` / `is_admin` が必要レベルを属性として持つようにした（属性を足すだけなので既存の権限判定の挙動は不変）。(2) コマンド一覧は Embed の field ではなく description に列挙する — コマンドが増えても 25 field 制限に当たらないため。溢れる場合は「ほか N 件」に畳む。(3) カテゴリ未登録の Cog は「その他」へ落ち、`test_no_uncategorized_command_remains` と `test_every_loaded_cog_with_commands_is_mapped` が落ちる（実際に `Tasks` を外して2件落ちることを確認済み）。**申し送り**: 現在 75 コマンド / 12 Cog。新しい Cog を足したら `CATEGORY_BY_COG` への登録が要る |
 | F1-2 | 初期設定チェックを **`/setup-status`** として実装（表の `/help setup-status` から名前を変更）。**設計判断**: Discord のアプリコマンドは、サブコマンドを持つグループ自身を実行できない。`setup-status` を `/help` のサブコマンドにすると `/help` 単独実行ができなくなり、F1-1 の受入基準「`/help` でカテゴリ選択メニューを表示」と両立しない。Phase F1 の目的が「約80コマンドへの入口を作る」ことなので、入口である `/help` を単独コマンドとして残し、設定チェックを独立コマンドへ分けた。`/help` の冒頭に `/setup-status` への導線を置いてある。判定は `config.for_guild()` と `list_teams()` / `list_active()` の件数のみで、あるべき初期値をコードに持たない。**申し送り**: `README.md` の機能表と `docs/OPERATION.md` の全コマンド一覧への追記は **F5-3 の担当**なので本イテレーションでは行っていない |
+| F2-1 | スキーマ v11。`guilds` に `left_at` / `purge_after` を追加し、`on_guild_remove` で記録する。**設計判断**: 退出しただけでは消さない（誤キックや一時的な離脱から再招待で復帰できるようにする）。クリアは `on_guild_join` ではなく `_ensure_guild_setup()` に置いた — 起動時の `on_ready` からも通るため、Bot 停止中に退出→再参加した場合も復旧する。猶予日数は `DEFAULT_DATA_RETENTION_DAYS = 30`、ギルド別設定 `DATA_RETENTION_DAYS` で上書き（負値は 0 に丸める）。**申し送り**: 既存ギルドは列追加後も `left_at IS NULL` = 参加中のままで、マイグレーションで削除対象にならないことをテストで固定した |
+| F2-2 | `/data export`。**設計判断**: 出力対象を `table_repository.TABLES` のホワイトリストに限ったので、`guild_id` 列も Todoist トークンも**構造的に**出てこない（除外リストを手で持たない）。CSV 生成は `rows_to_csv()` に切り出し、BOM 付与と数式インジェクション対策（先頭 `=+-@` にシングルクォート）をここに集約した。全件取得には `list_all_rows()` を追加（`list_rows` は表示用に 500 件上限のため）。**申し送り**: 未マージの `fix/code-audit-v2` がダッシュボード側に同等の `_csv_safe` を持つ。マージ時に `rows_to_csv` へ寄せて重複を解消すること |
+| F2-3 | `/data delete` と **`/data delete-cancel`**（表の `/data delete cancel` から変更）。**設計判断**: F1-2 と同じ Discord の制約 — サブコマンドを持つグループ自身は実行できないため、`/data delete` を実行可能にしたまま `cancel` をサブコマンドにはできない。確認は Modal でサーバー名の完全一致を要求する。実削除はせず `purge_after` を現在時刻にするだけで、確認が通った時点で最後のバックアップ ZIP を添付する。`request_purge` は `left_at` を立てない（参加したまま削除を申告した状態と、退出による削除予定を区別するため） |
+| F2-4 | 日次パージジョブ（毎日 04:00）とドキュメント更新。**設計判断**: 削除対象は `TABLE_DDL` から導出し、**順序は TABLE_DDL の逆順**（`guilds` だけ最後）。`schedule_options → schedules`、`schedule_votes → schedule_options` に `ON DELETE CASCADE` の外部キーがあり、親を先に消すと子が連鎖削除されて `DELETE` の rowcount に現れず、削除件数のログが実際より少なくなるため。期限判定は ISO 文字列の辞書順ではなく `from_iso()` で行う（タイムゾーン表記が混ざると誤るため）。解釈できない `purge_after` は対象外にする（消さない側に倒す）。削除後は `config.invalidate_guild()` でキャッシュを捨てる。通知先は設定ごと消えるので**削除前に**解決しておく。**検証**: `TABLE_DDL` に仮のテーブルを足すと網羅テスト2件が実際に落ちることを確認済み。**申し送り**: `docs/PRIVACY.md` / `docs/TERMS.md` / `README.md` の「キックしても消えない・運営者へ連絡」を全面的に書き換えた（運営者への連絡は不要になった） |

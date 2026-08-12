@@ -99,7 +99,11 @@ CREATE TABLE IF NOT EXISTS guilds (
     guild_id      INTEGER PRIMARY KEY CHECK (guild_id > 0),
     guild_name    TEXT NOT NULL,
     joined_at     TEXT NOT NULL,
-    setup_version INTEGER NOT NULL DEFAULT 2
+    setup_version INTEGER NOT NULL DEFAULT 2,
+    -- 退出日時と自動削除の予定日時（参加中はどちらも NULL）。
+    -- 退出しただけではデータを消さず、purge_after を過ぎたものだけを消す。
+    left_at       TEXT,
+    purge_after   TEXT
 );
 """,
     "settings": f"""
@@ -398,6 +402,7 @@ CREATE TABLE IF NOT EXISTS progress_spar_links (
 
 # インデックス（guild_id を先頭に含む複合インデックス）
 INDEX_DDL = """
+CREATE INDEX IF NOT EXISTS idx_guilds_purge_after ON guilds(purge_after);
 CREATE INDEX IF NOT EXISTS idx_teams_guild ON teams(guild_id, active_flag);
 CREATE INDEX IF NOT EXISTS idx_members_guild ON members(guild_id, active_flag);
 CREATE INDEX IF NOT EXISTS idx_schedules_guild ON schedules(guild_id, closed_flag, deadline);
@@ -497,7 +502,9 @@ POSTGRES_VIEW_DDL = "\n".join(
 #    Directus の初回セットアップが失敗して起動できない）
 # 10: progress_nodes / progress_todoist_links / progress_spar_links 追加
 #    （/progress の正本を Google Sheets から DB へ移行。migrations/009）
-SCHEMA_VERSION = 10
+# 11: guilds に left_at / purge_after を追加（サーバー退出後の猶予付き
+#    自動削除。退出しただけでは消さない。migrations/010）
+SCHEMA_VERSION = 11
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
@@ -899,6 +906,9 @@ class Database:
         if version < 10:
             await self._migrate_v10_progress_tables()
 
+        if version < 11:
+            await self._migrate_v11_guild_lifecycle()
+
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
 
@@ -1017,6 +1027,20 @@ class Database:
             await self._executescript(ddl_map[name])
         log.info("機体進捗テーブル（%s）を作成しました（v10）。",
                  ", ".join(self._PROGRESS_TABLES))
+
+    async def _migrate_v11_guild_lifecycle(self) -> None:
+        """
+        v11: guilds に left_at / purge_after を追加する（冪等）。
+
+        どちらも NULL 許容で追加するため既存行は壊れない。参加中のギルドは
+        NULL のままで、退出時に on_guild_remove が値を入れる。
+        既存の全ギルドは「参加中」として扱われる（勝手に削除予定にしない）。
+        """
+        cols = await self._table_columns("guilds")
+        for col in ("left_at", "purge_after"):
+            if col not in cols:
+                await self.execute(f"ALTER TABLE guilds ADD COLUMN {col} TEXT")
+                log.info("guilds テーブルに %s カラムを追加しました（v11）。", col)
 
     async def _migrate_v8_members_surrogate_pk(self) -> None:
         """

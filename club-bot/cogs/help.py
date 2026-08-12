@@ -48,6 +48,7 @@ CATEGORY_BY_COG: dict[str, str] = {
     "Settings": "設定",
     "SetupWizard": "設定",
     "TodoistAdmin": "設定",
+    "Data": "データ",
 }
 
 UNCATEGORIZED = "その他"
@@ -62,6 +63,7 @@ CATEGORY_ORDER: list[str] = [
     "機体進捗",
     "レポート",
     "設定",
+    "データ",
 ]
 
 # Discord の制限

@@ -22,6 +22,7 @@ import discord
 from discord.ext import commands, tasks
 
 from config import config
+from repositories.guild_repository import GuildRepository
 from repositories.member_repository import MemberRepository
 from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.schedule_repository import ScheduleRepository
@@ -103,11 +104,13 @@ class Reminders(commands.Cog):
         self.schedule_tick.start()
         self.daily_morning.start()
         self.daily_night.start()
+        self.daily_purge.start()
 
     async def cog_unload(self):
         self.schedule_tick.cancel()
         self.daily_morning.cancel()
         self.daily_night.cancel()
+        self.daily_purge.cancel()
 
     # ---------- 5分ごと: 締切前催促 + 自動締切 ----------
     @tasks.loop(minutes=5)
@@ -220,6 +223,64 @@ class Reminders(commands.Cog):
     @daily_night.before_loop
     async def _before_night(self):
         await self.bot.wait_until_ready()
+
+    # ---------- 毎日 04:00: 期限切れギルドのデータ削除 ----------
+    @tasks.loop(time=time(hour=4, minute=0, tzinfo=TZ))
+    async def daily_purge(self):
+        await self.run_purge()
+
+    @daily_purge.before_loop
+    async def _before_purge(self):
+        await self.bot.wait_until_ready()
+
+    async def run_purge(self, now_dt=None) -> dict[int, dict[str, int]]:
+        """削除予定日時を過ぎたギルドのデータを全テーブルから削除する。
+
+        対象は「退出して猶予を過ぎたサーバー」と「/data delete で
+        自分から削除を申告したサーバー」。**唯一の破壊的な定期処理**なので、
+        1つのギルドの失敗が他ギルドの削除を止めないよう個別に握る。
+        """
+        repo = GuildRepository(self.bot.db)
+        try:
+            due = await repo.list_purge_due(now_dt)
+        except Exception as e:  # noqa: BLE001
+            log.warning("削除対象ギルドの取得に失敗: %s", type(e).__name__)
+            return {}
+
+        results: dict[int, dict[str, int]] = {}
+        for row in due:
+            guild_id = int(row["guild_id"])
+            try:
+                results[guild_id] = await self._purge_one(guild_id, row)
+            except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
+                log.warning("データ削除に失敗 (guild=%s): %s",
+                            guild_id, type(e).__name__)
+        return results
+
+    async def _purge_one(self, guild_id: int, row) -> dict[str, int]:
+        repo = GuildRepository(self.bot.db)
+        # 設定ごと消えるため、通知先は削除する前に解決しておく。
+        # 退出済みサーバーではチャンネルを取得できないので通知は出ない。
+        channel = None
+        try:
+            gconf = await config.for_guild(guild_id)
+            if gconf.bot_log_channel_id:
+                channel = self.bot.get_channel(gconf.bot_log_channel_id)
+        except Exception:  # noqa: BLE001
+            channel = None
+
+        deleted = await repo.purge_guild(guild_id)
+        total = sum(deleted.values())
+        # ギルド別設定のキャッシュに消したはずの値が残らないようにする
+        config.invalidate_guild(guild_id)
+
+        reason = "退出後の保持期間満了" if row["left_at"] else "管理者による削除要求"
+        summary = (f"[Data] サーバーのデータを削除しました（{reason}）: "
+                   f"{total} 行 / {len(deleted)} テーブル")
+        log.info("%s (guild=%s, 内訳=%s)", summary, guild_id, deleted)
+        if channel is not None:
+            await self._safe_send(guild_id, channel, content=f"```\n{summary}\n```")
+        return deleted
 
     async def _notify_due_within_7days(self, guild_id: int):
         today = now().date()

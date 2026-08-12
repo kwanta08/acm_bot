@@ -101,6 +101,11 @@ def _get_team_role_map(name: str) -> dict[str, int]:
     return result
 
 
+# サーバー退出後にデータを保持する既定日数。
+# ギルド別設定 DATA_RETENTION_DAYS で上書きできる。
+DEFAULT_DATA_RETENTION_DAYS = 30
+
+
 @dataclass
 class GuildConfig:
     """
@@ -128,6 +133,10 @@ class GuildConfig:
 
     # サークル名（未設定時は汎用表現にフォールバック）
     club_name: str | None = None
+
+    # サーバー退出後にデータを保持する日数。この日数を過ぎたギルドの
+    # データは自動削除される（0 なら退出時点で削除対象）。
+    data_retention_days: int = DEFAULT_DATA_RETENTION_DAYS
 
     # 日程調整のリアクション絵文字（カスタム絵文字 ID。未設定は既定 ✅❓❌）
     schedule_emoji_ok_id: int | None = None
@@ -285,6 +294,7 @@ class Config:
                 ("SCHEDULE_EMOJI_OK_ID", "schedule_emoji_ok_id"),
                 ("SCHEDULE_EMOJI_MAYBE_ID", "schedule_emoji_maybe_id"),
                 ("SCHEDULE_EMOJI_NG_ID", "schedule_emoji_ng_id"),
+                ("DATA_RETENTION_DAYS", "data_retention_days"),
             ):
                 val = await repo.get_int(guild_id, key)
                 if val is not None:
