@@ -15,10 +15,13 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import config
+from repositories.progress_repository import ProgressRepository
 from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.schedule_repository import ScheduleRepository
 from repositories.task_repository import TaskRepository
 from services import team_service
+from services.milestone_service import days_until_competition, evaluate_all
+from services.progress_tree import load_tree
 from utils.embeds import info_embed, success_embed
 from utils.logger import get_logger
 from utils.parser import fmt_jp, from_iso, now
@@ -64,7 +67,45 @@ class Reports(commands.Cog):
         if by_team:
             lines = [f"{team_names.get(k, k)}: {v}" for k, v in sorted(by_team.items())]
             embed.add_field(name="班別未完了タスク", value="\n".join(lines), inline=False)
+
+        countdown = await self.countdown_summary(guild_id, gconf)
+        if countdown:
+            embed.add_field(name="大会まで", value=countdown, inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
+
+    async def countdown_summary(self, guild_id: int, gconf) -> str:
+        """「大会まで N 日 / 遅延 M 件」の1行。
+
+        大会日が未設定でマイルストーンも無いサーバーでは空文字を返し、
+        週次サマリーの表示を変えない。
+        """
+        today = now().date()
+        left = days_until_competition(gconf.competition_date, today)
+        repo = ProgressRepository(self.bot.db)
+        try:
+            rows = await repo.list_milestones(guild_id)
+            statuses = (evaluate_all(await load_tree(repo, guild_id), rows,
+                                     today=today) if rows else [])
+        except Exception as e:  # noqa: BLE001  (週次サマリー全体は止めない)
+            log.warning("マイルストーンの集計に失敗 (guild=%s): %s",
+                        guild_id, type(e).__name__)
+            return ""
+
+        if left is None and not statuses:
+            return ""
+        parts = []
+        if left is None:
+            parts.append("大会日: 未設定")
+        elif left > 0:
+            parts.append(f"残り {left} 日")
+        elif left == 0:
+            parts.append("本日が大会日")
+        else:
+            parts.append(f"{-left} 日経過")
+        if statuses:
+            behind = sum(1 for s in statuses if s.is_behind)
+            parts.append(f"遅延 {behind} 件 / 全 {len(statuses)} 件")
+        return " / ".join(parts)
 
     # ---------- export tasks (CSV) ----------
     @group.command(name="export-tasks", description="タスク一覧を CSV で出力します。")

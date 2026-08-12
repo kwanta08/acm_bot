@@ -208,7 +208,7 @@
 **背景**: 進捗率は見えるが「間に合うのか」が見えない。大会日とマイルストーンから
 必要ペースを逆算し、遅延を先に知らせる。
 
-- [ ] **F4-1** スキーマ v13: `progress_milestones` テーブルと大会日の設定。
+- [x] **F4-1** スキーマ v13: `progress_milestones` テーブルと大会日の設定。
       - **変更ファイル**: `migrations/012_progress_milestones.sql`, `utils/db.py`(v13),
         `repositories/progress_repository.py`, `tests/test_milestones.py`(新規)
       - **受入**:
@@ -220,7 +220,7 @@
           存在しないノードを指すマイルストーンは表示から除外する
       - **検証**: マイグレーション後に既存データが保持されること、`guild_id` スコープ
 
-- [ ] **F4-2** `/milestone add|remove|list` と `/countdown`。
+- [x] **F4-2** `/milestone add|remove|list` と `/countdown`。
       - **受入**:
         - `/milestone add node:<ツリー補完> name:<名前> due:<日付>`（L2 以上）。
           日付は `utils/parser.py` の既存パーサを使う（独自実装しない）
@@ -233,7 +233,7 @@
       - **検証**: `tests/test_milestones.py` — 遅延あり / 余裕あり / 判定不能の3ケースで
         分類が正しいこと、日付境界（当日・過去日）で例外を出さないこと
 
-- [ ] **F4-3** 週次アラートと `/report weekly` への統合。
+- [x] **F4-3** 週次アラートと `/report weekly` への統合。
       - **受入**:
         - `cogs/reminders.py` に週次ループを追加（既定は月曜 8:30 / `TZ` は既存定数を使う）。
           遅延マイルストーンがあるときだけ通知する（無いときは沈黙。通知疲れを避ける）
@@ -329,3 +329,6 @@
 | F3-2 | `services/progress_tree.py` に重量集計を追加。**設計判断**: (1) 集計は進捗率と同じ後行順ループの中で行う（木を2回歩かない）。(2) **未計測は `None` のままにし `0.0` へ丸めない** — 「0 g」と「未計測」を混同すると合計が過小に出るため。(3) 自ノードに値があれば子の合計より優先する（実測のほうが見積もりより信用できる）。(4) 確度を示すため `WeightSummary.fill_rate`（実測が入っているノードの割合）を返す。孤児・循環は既存の `build_tree` が除外するので重量集計にも自動的に効く |
 | F3-3 | `/weight set|view|top` と `/progress view` への重量行。**設計判断**: 新しい Cog を作らず `cogs/progress.py` に置いた — ツリーのオートコンプリート（`_node_autocomplete`）と `load_tree()` をそのまま共有できるため。重量が未設定のサーバーでは `weight_line()` が空文字を返し、`/progress view` の表示は従来どおりになる（回帰テストで固定）。`/weight top` は親ノードも対象に含まれる（機体全体としての超過が最上位に出る）。画像は作らずテキスト表現のみ |
 | F3-4 | ダッシュボードの progress グリッドに重量2列を追加。ホワイトリストに足すだけで、閲覧・編集・CSV 出力・`guild_id` スコープはすべて既存の仕組みに乗る。**申し送り**: `test_dashboard_*` は `dashboard/requirements.txt` が未導入だと丸ごと skip される。導入済みの環境で回すこと |
+| F4-1 | スキーマ v13。`progress_milestones` を追加（migrations/012）。大会日はテーブルに持たずギルド別設定 `COMPETITION_DATE` に置き、**既定値を持たない**。`node_id` に外部キーを張らないのは `progress_nodes` と同じ方針で、存在しないノードを指す行は表示側で除外する。**申し送り**: テーブルを足したことで F2-4 の網羅テスト（`test_seed_covers_every_purge_target`）が実際に落ちた。削除処理は `TABLE_DDL` から導出しているので実装の変更は不要で、テストの seed に1行足すだけで済んだ — 消し漏れ検出が設計どおり働いている |
+| F4-2 | `services/milestone_service.py`（純関数）＋ `/milestone add\|remove\|list` と `/countdown`。**ペース算出の定義（停止条件だった箇所）**: 進捗の履歴テーブルが無く `progress_nodes` は現在値と `created_at` / `updated_at` しか持たないため、実績ペース = 集計進捗 ÷（更新日 − 作成日）とした。「作られてから最後に動くまでの平均」であり停滞期間は含まない。判定不能は (1) 作成日と更新日が同じ、(2) 日時が記録されていない、の2つだけに絞ったので実運用のツリーではほぼ判定できる（`test_most_nodes_are_judgeable_in_a_realistic_tree` で固定）。桁巻きに紐付いたノードは `layer_records` に作業日が残るため、そちらを優先して実際の作業ペースを使う。判定できないものは必要ペースだけを示し、**予測は出さない**。日付境界は当日未完 = 遅延、過去日 = 期限超過、進捗100% = 期限に関係なく完了 |
+| F4-3 | 週次アラート（月曜 8:30）と `/report weekly` への統合。**設計判断**: `tasks.loop(time=...)` は毎日発火するので曜日で絞る。**遅延が無い週は沈黙する** — 毎週「問題ありません」を送ると通知が読まれなくなるため。二重送信の防止は `reminders_log` に ISO 週キー（`milestone:2026-W33`）を記録して判定する。通知先は既存の `resolve_default_channel_id()`（紐付け → `PROGRESS_DEFAULT_CHANNEL_ID` → ギルド既定）に乗せた。1ギルドの送信失敗が他ギルドを止めないことをテストで固定 |

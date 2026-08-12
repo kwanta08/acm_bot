@@ -162,6 +162,13 @@ _SEED_SQL: dict[str, tuple[str, tuple[str, ...]]] = {
          " VALUES (?, '主桁', 'n1', 5, '2026-01-01', '2026-01-01')"),
         (),
     ),
+    "progress_milestones": (
+        ("INSERT INTO progress_milestones (guild_id, node_id, name, due_date,"
+         " created_at, updated_at)"
+         " VALUES (?, 'n1', '接着完了', '2026-09-01', '2026-01-01',"
+         " '2026-01-01')"),
+        (),
+    ),
 }
 
 

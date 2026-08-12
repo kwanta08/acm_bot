@@ -24,15 +24,23 @@ from discord.ext import commands, tasks
 from config import config
 from repositories.guild_repository import GuildRepository
 from repositories.member_repository import MemberRepository
+from repositories.progress_repository import ProgressRepository
 from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.schedule_repository import ScheduleRepository
 from repositories.section_repository import SectionRepository
 from repositories.task_repository import TaskRepository
+from services.milestone_service import days_until_competition, evaluate_all
+from services.progress_sync_service import resolve_default_channel_id
+from services.progress_tree import load_tree
 from utils.embeds import task_embed
 from utils.logger import get_logger
 from utils.parser import TZ, from_iso, now, to_iso
 
 log = get_logger("reminders")
+
+# 遅延マイルストーンの週次通知（0 = 月曜）。reminders_log の種別名も兼ねる
+MILESTONE_ALERT_WEEKDAY = 0
+MILESTONE_ALERT_TYPE = "milestone_alert"
 
 PRIORITY_LABELS = {1: "低", 2: "中", 3: "高", 4: "最優先"}
 PRIORITY_EMOJI = {4: "🔴", 3: "🟠", 2: "🔵", 1: "⚪"}
@@ -105,12 +113,14 @@ class Reminders(commands.Cog):
         self.daily_morning.start()
         self.daily_night.start()
         self.daily_purge.start()
+        self.weekly_milestone_alert.start()
 
     async def cog_unload(self):
         self.schedule_tick.cancel()
         self.daily_morning.cancel()
         self.daily_night.cancel()
         self.daily_purge.cancel()
+        self.weekly_milestone_alert.cancel()
 
     # ---------- 5分ごと: 締切前催促 + 自動締切 ----------
     @tasks.loop(minutes=5)
@@ -223,6 +233,89 @@ class Reminders(commands.Cog):
     @daily_night.before_loop
     async def _before_night(self):
         await self.bot.wait_until_ready()
+
+    # ---------- 毎週月曜 08:30: 遅延マイルストーンの通知 ----------
+    @tasks.loop(time=time(hour=8, minute=30, tzinfo=TZ))
+    async def weekly_milestone_alert(self):
+        # tasks.loop(time=...) は毎日発火するので曜日で絞る
+        if now().weekday() != MILESTONE_ALERT_WEEKDAY:
+            return
+        await self.run_milestone_alerts()
+
+    @weekly_milestone_alert.before_loop
+    async def _before_milestone_alert(self):
+        await self.bot.wait_until_ready()
+
+    @staticmethod
+    def week_key(current) -> str:
+        """ISO 週のキー（例 2026-W33）。同じ週の二重送信を防ぐのに使う。"""
+        iso = current.isocalendar()
+        return f"{iso[0]}-W{iso[1]:02d}"
+
+    async def run_milestone_alerts(self, now_dt=None) -> dict[int, int]:
+        """遅延しているマイルストーンがあるギルドにだけ通知する。
+
+        **遅れが無いときは沈黙する**（毎週「問題ありません」を送ると
+        通知が読まれなくなるため）。1ギルドの失敗は他ギルドを止めない。
+        """
+        current = now_dt or now()
+        key = self.week_key(current)
+        sent: dict[int, int] = {}
+        for guild in list(self.bot.guilds):
+            try:
+                count = await self._alert_milestones(guild.id, current, key)
+            except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
+                log.warning("マイルストーン通知に失敗 (guild=%s): %s",
+                            guild.id, type(e).__name__)
+                continue
+            if count:
+                sent[guild.id] = count
+        return sent
+
+    async def _alert_milestones(self, guild_id: int, current,
+                                week_key: str) -> int:
+        target_id = f"milestone:{week_key}"
+        if await self.log_repo.exists(guild_id, MILESTONE_ALERT_TYPE, target_id):
+            return 0
+
+        repo = ProgressRepository(self.bot.db)
+        rows = await repo.list_milestones(guild_id)
+        if not rows:
+            return 0
+        tree = await load_tree(repo, guild_id)
+        statuses = evaluate_all(tree, rows, today=current.date())
+        behind = [s for s in statuses if s.is_behind]
+        if not behind:
+            return 0
+
+        gconf = await config.for_guild(guild_id)
+        channel_id = await resolve_default_channel_id(self.bot.db, guild_id)
+        channel = self.bot.get_channel(channel_id) if channel_id else None
+        if channel is None:
+            log.info("マイルストーン通知の送信先が無い (guild=%s)", guild_id)
+            return 0
+
+        left = days_until_competition(gconf.competition_date, current.date())
+        head = (f"大会まで残り {left} 日。" if left is not None and left >= 0
+                else "")
+        lines = [
+            f"・**{s.node_name}: {s.name}** — "
+            + (f"期限まで {s.days_left} 日" if s.days_left > 0
+               else "本日が期限" if s.days_left == 0
+               else f"{-s.days_left} 日超過")
+            + f" / 進捗 {s.progress * 100:.0f}%"
+            for s in behind[:20]
+        ]
+        if len(behind) > 20:
+            lines.append(f"…ほか {len(behind) - 20} 件")
+        embed = task_embed(
+            "⚠️ 遅れているマイルストーン",
+            f"{head}遅延 **{len(behind)} 件**\n\n" + "\n".join(lines))
+
+        await self._safe_send(guild_id, channel, embed=embed)
+        await self._log_reminder(guild_id, MILESTONE_ALERT_TYPE, target_id,
+                                 None, str(channel_id), "sent")
+        return len(behind)
 
     # ---------- 毎日 04:00: 期限切れギルドのデータ削除 ----------
     @tasks.loop(time=time(hour=4, minute=0, tzinfo=TZ))

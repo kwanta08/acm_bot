@@ -402,6 +402,25 @@ CREATE TABLE IF NOT EXISTS progress_spar_links (
     UNIQUE (guild_id, keta_name)
 );
 """,
+    # 大会からの逆算アラート用のマイルストーン（F4）。
+    #
+    # node_id は progress_nodes と同じく外部キーを張らない（同期・移行で
+    # 親より先に子が入る順序を許す既存方針に合わせる）。存在しないノードを
+    # 指す行は表示から除外する。
+    # due_date は 'YYYY-MM-DD'。大会日そのものはギルド別設定
+    # COMPETITION_DATE に持ち、既定値は持たない（大会も日程もサークルごとに違う）。
+    "progress_milestones": f"""
+CREATE TABLE IF NOT EXISTS progress_milestones (
+    milestone_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    {_GUILD_COL},
+    node_id      TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    due_date     TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    UNIQUE (guild_id, node_id, name)
+);
+""",
 }
 
 # インデックス（guild_id を先頭に含む複合インデックス）
@@ -423,6 +442,7 @@ CREATE INDEX IF NOT EXISTS idx_skill_tags_guild ON skill_tags(guild_id, active_f
 CREATE INDEX IF NOT EXISTS idx_progress_nodes_guild_parent ON progress_nodes(guild_id, parent_id);
 CREATE INDEX IF NOT EXISTS idx_progress_nodes_guild_source ON progress_nodes(guild_id, source);
 CREATE INDEX IF NOT EXISTS idx_progress_todoist_links_guild ON progress_todoist_links(guild_id);
+CREATE INDEX IF NOT EXISTS idx_progress_milestones_guild_due ON progress_milestones(guild_id, due_date);
 CREATE INDEX IF NOT EXISTS idx_progress_spar_links_guild ON progress_spar_links(guild_id);
 """
 
@@ -510,7 +530,8 @@ POSTGRES_VIEW_DDL = "\n".join(
 #    自動削除。退出しただけでは消さない。migrations/010）
 # 12: progress_nodes に target_weight_g / actual_weight_g を追加
 #    （機体重量を進捗と同じツリーで積み上げる。migrations/011）
-SCHEMA_VERSION = 12
+# 13: progress_milestones を追加（大会日からの逆算アラート。migrations/012）
+SCHEMA_VERSION = 13
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
@@ -918,6 +939,9 @@ class Database:
         if version < 12:
             await self._migrate_v12_progress_weight()
 
+        if version < 13:
+            await self._migrate_v13_progress_milestones()
+
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
 
@@ -1071,6 +1095,18 @@ class Database:
                     f"ALTER TABLE progress_nodes ADD COLUMN {col} {col_type}")
                 log.info("progress_nodes テーブルに %s カラムを追加しました（v12）。",
                          col)
+
+    async def _migrate_v13_progress_milestones(self) -> None:
+        """
+        v13: progress_milestones テーブルを追加する（冪等）。
+
+        新規 DB では init_schema / _connect_pg が CREATE TABLE IF NOT EXISTS で
+        作成済みだが、既存 DB でも確実に作られるようここでも実行する
+        （v10 と同じ方式）。既存データには触れないため後方互換。
+        """
+        ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
+        await self._executescript(ddl_map["progress_milestones"])
+        log.info("progress_milestones テーブルを作成しました（v13）。")
 
     async def _migrate_v8_members_surrogate_pk(self) -> None:
         """

@@ -253,6 +253,42 @@ class ProgressRepository(BaseRepository):
     # ------------------------------------------------------------------
     # 桁巻き紐付け（旧「桁巻き対応表」＋「桁マスタ」）
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # マイルストーン（大会からの逆算アラート）
+    # ------------------------------------------------------------------
+    async def add_milestone(self, guild_id: int, node_id: str, name: str,
+                            due_date: str, now_text: str) -> None:
+        """マイルストーンを登録する（同じ node_id + 名前なら期限を更新）。"""
+        await self.db.execute(
+            """
+            INSERT INTO progress_milestones
+                (guild_id, node_id, name, due_date, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(guild_id, node_id, name) DO UPDATE SET
+                due_date = excluded.due_date,
+                updated_at = excluded.updated_at
+            """,
+            (guild_id, node_id, name, due_date, now_text, now_text),
+        )
+
+    async def remove_milestone(self, guild_id: int, node_id: str,
+                               name: str) -> bool:
+        cur = await self.db.execute(
+            "DELETE FROM progress_milestones"
+            " WHERE guild_id = ? AND node_id = ? AND name = ?",
+            (guild_id, node_id, name),
+        )
+        return cur.rowcount > 0
+
+    async def list_milestones(self, guild_id: int) -> list[dict[str, Any]]:
+        """期限の早い順にマイルストーンを返す。"""
+        rows = await self.db.fetchall(
+            "SELECT milestone_id, node_id, name, due_date, created_at,"
+            " updated_at FROM progress_milestones"
+            " WHERE guild_id = ? ORDER BY due_date, name",
+            (guild_id,))
+        return [dict(r) for r in rows]
+
     async def list_spar_links(self, guild_id: int) -> list[dict[str, Any]]:
         rows = await self.db.fetchall(
             "SELECT keta_name, node_id, target_layers, created_at, updated_at"
@@ -299,3 +335,20 @@ class ProgressRepository(BaseRepository):
             " FROM layer_records WHERE guild_id = ? GROUP BY keta",
             (guild_id,))
         return {r["keta"]: int(r["layers"]) for r in rows}
+
+    async def list_layer_dates(self, guild_id: int) -> dict[str, list[str]]:
+        """桁名ごとの「各層を最初に巻き終えた日時」を返す。
+
+        大会逆算の実績ペース算出に使う。巻き直しを二重に数えないよう、
+        層番号ごとに最初の完了日時だけを採る（count_completed_layers と
+        同じ数え方）。
+        """
+        rows = await self.db.fetchall(
+            "SELECT keta, layer_num, MIN(ended_at) AS ended_at"
+            " FROM layer_records WHERE guild_id = ?"
+            " GROUP BY keta, layer_num ORDER BY keta, ended_at",
+            (guild_id,))
+        out: dict[str, list[str]] = {}
+        for row in rows:
+            out.setdefault(row["keta"], []).append(row["ended_at"])
+        return out

@@ -138,6 +138,10 @@ class GuildConfig:
     # データは自動削除される（0 なら退出時点で削除対象）。
     data_retention_days: int = DEFAULT_DATA_RETENTION_DAYS
 
+    # 大会の日付（YYYY-MM-DD）。**既定値は持たない**
+    # （大会も日程もサークルごとに違うため、未設定なら /countdown は案内で終わる）
+    competition_date: str | None = None
+
     # 日程調整のリアクション絵文字（カスタム絵文字 ID。未設定は既定 ✅❓❌）
     schedule_emoji_ok_id: int | None = None
     schedule_emoji_maybe_id: int | None = None
@@ -307,6 +311,10 @@ class Config:
             club_name = await repo.get(guild_id, "CLUB_NAME")
             if club_name:
                 gc.club_name = club_name
+
+            competition_date = await repo.get(guild_id, "COMPETITION_DATE")
+            if competition_date:
+                gc.competition_date = competition_date.strip()
 
             for key, attr in (
                 ("PRIMARY_TEAM_ROLE_IDS", "primary_team_role_ids"),

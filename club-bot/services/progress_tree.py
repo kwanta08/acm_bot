@@ -42,6 +42,9 @@ class ProgressNode:
     # 進捗と同じ木で積み上げる
     target_weight_g: float | None = None
     actual_weight_g: float | None = None
+    # 進捗ペースの推定に使う（大会からの逆算）。DB の同名列をそのまま持つ
+    created_at: str = ""
+    updated_at: str = ""
 
     # 計算結果（compute_tree が設定する）
     depth: int | None = None
@@ -367,6 +370,8 @@ def node_from_row(row: dict[str, Any]) -> ProgressNode:
                          else float(row["target_weight_g"])),
         actual_weight_g=(None if row.get("actual_weight_g") is None
                          else float(row["actual_weight_g"])),
+        created_at=row.get("created_at") or "",
+        updated_at=row.get("updated_at") or "",
     )
 
 
