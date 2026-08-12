@@ -34,6 +34,7 @@ from repositories.table_repository import (
     TableRepository,
     UnknownColumnError,
     UnknownTableError,
+    rows_to_csv,
 )
 from repositories.task_repository import TaskRepository
 from utils.db import Database
@@ -365,3 +366,84 @@ def test_csv_export_is_audited():
             await db.close()
 
     assert any(e["action"] == "dashboard.export" for e in asyncio.run(_entries()))
+
+
+# ---------------------------------------------------------------------
+# 機体重量の列（F3-4）
+# ---------------------------------------------------------------------
+def test_progress_table_exposes_weight_columns():
+    names = TABLES["progress"].column_names
+    assert "target_weight_g" in names
+    assert "actual_weight_g" in names
+
+
+def test_weight_columns_are_editable():
+    """班長以上（表グリッドの編集権限）で編集できる列にする。"""
+    editable = TABLES["progress"].editable_columns
+    assert "target_weight_g" in editable
+    assert "actual_weight_g" in editable
+
+
+def test_weight_columns_are_numeric():
+    by_name = {c.name: c for c in TABLES["progress"].columns}
+    assert by_name["target_weight_g"].type == "number"
+    assert by_name["actual_weight_g"].type == "number"
+
+
+def test_weight_columns_appear_in_csv_export():
+    csv_text = rows_to_csv(TABLES["progress"], [])
+    assert "目標重量(g)" in csv_text
+    assert "実測重量(g)" in csv_text
+
+
+def test_weight_can_be_updated_through_table_repository():
+    async def _main():
+        db = Database(_tmp_db_path())
+        await db.connect()
+        try:
+            await ProgressRepository(db).upsert_node(
+                GUILD_A, "wing", name="主翼", now_text=NOW)
+            row = await db.fetchone(
+                "SELECT progress_node_id FROM progress_nodes"
+                " WHERE guild_id = ?", (GUILD_A,))
+            pk = row["progress_node_id"]
+
+            table = TableRepository(db)
+            assert await table.update_row(
+                GUILD_A, "progress", pk,
+                {"actual_weight_g": 1240.0, "target_weight_g": 1100.0})
+
+            after = await table.get_row(GUILD_A, "progress", pk)
+            assert after["actual_weight_g"] == 1240.0
+            assert after["target_weight_g"] == 1100.0
+        finally:
+            await db.close()
+
+    asyncio.run(_main())
+
+
+def test_weight_update_does_not_cross_guilds():
+    async def _main():
+        db = Database(_tmp_db_path())
+        await db.connect()
+        try:
+            repo = ProgressRepository(db)
+            await repo.upsert_node(GUILD_A, "wing", name="主翼", now_text=NOW)
+            await repo.upsert_node(GUILD_B, "wing", name="別大学", now_text=NOW)
+            row_b = await db.fetchone(
+                "SELECT progress_node_id FROM progress_nodes"
+                " WHERE guild_id = ?", (GUILD_B,))
+
+            table = TableRepository(db)
+            # B の行 ID を A のスコープで更新しようとしても通らない
+            assert await table.update_row(
+                GUILD_A, "progress", row_b["progress_node_id"],
+                {"actual_weight_g": 999.0}) is False
+
+            after = await table.get_row(GUILD_B, "progress",
+                                        row_b["progress_node_id"])
+            assert after["actual_weight_g"] is None
+        finally:
+            await db.close()
+
+    asyncio.run(_main())

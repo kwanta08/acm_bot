@@ -27,6 +27,7 @@ SOURCE_SPAR_WINDING = "spar_winding"
 NODE_COLUMNS = (
     "node_id, parent_id, sort_order, name, assignee, status,"
     " manual_progress, source, todoist_task_id, weight,"
+    " target_weight_g, actual_weight_g,"
     " created_at, updated_at"
 )
 
@@ -133,6 +134,7 @@ class ProgressRepository(BaseRepository):
     _UPDATABLE: ClassVar[set[str]] = {
         "parent_id", "sort_order", "name", "assignee", "status",
         "manual_progress", "source", "todoist_task_id", "weight",
+        "target_weight_g", "actual_weight_g",
     }
 
     async def update_node(self, guild_id: int, node_id: str,

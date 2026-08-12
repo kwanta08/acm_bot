@@ -170,6 +170,9 @@ TABLES: dict[str, TableSpec] = {
             _c("assignee", "担当者", "text", editable=True),
             _c("status", "状態", "text", editable=True),
             _c("manual_progress", "進捗率", "progress", editable=True),
+            # 重量はグラム固定（列名の _g で明示。単位設定は作らない）
+            _c("target_weight_g", "目標重量(g)", "number", editable=True),
+            _c("actual_weight_g", "実測重量(g)", "number", editable=True),
             _c("source", "ソース"),
             _c("todoist_task_id", "TodoistタスクID"),
             _c("updated_at", "更新日時", "datetime"),

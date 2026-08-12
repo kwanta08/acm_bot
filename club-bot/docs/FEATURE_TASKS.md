@@ -162,7 +162,7 @@
 オートコンプリートと `load_tree()` をそのまま流用できる、(3) 別テーブルにすると
 ノード削除時の整合管理が増える。
 
-- [ ] **F3-1** スキーマ v12: `progress_nodes` に `target_weight_g REAL NULL` /
+- [x] **F3-1** スキーマ v12: `progress_nodes` に `target_weight_g REAL NULL` /
       `actual_weight_g REAL NULL` を追加する。
       - **変更ファイル**: `migrations/011_progress_weight.sql`, `utils/db.py`(v12),
         `repositories/progress_repository.py`(更新許可列のホワイトリストに追加),
@@ -172,7 +172,7 @@
         （`to_pg_ddl` の REAL 変換が効いているか確認する）
       - **検証**: v11 DB からのマイグレーションで既存 `progress_nodes` が保持されること
 
-- [ ] **F3-2** `services/progress_tree.py` に重量集計を追加する。
+- [x] **F3-2** `services/progress_tree.py` に重量集計を追加する。
       - **受入**:
         - 集計規則: **実測値が入っていればそれを採用**、無ければ子ノードの実測合計を積み上げる
           （進捗率の `aggregated` と同じ再帰の中で計算する）
@@ -182,7 +182,7 @@
       - **検証**: `tests/test_progress_weight.py` — (1) 葉のみ実測 → 親が合計になる、
         (2) 親に実測がある → 子の合計ではなく親の実測が勝つ、(3) 循環データで停止する
 
-- [ ] **F3-3** `/weight` コマンド群と `/progress view` への表示。
+- [x] **F3-3** `/weight` コマンド群と `/progress view` への表示。
       - **受入**:
         - `/weight set node:<ツリー補完> actual:<g> [target:<g>]`（L2 班長以上）
         - `/weight view [node]` — 集計重量 / 目標との差分 / 実測入力率を Embed 表示
@@ -195,7 +195,7 @@
       - **注意**: 画像を作らない（`utils/progress_bar.py` と同じくテキスト表現。
         matplotlib 再混入は P3-1 のテストが検出する）
 
-- [ ] **F3-4** Web ダッシュボードの progress グリッドへ重量列を追加する。
+- [x] **F3-4** Web ダッシュボードの progress グリッドへ重量列を追加する。
       - **受入**: `repositories/table_repository.py` のホワイトリストに 2 列を追加し、
         班長以上は編集可・CSV にも出力される。`guild_id` スコープの検証は既存の仕組みに乗る
       - **検証**: `tests/test_dashboard_tables.py` に追記（`dashboard/requirements.txt` 未導入だと
@@ -325,3 +325,7 @@
 | F2-2 | `/data export`。**設計判断**: 出力対象を `table_repository.TABLES` のホワイトリストに限ったので、`guild_id` 列も Todoist トークンも**構造的に**出てこない（除外リストを手で持たない）。CSV 生成は `rows_to_csv()` に切り出し、BOM 付与と数式インジェクション対策（先頭 `=+-@` にシングルクォート）をここに集約した。全件取得には `list_all_rows()` を追加（`list_rows` は表示用に 500 件上限のため）。**申し送り**: 未マージの `fix/code-audit-v2` がダッシュボード側に同等の `_csv_safe` を持つ。マージ時に `rows_to_csv` へ寄せて重複を解消すること |
 | F2-3 | `/data delete` と **`/data delete-cancel`**（表の `/data delete cancel` から変更）。**設計判断**: F1-2 と同じ Discord の制約 — サブコマンドを持つグループ自身は実行できないため、`/data delete` を実行可能にしたまま `cancel` をサブコマンドにはできない。確認は Modal でサーバー名の完全一致を要求する。実削除はせず `purge_after` を現在時刻にするだけで、確認が通った時点で最後のバックアップ ZIP を添付する。`request_purge` は `left_at` を立てない（参加したまま削除を申告した状態と、退出による削除予定を区別するため） |
 | F2-4 | 日次パージジョブ（毎日 04:00）とドキュメント更新。**設計判断**: 削除対象は `TABLE_DDL` から導出し、**順序は TABLE_DDL の逆順**（`guilds` だけ最後）。`schedule_options → schedules`、`schedule_votes → schedule_options` に `ON DELETE CASCADE` の外部キーがあり、親を先に消すと子が連鎖削除されて `DELETE` の rowcount に現れず、削除件数のログが実際より少なくなるため。期限判定は ISO 文字列の辞書順ではなく `from_iso()` で行う（タイムゾーン表記が混ざると誤るため）。解釈できない `purge_after` は対象外にする（消さない側に倒す）。削除後は `config.invalidate_guild()` でキャッシュを捨てる。通知先は設定ごと消えるので**削除前に**解決しておく。**検証**: `TABLE_DDL` に仮のテーブルを足すと網羅テスト2件が実際に落ちることを確認済み。**申し送り**: `docs/PRIVACY.md` / `docs/TERMS.md` / `README.md` の「キックしても消えない・運営者へ連絡」を全面的に書き換えた（運営者への連絡は不要になった） |
+| F3-1 | スキーマ v12。`progress_nodes` に `target_weight_g` / `actual_weight_g` を追加（migrations/011）。**設計判断**: `ALTER TABLE ... ADD COLUMN` は `to_pg_ddl()` を通らないため、マイグレーション側でドライバ別に型を指定する（PostgreSQL の `REAL` は 4 バイトで SQLite の `REAL` より精度が低い）。新規 DB は `TABLE_DDL_PG` 経由なので変換が効く。**申し送り**: `NODE_COLUMNS`（`SELECT *` を使わない取得列の定数）への追加を忘れると、DB に値が入っていてもツリーまで流れてこない。実際に取りこぼして 1 周使った |
+| F3-2 | `services/progress_tree.py` に重量集計を追加。**設計判断**: (1) 集計は進捗率と同じ後行順ループの中で行う（木を2回歩かない）。(2) **未計測は `None` のままにし `0.0` へ丸めない** — 「0 g」と「未計測」を混同すると合計が過小に出るため。(3) 自ノードに値があれば子の合計より優先する（実測のほうが見積もりより信用できる）。(4) 確度を示すため `WeightSummary.fill_rate`（実測が入っているノードの割合）を返す。孤児・循環は既存の `build_tree` が除外するので重量集計にも自動的に効く |
+| F3-3 | `/weight set|view|top` と `/progress view` への重量行。**設計判断**: 新しい Cog を作らず `cogs/progress.py` に置いた — ツリーのオートコンプリート（`_node_autocomplete`）と `load_tree()` をそのまま共有できるため。重量が未設定のサーバーでは `weight_line()` が空文字を返し、`/progress view` の表示は従来どおりになる（回帰テストで固定）。`/weight top` は親ノードも対象に含まれる（機体全体としての超過が最上位に出る）。画像は作らずテキスト表現のみ |
+| F3-4 | ダッシュボードの progress グリッドに重量2列を追加。ホワイトリストに足すだけで、閲覧・編集・CSV 出力・`guild_id` スコープはすべて既存の仕組みに乗る。**申し送り**: `test_dashboard_*` は `dashboard/requirements.txt` が未導入だと丸ごと skip される。導入済みの環境で回すこと |

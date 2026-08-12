@@ -359,6 +359,10 @@ CREATE TABLE IF NOT EXISTS progress_nodes (
     source          TEXT NOT NULL DEFAULT 'manual',
     todoist_task_id TEXT,
     weight          REAL NOT NULL DEFAULT 1,
+    -- 重量（グラム固定。単位設定は作らない）。NULL は未入力。
+    -- 人力飛行機は重量が競技成績に直結するため、進捗と同じ木で積み上げる。
+    target_weight_g REAL,
+    actual_weight_g REAL,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     UNIQUE (guild_id, node_id)
@@ -504,7 +508,9 @@ POSTGRES_VIEW_DDL = "\n".join(
 #    （/progress の正本を Google Sheets から DB へ移行。migrations/009）
 # 11: guilds に left_at / purge_after を追加（サーバー退出後の猶予付き
 #    自動削除。退出しただけでは消さない。migrations/010）
-SCHEMA_VERSION = 11
+# 12: progress_nodes に target_weight_g / actual_weight_g を追加
+#    （機体重量を進捗と同じツリーで積み上げる。migrations/011）
+SCHEMA_VERSION = 12
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
@@ -909,6 +915,9 @@ class Database:
         if version < 11:
             await self._migrate_v11_guild_lifecycle()
 
+        if version < 12:
+            await self._migrate_v12_progress_weight()
+
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
 
@@ -1041,6 +1050,27 @@ class Database:
             if col not in cols:
                 await self.execute(f"ALTER TABLE guilds ADD COLUMN {col} TEXT")
                 log.info("guilds テーブルに %s カラムを追加しました（v11）。", col)
+
+    async def _migrate_v12_progress_weight(self) -> None:
+        """
+        v12: progress_nodes に目標重量・実測重量を追加する（冪等）。
+
+        単位はグラム固定（列名の _g で明示する。単位設定は作らない）。
+        NULL 許容で追加するため既存ノードは壊れず、重量未入力として扱われる。
+
+        新規 DB は TABLE_DDL / TABLE_DDL_PG が作るので to_pg_ddl() の
+        REAL → DOUBLE PRECISION 変換が効くが、ALTER 文はそこを通らないため
+        ここでドライバ別に型を指定する（PostgreSQL の REAL は 4 バイトで
+        SQLite の REAL より精度が低い）。
+        """
+        col_type = "DOUBLE PRECISION" if self._is_pg else "REAL"
+        cols = await self._table_columns("progress_nodes")
+        for col in ("target_weight_g", "actual_weight_g"):
+            if col not in cols:
+                await self.execute(
+                    f"ALTER TABLE progress_nodes ADD COLUMN {col} {col_type}")
+                log.info("progress_nodes テーブルに %s カラムを追加しました（v12）。",
+                         col)
 
     async def _migrate_v8_members_surrogate_pk(self) -> None:
         """
