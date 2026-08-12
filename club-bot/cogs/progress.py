@@ -972,6 +972,17 @@ class Progress(commands.Cog):
                 return
             if not await self._resolve_node(interaction, guild_id, parent):
                 return
+            # 自分の配下を親にすると循環参照になり、その部分木がツリーから
+            # 丸ごと除外される（利用者からは進捗が消えたように見える）
+            tree = await self.load_tree(guild_id)
+            if parent in pt.descendant_ids(tree, node):
+                await interaction.followup.send(
+                    embed=error_embed(
+                        f"`{parent}` は `{node}` の配下にあるため親にできません"
+                        "（循環参照になります）。\n"
+                        "先に移動先を配下の外へ出してください。"),
+                    ephemeral=True)
+                return
 
         fields: dict[str, object] = {}
         if name is not None:
