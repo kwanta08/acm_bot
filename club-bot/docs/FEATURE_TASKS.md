@@ -57,7 +57,7 @@
 **背景**: `bot.py` は `help_command=None`、`cogs/core.py` は `/ping` と `/health` のみ。
 コマンドが約80個あるのに入口が無く、招待直後のサークルが `docs/GUIDE.md` に辿り着けない。
 
-- [ ] **F1-1** `/help` を `cogs/core.py`（または新規 `cogs/help.py`）に実装する。
+- [x] **F1-1** `/help` を `cogs/core.py`（または新規 `cogs/help.py`）に実装する。
       **コマンド一覧はハードコードせず** `bot.tree.walk_commands()` から動的生成する
       （手書きの一覧はコマンド追加のたびに腐るため）。
       - **変更ファイル（推定）**: `cogs/help.py`(新規) or `cogs/core.py`, `bot.py`(cog 登録),
@@ -75,7 +75,8 @@
         (3) Embed が Discord の 6000 文字 / 25 field 制限に収まる
       - **注意**: スキーマ変更なし
 
-- [ ] **F1-2** `/help setup-status` — 初期設定の未完了チェックを追加する。
+- [x] **F1-2** `/help setup-status` — 初期設定の未完了チェックを追加する。
+      （実装は `/setup-status`。理由は完了ログを参照）
       - **受入**: 通知チャンネル・ログチャンネル・管理者ロール・班・桁が未設定なら
         「未設定」と該当コマンド（`/setup`, `/team-add`, `/layer keta-add`）を案内する。
         すべて設定済みなら ✅ を返す。判定は `config.for_guild()` と各リポジトリの件数のみで行い、
@@ -318,3 +319,5 @@
 |---|---|
 | （初期化） | 本表を作成。`/help`・データ削除・重量管理・大会逆算・年度替わりの5機能を F0〜F5 に分解。スキーマは v11〜v14 を予約済み。次は F0-1（`loop_check` スクリプトの配置）から着手する |
 | F0-1 | `scripts/loop_check.sh` / `.ps1` を `club-bot/scripts/` へ配置。**設計判断**: (1) `.ps1` は UTF-8 **BOM 付き**で保存する — Windows PowerShell 5.1 は BOM 無し UTF-8 を CP932 と誤読し、日本語メッセージでパースエラーになる（スキル同梱版はこれで起動不能だった）。(2) `-PytestArgs` は名前付きではなく `ValueFromRemainingArguments` で受ける — `powershell -File` 経由では配列パラメータが `-k ,progress` に壊れるため。これで `-k progress` と sh 版の書き味が揃う。(3) `.sh` は `${PYTEST_ARGS[@]+...}` で `set -u` 下の空配列展開を保護（bash 4.3 以前対策）。**申し送り**: 本ブランチは `main`(2c15601) 基点。スキル同梱の `.claude/skills/acm-bot-loop/scripts/` も同内容へ同期した（同梱版は上記 (1)(2) の不具合を抱えており PowerShell から起動できなかったため）。ruff の既定 select は `E4/E7/E9/F` のみで `E501`（行長）は検出されない — `line-length = 100` は formatter にしか効いていないので、行長を lint で縛りたいなら明示的な `select` 追加が要る（現状 32 件 / 16 ファイルが該当） |
+| F1-1 | `cogs/help.py` を新設し `/help` を実装。一覧は `bot.tree.walk_commands()` から動的生成し、カテゴリは Cog 名から導出する（`CATEGORY_BY_COG`）。**設計判断**: (1) 必要権限が `require()` のクロージャに閉じていて外から読めなかったため、`utils/permissions.py` に `REQUIRED_LEVEL_ATTR` と `command_required_level()` を追加し、`require()` / `require_manage_guild_or()` / `is_admin` が必要レベルを属性として持つようにした（属性を足すだけなので既存の権限判定の挙動は不変）。(2) コマンド一覧は Embed の field ではなく description に列挙する — コマンドが増えても 25 field 制限に当たらないため。溢れる場合は「ほか N 件」に畳む。(3) カテゴリ未登録の Cog は「その他」へ落ち、`test_no_uncategorized_command_remains` と `test_every_loaded_cog_with_commands_is_mapped` が落ちる（実際に `Tasks` を外して2件落ちることを確認済み）。**申し送り**: 現在 75 コマンド / 12 Cog。新しい Cog を足したら `CATEGORY_BY_COG` への登録が要る |
+| F1-2 | 初期設定チェックを **`/setup-status`** として実装（表の `/help setup-status` から名前を変更）。**設計判断**: Discord のアプリコマンドは、サブコマンドを持つグループ自身を実行できない。`setup-status` を `/help` のサブコマンドにすると `/help` 単独実行ができなくなり、F1-1 の受入基準「`/help` でカテゴリ選択メニューを表示」と両立しない。Phase F1 の目的が「約80コマンドへの入口を作る」ことなので、入口である `/help` を単独コマンドとして残し、設定チェックを独立コマンドへ分けた。`/help` の冒頭に `/setup-status` への導線を置いてある。判定は `config.for_guild()` と `list_teams()` / `list_active()` の件数のみで、あるべき初期値をコードに持たない。**申し送り**: `README.md` の機能表と `docs/OPERATION.md` の全コマンド一覧への追記は **F5-3 の担当**なので本イテレーションでは行っていない |

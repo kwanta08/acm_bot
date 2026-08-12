@@ -35,6 +35,7 @@ log = get_logger("bot")
 
 COGS = [
     "cogs.core",
+    "cogs.help",           # /help コマンドカタログ
     "cogs.schedule",
     "cogs.tasks",
     "cogs.members",

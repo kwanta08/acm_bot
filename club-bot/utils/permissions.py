@@ -26,6 +26,34 @@ class Level(IntEnum):
     L4 = 4  # Bot 管理者
 
 
+# 権限チェック関数に「必要レベル」を刻む属性名。
+# require() が返す check はクロージャなので、外からは必要レベルを読めない。
+# /help がコマンド一覧に権限バッジを出せるよう、predicate 自身に持たせる。
+REQUIRED_LEVEL_ATTR = "__club_required_level__"
+
+
+def _mark_required_level(predicate, level: Level):
+    """権限チェック関数に必要レベルを刻んで返す。"""
+    setattr(predicate, REQUIRED_LEVEL_ATTR, level)
+    return predicate
+
+
+def command_required_level(command) -> Level | None:
+    """app_commands のコマンドに宣言された必要レベルを返す。
+
+    宣言が無い（誰でも実行できる）場合は None。
+    親グループに付いた check も辿るため、サブコマンド単体で判定できる。
+    """
+    seen = command
+    while seen is not None:
+        for check in getattr(seen, "checks", []) or []:
+            level = getattr(check, REQUIRED_LEVEL_ATTR, None)
+            if level is not None:
+                return level
+        seen = getattr(seen, "parent", None)
+    return None
+
+
 def get_level(member: discord.Member, gconf: GuildConfig) -> Level:
     """
     メンバーの権限レベルを判定する。最も高いものを返す。
@@ -95,7 +123,7 @@ def require(level: Level):
             raise PermissionDenied(level)
         return True
 
-    return app_commands.check(predicate)
+    return app_commands.check(_mark_required_level(predicate, level))
 
 
 def require_manage_guild_or(level: Level):
@@ -116,7 +144,7 @@ def require_manage_guild_or(level: Level):
                 f"または L{int(level)} 以上の権限が必要です。")
         return True
 
-    return app_commands.check(predicate)
+    return app_commands.check(_mark_required_level(predicate, level))
 
 
 async def is_admin(interaction: discord.Interaction) -> bool:
@@ -130,6 +158,10 @@ async def is_admin(interaction: discord.Interaction) -> bool:
     if not has_level(member, gconf, Level.L4):
         raise PermissionDenied(Level.L4)
     return True
+
+
+# @app_commands.check(is_admin) で直接使われるため、関数自体に必要レベルを刻む
+_mark_required_level(is_admin, Level.L4)
 
 
 async def ensure_guild(interaction: discord.Interaction) -> int | None:
