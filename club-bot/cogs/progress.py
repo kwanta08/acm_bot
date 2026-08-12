@@ -58,7 +58,13 @@ from utils import progress_bar
 from utils.embeds import error_embed, info_embed, success_embed, task_embed
 from utils.logger import get_logger
 from utils.parser import TZ, now, parse_deadline
-from utils.permissions import Level, ensure_guild, is_admin, require
+from utils.permissions import (
+    Level,
+    ensure_guild,
+    is_admin,
+    require,
+    require_manage_guild_or,
+)
 
 if TYPE_CHECKING:
     from utils.db import Database
@@ -1100,10 +1106,14 @@ class Progress(commands.Cog):
         )
 
     # ---------- /progress setup ----------
+    # 導入直後のサーバーは班長ロールが未設定のことが多いため、
+    # 「サーバー管理（Manage Server）」権限でも実行できるようにする
+    # （班長ロールを設定済みのサーバーとの後方互換は L2 判定で維持）。
     @group.command(
-        name="setup", description="Todoist プロジェクトを進捗ツリーに紐付けます（班長以上）。"
+        name="setup",
+        description="Todoist プロジェクトを進捗ツリーに紐付けます（サーバー管理権限または班長以上）。",
     )
-    @require(Level.L2)
+    @require_manage_guild_or(Level.L2)
     async def progress_setup(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
