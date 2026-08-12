@@ -1,0 +1,4 @@
+# シェルスクリプトは LF 固定。
+# core.autocrlf=true の Windows 環境で CRLF のままチェックアウトされると、
+# bash が shebang を `/usr/bin/env bash\r` と解釈して bad interpreter で落ちる。
+*.sh text eol=lf
