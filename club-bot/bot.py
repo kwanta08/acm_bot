@@ -37,6 +37,7 @@ COGS = [
     "cogs.core",
     "cogs.help",           # /help コマンドカタログ
     "cogs.data",           # /data エクスポート・削除
+    "cogs.season",         # /season 年度替わり
     "cogs.schedule",
     "cogs.tasks",
     "cogs.members",

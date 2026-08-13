@@ -256,7 +256,7 @@
 リスクが大きすぎる、(2) 記録には `created_at` があり年度での絞り込みは日付範囲で足りる。
 本フェーズで持たせるのは **`seasons`（年度の境界）と `members.status`（在籍状態）だけ**にする。
 
-- [ ] **F5-1** スキーマ v14: `seasons` テーブルと `members` の在籍状態。
+- [x] **F5-1** スキーマ v14: `seasons` テーブルと `members` の在籍状態。
       - **変更ファイル**: `migrations/013_seasons.sql`, `utils/db.py`(v14),
         `repositories/season_repository.py`(新規), `repositories/member_repository.py`,
         `tests/test_seasons.py`(新規)
@@ -268,7 +268,7 @@
         - 年度名に既定値を持たない（`2026年度` も `第30代` もサークル次第）
       - **検証**: v13 からのマイグレーションで既存メンバーが `active` として保持されること
 
-- [ ] **F5-2** `/season` コマンド群。
+- [x] **F5-2** `/season` コマンド群。
       - **受入**:
         - `/season list` / `/season new name:<名前>`（L4）。`new` は現年度に `ended_at` を打ってから作る
         - `/season rollover`（L4）— ウィザードで**継続 / 卒業を仕分ける**。
@@ -283,7 +283,7 @@
         既存の `tests/test_teams_skills.py` / `test_multi_tenant.py` が落ちないこと
       - **注意**: **既存メンバーの status を勝手に変えない**（明示的な rollover のときだけ変える）
 
-- [ ] **F5-3** 引き継ぎパッケージとドキュメント更新。
+- [x] **F5-3** 引き継ぎパッケージとドキュメント更新。
       - **受入**:
         - `/season rollover` の完了時に F2-2 のエクスポート ZIP を「年度スナップショット」として添付する
           （エクスポート処理は再実装せず共有する）
@@ -332,3 +332,6 @@
 | F4-1 | スキーマ v13。`progress_milestones` を追加（migrations/012）。大会日はテーブルに持たずギルド別設定 `COMPETITION_DATE` に置き、**既定値を持たない**。`node_id` に外部キーを張らないのは `progress_nodes` と同じ方針で、存在しないノードを指す行は表示側で除外する。**申し送り**: テーブルを足したことで F2-4 の網羅テスト（`test_seed_covers_every_purge_target`）が実際に落ちた。削除処理は `TABLE_DDL` から導出しているので実装の変更は不要で、テストの seed に1行足すだけで済んだ — 消し漏れ検出が設計どおり働いている |
 | F4-2 | `services/milestone_service.py`（純関数）＋ `/milestone add\|remove\|list` と `/countdown`。**ペース算出の定義（停止条件だった箇所）**: 進捗の履歴テーブルが無く `progress_nodes` は現在値と `created_at` / `updated_at` しか持たないため、実績ペース = 集計進捗 ÷（更新日 − 作成日）とした。「作られてから最後に動くまでの平均」であり停滞期間は含まない。判定不能は (1) 作成日と更新日が同じ、(2) 日時が記録されていない、の2つだけに絞ったので実運用のツリーではほぼ判定できる（`test_most_nodes_are_judgeable_in_a_realistic_tree` で固定）。桁巻きに紐付いたノードは `layer_records` に作業日が残るため、そちらを優先して実際の作業ペースを使う。判定できないものは必要ペースだけを示し、**予測は出さない**。日付境界は当日未完 = 遅延、過去日 = 期限超過、進捗100% = 期限に関係なく完了 |
 | F4-3 | 週次アラート（月曜 8:30）と `/report weekly` への統合。**設計判断**: `tasks.loop(time=...)` は毎日発火するので曜日で絞る。**遅延が無い週は沈黙する** — 毎週「問題ありません」を送ると通知が読まれなくなるため。二重送信の防止は `reminders_log` に ISO 週キー（`milestone:2026-W33`）を記録して判定する。通知先は既存の `resolve_default_channel_id()`（紐付け → `PROGRESS_DEFAULT_CHANNEL_ID` → ギルド既定）に乗せた。1ギルドの送信失敗が他ギルドを止めないことをテストで固定 |
+| F5-1 | スキーマ v14。`seasons` と `members.status` / `left_season`（migrations/013）。**後方互換がこのフェーズの主眼**: `status` は `NOT NULL DEFAULT 'active'` で追加するため、**既存メンバーは全員そのまま active** になり、移行で誰も勝手に卒業扱いにならない（`test_existing_members_all_become_active` と、他の全列が保持されることを `test_existing_member_columns_are_preserved` で固定）。表の設計判断どおり全テーブルに `season_id` は張っていない |
+| F5-2 | `/season list\|new\|rollover` と在籍状態の反映。**設計判断**: (1) `list_members()` に `include_alumni`（既定 False）を足し、既定の一覧・検索から卒業者を外した。`search_support()` はこれを経由するので自動的に効く。既存テスト（`test_teams_skills` / `test_multi_tenant` 含む）が全て通ることを確認済み。(2) rollover の確定処理は `services/season_service.perform_rollover()` に切り出して Discord なしでテストできるようにした。(3) **選ばれなかったメンバーの status には触れない**（`test_rollover_does_not_touch_unselected_members`）。(4) 卒業者選択は `discord.ui.UserSelect`（上限25名）。**申し送り**: 一度に26名以上を卒業させる場合はコマンドを複数回実行する必要がある |
+| F5-3 | 年度スナップショットとドキュメント更新。`/season rollover` の完了時に `cogs/data.build_export_zip()` を**共有**して ZIP を添付する（エクスポートを再実装しない）。`docs/GUIDE.md` の年度替わりの章を `/season rollover` 前提へ全面的に書き換え、`README.md` の機能表に `/help` `/weight` `/countdown` `/season` `/data` を追加、`docs/OPERATION.md` に不足していた **26 コマンド**を追記した（新機能15件のほか、`/set_*` `/settings_*` `/member setup` `/schedule edit-deadline` など既存の記載漏れ11件も含む）。**回帰テスト**: `tests/test_docs_commands.py` が `bot.tree` の全89コマンドと `OPERATION.md` を突き合わせ、記載漏れと逆に実装から消えたコマンドの両方を検出する |

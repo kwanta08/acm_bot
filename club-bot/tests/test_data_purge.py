@@ -169,6 +169,11 @@ _SEED_SQL: dict[str, tuple[str, tuple[str, ...]]] = {
          " '2026-01-01')"),
         (),
     ),
+    "seasons": (
+        ("INSERT INTO seasons (guild_id, name, started_at, created_at)"
+         " VALUES (?, '2026年度', '2026-04-01', '2026-01-01')"),
+        (),
+    ),
 }
 
 

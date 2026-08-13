@@ -42,6 +42,7 @@ CATEGORY_BY_COG: dict[str, str] = {
     "Tasks": "タスク",
     "Members": "班・メンバー",
     "Teams": "班・メンバー",
+    "Season": "班・メンバー",
     "LayerTracking": "桁巻き",
     "Progress": "機体進捗",
     "Reports": "レポート",

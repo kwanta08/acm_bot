@@ -148,6 +148,11 @@ CREATE TABLE IF NOT EXISTS members (
     notes           TEXT,
     joined_at       TEXT NOT NULL,
     active_flag     INTEGER NOT NULL DEFAULT 1,
+    -- 在籍状態（active / alumni / inactive）。年度替わりの仕分けで使う。
+    -- 卒業しても行は消さない（過去の作業記録の担当者名が壊れるため）。
+    status          TEXT NOT NULL DEFAULT 'active',
+    -- 卒業した年度の名前（seasons.name）。在籍中は NULL
+    left_season     TEXT,
     UNIQUE (guild_id, user_id)
 );
 """,
@@ -421,6 +426,26 @@ CREATE TABLE IF NOT EXISTS progress_milestones (
     UNIQUE (guild_id, node_id, name)
 );
 """,
+    # 年度（世代）の境界（F5）。
+    #
+    # 全テーブルに season_id は張らない。既存の全テーブルへの列追加と
+    # 全クエリの改修は後方互換のリスクが大きすぎるうえ、各記録には
+    # created_at があるので年度での絞り込みは日付範囲で足りる。
+    # ここで持つのは「年度の境界」と members.status（在籍状態）だけ。
+    #
+    # 「現役の年度」は ended_at IS NULL の最新1件。年度名に既定値は持たない
+    # （「2026年度」も「第30代」もサークルごとに違う）。
+    "seasons": f"""
+CREATE TABLE IF NOT EXISTS seasons (
+    season_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+    {_GUILD_COL},
+    name       TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    ended_at   TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (guild_id, name)
+);
+""",
 }
 
 # インデックス（guild_id を先頭に含む複合インデックス）
@@ -443,6 +468,8 @@ CREATE INDEX IF NOT EXISTS idx_progress_nodes_guild_parent ON progress_nodes(gui
 CREATE INDEX IF NOT EXISTS idx_progress_nodes_guild_source ON progress_nodes(guild_id, source);
 CREATE INDEX IF NOT EXISTS idx_progress_todoist_links_guild ON progress_todoist_links(guild_id);
 CREATE INDEX IF NOT EXISTS idx_progress_milestones_guild_due ON progress_milestones(guild_id, due_date);
+CREATE INDEX IF NOT EXISTS idx_seasons_guild_ended ON seasons(guild_id, ended_at);
+CREATE INDEX IF NOT EXISTS idx_members_guild_status ON members(guild_id, status);
 CREATE INDEX IF NOT EXISTS idx_progress_spar_links_guild ON progress_spar_links(guild_id);
 """
 
@@ -531,7 +558,9 @@ POSTGRES_VIEW_DDL = "\n".join(
 # 12: progress_nodes に target_weight_g / actual_weight_g を追加
 #    （機体重量を進捗と同じツリーで積み上げる。migrations/011）
 # 13: progress_milestones を追加（大会日からの逆算アラート。migrations/012）
-SCHEMA_VERSION = 13
+# 14: seasons を追加し、members に status / left_season を追加
+#    （年度替わり。既存メンバーはすべて active。migrations/013）
+SCHEMA_VERSION = 14
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
@@ -942,6 +971,9 @@ class Database:
         if version < 13:
             await self._migrate_v13_progress_milestones()
 
+        if version < 14:
+            await self._migrate_v14_seasons()
+
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
 
@@ -1107,6 +1139,28 @@ class Database:
         ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
         await self._executescript(ddl_map["progress_milestones"])
         log.info("progress_milestones テーブルを作成しました（v13）。")
+
+    async def _migrate_v14_seasons(self) -> None:
+        """
+        v14: seasons テーブルと members の在籍状態を追加する（冪等）。
+
+        **既存メンバーはすべて status='active' になる。** NOT NULL DEFAULT で
+        列を足すため既存行にはデフォルト値が入り、誰も勝手に卒業扱いには
+        ならない（卒業の仕分けは /season rollover を実行したときだけ）。
+        left_season は NULL 許容。
+        """
+        ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
+        await self._executescript(ddl_map["seasons"])
+
+        cols = await self._table_columns("members")
+        if "status" not in cols:
+            await self.execute(
+                "ALTER TABLE members ADD COLUMN status TEXT NOT NULL"
+                " DEFAULT 'active'")
+            log.info("members テーブルに status カラムを追加しました（v14）。")
+        if "left_season" not in cols:
+            await self.execute("ALTER TABLE members ADD COLUMN left_season TEXT")
+            log.info("members テーブルに left_season カラムを追加しました（v14）。")
 
     async def _migrate_v8_members_surrogate_pk(self) -> None:
         """
