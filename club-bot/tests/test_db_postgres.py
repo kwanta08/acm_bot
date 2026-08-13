@@ -189,6 +189,80 @@ def test_driver_name():
     assert Database("./x.db", database_url="postgresql://u:p@h/d").driver_name == "PostgreSQL"
 
 
+def test_pg_indexes_are_created_after_migrations(monkeypatch):
+    """インデックス・ビューはマイグレーションの後に作ること。
+
+    CREATE TABLE IF NOT EXISTS は既存テーブルへ列を追加しないため、
+    旧バージョンで作られた DB には後から追加した列
+    （guilds.purge_after / members.status など）がマイグレーション前には
+    存在しない。インデックスを先に作ると
+    UndefinedColumnError: column "purge_after" does not exist
+    で起動に失敗する（実際に発生した回帰）。
+    """
+    events: list[str] = []
+
+    class _FakeConnection:
+        async def execute(self, sql):  # 実際の DDL 実行はしない
+            return None
+
+    class _FakeAcquire:
+        async def __aenter__(self):
+            return _FakeConnection()
+
+        async def __aexit__(self, *exc):
+            return False
+
+    class _FakePool:
+        def acquire(self):
+            return _FakeAcquire()
+
+        async def close(self):
+            return None
+
+    class _FakeAsyncpg:
+        @staticmethod
+        async def create_pool(**kwargs):
+            return _FakePool()
+
+    monkeypatch.setattr("utils.db.asyncpg", _FakeAsyncpg)
+
+    db = Database("./ignored.db", database_url="postgresql://u:p@h/d")
+
+    async def _fake_exec_ddl(con, label, sql):
+        events.append(label)
+
+    async def _fake_migrate():
+        events.append("migrate")
+
+    async def _fake_fix_sequences():
+        events.append("sequences")
+
+    monkeypatch.setattr(db, "_pg_exec_ddl", _fake_exec_ddl)
+    monkeypatch.setattr(db, "_migrate_versioned", _fake_migrate)
+    monkeypatch.setattr(db, "_pg_fix_sequences", _fake_fix_sequences)
+
+    run(db.connect())
+
+    assert {"migrate", "indexes", "views", "table:guilds"} <= set(events)
+    # テーブル作成 → マイグレーション → インデックス/ビュー の順
+    assert events.index("table:guilds") < events.index("migrate")
+    assert events.index("table:schema_meta") < events.index("migrate")
+    assert events.index("migrate") < events.index("indexes")
+    assert events.index("migrate") < events.index("views")
+
+
+def test_index_ddl_columns_exist_in_table_ddl():
+    """INDEX_DDL が参照する列は最新スキーマ（TABLE_DDL）に存在すること。"""
+    pattern = re.compile(
+        r"CREATE INDEX IF NOT EXISTS \w+\s+ON\s+(\w+)\s*\(([^)]*)\)")
+    for table, columns in pattern.findall(INDEX_DDL):
+        ddl = TABLE_DDL.get(table)
+        assert ddl, f"INDEX_DDL が未知のテーブル {table} を参照している"
+        for column in (c.strip() for c in columns.split(",")):
+            assert re.search(rf"^\s*{re.escape(column)}\b", ddl, re.MULTILINE), (
+                f"{table}.{column} が TABLE_DDL に無い")
+
+
 # ---------------------------------------------------------------------
 # ライブ PG 結合テスト（CLUB_TEST_PG_DSN がテスト専用 DB を指す場合のみ）
 # ---------------------------------------------------------------------

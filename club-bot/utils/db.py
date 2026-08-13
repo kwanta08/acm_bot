@@ -712,18 +712,27 @@ class Database:
             max_size=self.pool_max_size,
             command_timeout=POOL_COMMAND_TIMEOUT,
             max_inactive_connection_lifetime=POOL_MAX_INACTIVE_LIFETIME)
-        # スキーマ作成（冪等）→ バージョン付きマイグレーション → シーケンス修復
+        # テーブル作成（冪等）→ バージョン付きマイグレーション
+        # → インデックス・ビュー → シーケンス修復
+        #
+        # インデックスとビューは必ずマイグレーションの**後**に作る。
+        # CREATE TABLE IF NOT EXISTS は既にあるテーブルへ列を追加しないため、
+        # 旧バージョンで作られた既存 DB には後から足した列
+        # （guilds.purge_after / members.status など）がこの時点では無く、
+        # それらを参照するインデックス作成が UndefinedColumnError で
+        # 落ちて起動に失敗する。SQLite 側（connect()）も同じ順序。
         try:
             async with self._pool.acquire() as con:
                 for name, ddl in TABLE_DDL_PG.items():
                     await self._pg_exec_ddl(con, f"table:{name}", ddl)
                 await self._pg_exec_ddl(con, "table:schema_meta", SCHEMA_META_DDL)
+            await self._migrate_versioned()
+            async with self._pool.acquire() as con:
                 await self._pg_exec_ddl(con, "indexes", INDEX_DDL)
                 await self._pg_exec_ddl(con, "views", POSTGRES_VIEW_DDL)
         except Exception:
             await self.close()
             raise
-        await self._migrate_versioned()
         await self._pg_fix_sequences()
         log.info("PostgreSQL に接続しました（%s / プール %d〜%d）",
                  re.sub(r"://[^@]*@", "://***@", self.database_url),
