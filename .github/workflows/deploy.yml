@@ -23,8 +23,21 @@ jobs:
           command_timeout: "30m"
           script: |
             cd /home/ubuntu/club-bot
-            git pull origin main
+            # git pull（merge）だと、サーバー上でファイルを手直ししたときに
+            # "local changes would be overwritten by merge" でデプロイが止まる。
+            # デプロイは常に origin/main と同一の状態にする（サーバー上の
+            # 手編集は破棄される。設定は .env / dashboard.env 側に置くこと）。
+            git fetch origin main
+            git reset --hard FETCH_HEAD
             cd /home/ubuntu/club-bot/club-bot
             ./venv/bin/python -m pip install --no-input -q -r requirements.txt
+            # systemd の ReadWritePaths が指すディレクトリ（無いと 226/NAMESPACE）
+            mkdir -p /home/ubuntu/club-bot/logs /home/ubuntu/club-bot/data
             sudo systemctl restart club-bot.service
             sudo systemctl status club-bot.service --no-pager
+            # ダッシュボードは bot と別プロセス・別依存。導入済みのときだけ更新する
+            if systemctl list-unit-files | grep -q '^club-bot-dashboard\.service'; then
+              ./venv/bin/python -m pip install --no-input -q -r dashboard/requirements.txt
+              sudo systemctl restart club-bot-dashboard.service
+              sudo systemctl status club-bot-dashboard.service --no-pager
+            fi
