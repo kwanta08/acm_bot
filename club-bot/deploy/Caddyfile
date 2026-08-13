@@ -62,8 +62,16 @@
 		lb_try_duration 5s
 	}
 
+	# アクセスログ。
+	# 出力先は caddy.service の StateDirectory（/var/lib/caddy）配下にする。
+	# 公式パッケージの caddy.service は sandbox が効いていて /var/log/caddy を
+	# 読み取り専用にするため、そちらへ書かせると
+	#   open /var/log/caddy/dashboard.log: permission denied
+	# で **Caddy 自体が起動できなくなる**（chown しても解消しない）。
+	# /var/log/caddy を使いたい場合は caddy.service に
+	# LogsDirectory=caddy と ReadWritePaths=/var/log/caddy を足すこと。
 	log {
-		output file /var/log/caddy/dashboard.log {
+		output file /var/lib/caddy/dashboard.log {
 			roll_size 10MiB
 			roll_keep 5
 		}

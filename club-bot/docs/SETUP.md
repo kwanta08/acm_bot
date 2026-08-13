@@ -263,10 +263,25 @@ $ cd ~/club-bot
 
 これで `/home/ubuntu/club-bot/` というフォルダができました（`~` は自分のホームの意味）。
 
-## 3-2. プログラム一式（app）を置く
+## 3-2. プログラム一式を置く
 
-配布 zip（`club-bot.zip`）の中身を、この `~/club-bot/` の中に `app` という名前で置きます。
-方法は2通り。どちらか1つでOKです。
+**目標の配置**（GitHub Actions のデプロイ・systemd のユニット定義もこの前提です）:
+
+```
+~/club-bot/            ← リポジトリのクローン先（= git のルート）
+  ├ club-bot/          ← コード本体。bot.py・dashboard/・deploy/ はこの中
+  │   └ venv/          ← Python の仮想環境
+  ├ .env               ← bot の設定（Git には入らない）
+  ├ dashboard.env      ← ダッシュボードの設定（同上）
+  ├ data/              ← SQLite 運用時の DB 置き場
+  └ logs/              ← ログ
+```
+
+`.env`・`data/`・`logs/` は Git の管理外なので、デプロイ（`git reset --hard`）で
+消えることはありません。
+
+方法は2通り。どちらか1つでOKです。**Git を使える場合は方法B を推奨**します
+（以後の更新が `git pull` だけで済み、GitHub Actions からの自動デプロイも使えます）。
 
 ### 方法A: 自分のPCからアップロードする（zipを持っている場合）
 
@@ -286,28 +301,35 @@ $ sudo apt install unzip -y
 $ unzip club-bot.zip          # club-bot/ というフォルダが展開される
 $ mv club-bot ~/club-bot-app-tmp     # 名前が被らないよう一旦退避
 $ mkdir -p ~/club-bot
-$ mv ~/club-bot-app-tmp ~/club-bot/app
-$ ls ~/club-bot/app           # bot.py などが見えればOK
+$ mv ~/club-bot-app-tmp ~/club-bot/club-bot
+$ ls ~/club-bot/club-bot           # bot.py などが見えればOK
 ```
 
 > ※ zip の中身の構成によっては展開後のフォルダ名が異なります。
-> 最終的に **`~/club-bot/app/bot.py` が存在する**状態になっていれば正解です。
+> 最終的に **`~/club-bot/club-bot/bot.py` が存在する**状態になっていれば正解です。
 
-### 方法B: Git リポジトリから取得する（GitHub等に置いている場合）
+### 方法B: Git リポジトリから取得する（推奨）
+
+`~/club-bot` そのものをクローン先にします（リポジトリの中に `club-bot/` という
+コード用ディレクトリが含まれているため、これで上の配置になります）。
 
 ```bash
-$ cd ~/club-bot
-$ git clone <リポジトリのURL> app
-$ ls app                      # bot.py などが見えればOK
+$ cd ~
+$ rmdir club-bot 2>/dev/null      # 3-1 で作った空フォルダがあれば消す
+$ git clone <リポジトリのURL> club-bot
+$ ls ~/club-bot/club-bot          # bot.py などが見えればOK
 ```
 
 ## 3-3. Python の仮想環境を作って依存をインストール
 
+仮想環境はコード本体と同じ `~/club-bot/club-bot` の中に作ります
+（systemd のユニット定義もこの位置を指しています）。
+
 ```bash
-$ cd ~/club-bot
+$ cd ~/club-bot/club-bot
 $ python3 -m venv venv
 $ venv/bin/pip install --upgrade pip
-$ venv/bin/pip install -r app/requirements.txt
+$ venv/bin/pip install -r requirements.txt
 ```
 
 エラーなく終われば準備完了です。
@@ -317,7 +339,7 @@ $ venv/bin/pip install -r app/requirements.txt
 ひな形をコピーして編集します。
 
 ```bash
-$ cp app/.env.example ~/club-bot/.env
+$ cp ~/club-bot/club-bot/.env.example ~/club-bot/.env
 $ nano ~/club-bot/.env
 ```
 
@@ -335,16 +357,21 @@ Todoist は `.env` ではなく、起動後に Discord 上で `/todoist-setup` �
 VPSでは**絶対パス**で書くのが安全です。おすすめの書き方：
 
 ```
-DB_PATH=/home/ubuntu/club-bot/app/data/club.db
+DB_PATH=/home/ubuntu/club-bot/data/club.db
 TZ=Asia/Tokyo
 ```
 
 書き終えたら **Ctrl+O → Enter（保存）→ Ctrl+X（終了）**。
 
-## 3-5. ログ用フォルダを作る
+## 3-5. ログ・データ用フォルダを作る
+
+systemd のユニット定義（`deploy/club-bot.service`・
+`deploy/club-bot-dashboard.service`）は `ReadWritePaths` でこの2つを指しています。
+**存在しないと `status=226/NAMESPACE` でサービスが起動できず、10秒ごとに
+再起動を繰り返す**ので、常駐化の前に必ず作っておきます。
 
 ```bash
-$ mkdir -p ~/club-bot/logs
+$ mkdir -p ~/club-bot/logs ~/club-bot/data
 ```
 
 ---
@@ -360,8 +387,8 @@ $ mkdir -p ~/club-bot/logs
 > 以降はこの手順書の venv/systemd 版の説明として読み進めてください。
 
 ```bash
-$ cd ~/club-bot/app
-$ ../venv/bin/python bot.py
+$ cd ~/club-bot/club-bot
+$ venv/bin/python bot.py
 ```
 
 - 「ログイン完了」「スラッシュコマンドを同期」などのログが出れば成功です。
@@ -397,7 +424,7 @@ Bot が動いたら、Discord のサーバー上で**管理者が `/setup` を�
 配布物の `deploy/club-bot.service` をそのまま使えます（パスは `/home/ubuntu/club-bot/` 前提）。
 
 ```bash
-$ sudo cp ~/club-bot/app/deploy/club-bot.service /etc/systemd/system/club-bot.service
+$ sudo cp ~/club-bot/club-bot/deploy/club-bot.service /etc/systemd/system/club-bot.service
 ```
 
 > **作業ユーザー名や配置場所を変えた人**は、中身を編集して合わせます。
@@ -440,7 +467,7 @@ $ sudo systemctl status club-bot     # 状態確認
 ## 5-5. ログのたまり過ぎを防ぐ（任意）
 
 ```bash
-$ sudo cp ~/club-bot/app/deploy/club-bot.logrotate /etc/logrotate.d/club-bot
+$ sudo cp ~/club-bot/club-bot/deploy/club-bot.logrotate /etc/logrotate.d/club-bot
 ```
 
 これでログファイルが自動で日ごとに整理・圧縮されます。
@@ -450,9 +477,9 @@ $ sudo cp ~/club-bot/app/deploy/club-bot.logrotate /etc/logrotate.d/club-bot
 # 【STEP6】バックアップと日常メンテ
 
 - **データのバックアップ**：
-  - SQLite 運用: `~/club-bot/app/data/club.db` を定期的にコピー保管。
+  - SQLite 運用: `~/club-bot/data/club.db` を定期的にコピー保管。
     ```bash
-    $ cp ~/club-bot/app/data/club.db ~/club-bot/backup_$(date +%Y%m%d).db
+    $ cp ~/club-bot/data/club.db ~/club-bot/backup_$(date +%Y%m%d).db
     ```
   - PostgreSQL 運用: `pg_dump` で定期的に取得（手順は [`NOCODB.md`](NOCODB.md) 5章）。
 - **タスクの控え**：週1回 Discord で `/report export-tasks` を実行して CSV を保存。
