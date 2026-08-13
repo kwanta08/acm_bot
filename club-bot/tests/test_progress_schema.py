@@ -278,7 +278,8 @@ def test_pg_ddl_conversion():
     assert "guild_id BIGINT" in ddl
     # REAL（4バイト float）ではなく倍精度で保持する
     assert "REAL" not in ddl
-    assert ddl.count("DOUBLE PRECISION") == 3  # sort_order / manual_progress / weight
+    # sort_order / manual_progress / weight / target_weight_g / actual_weight_g
+    assert ddl.count("DOUBLE PRECISION") == 5
 
     spar = TABLE_DDL_PG["progress_spar_links"]
     assert "guild_id BIGINT" in spar

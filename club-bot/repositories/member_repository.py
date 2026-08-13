@@ -119,10 +119,20 @@ class MemberRepository(BaseRepository):
         d["skills"] = json.loads(d.get("skills") or "[]")
         return d
 
-    async def list_members(self, guild_id: int, active_only: bool = True) -> list[dict[str, Any]]:
+    async def list_members(self, guild_id: int, active_only: bool = True,
+                           include_alumni: bool = False) -> list[dict[str, Any]]:
+        """メンバー一覧。
+
+        既定では卒業者（status='alumni'）と休止者を含めない。年度替わりの
+        あとも現役だけが候補に出るようにするため。過去の名簿を見たいときは
+        include_alumni=True を明示する。
+        active_only は従来どおり active_flag（論理削除）の絞り込み。
+        """
         sql = "SELECT * FROM members WHERE guild_id = ?"
         if active_only:
             sql += " AND active_flag = 1"
+        if not include_alumni:
+            sql += " AND status = 'active'"
         sql += " ORDER BY display_name"
         rows = await self.db.fetchall(sql, (guild_id,))
         out = []
@@ -132,6 +142,42 @@ class MemberRepository(BaseRepository):
             d["skills"] = json.loads(d.get("skills") or "[]")
             out.append(d)
         return out
+
+    # ------------------------------------------------------------------
+    # 在籍状態（年度替わり）
+    #
+    # active  : 現役
+    # alumni  : 卒業（行は残す。過去の記録の担当者名が引けなくなるため）
+    # inactive: 休止
+    # ------------------------------------------------------------------
+    async def set_status(self, guild_id: int, user_id: str, status: str,
+                         left_season: str | None = None) -> bool:
+        """メンバーの在籍状態を変える。行を消さずに status だけを動かす。
+
+        卒業者を削除しないのは、過去の作業記録に残る担当者名が
+        引けなくなるため。
+        """
+        cur = await self.db.execute(
+            "UPDATE members SET status = ?, left_season = ?"
+            " WHERE guild_id = ? AND user_id = ?",
+            (status, left_season, guild_id, user_id))
+        return cur.rowcount > 0
+
+    async def reset_leaders(self, guild_id: int) -> int:
+        """班長フラグを全員分リセットする。戻り値は解除した人数。
+
+        代替わりの時点で班長は一度全員外し、新体制で付け直す。
+        """
+        cur = await self.db.execute(
+            "UPDATE members SET is_leader = 0"
+            " WHERE guild_id = ? AND is_leader = 1", (guild_id,))
+        return cur.rowcount
+
+    async def count_by_status(self, guild_id: int) -> dict[str, int]:
+        rows = await self.db.fetchall(
+            "SELECT status, COUNT(*) AS n FROM members"
+            " WHERE guild_id = ? GROUP BY status", (guild_id,))
+        return {str(r["status"]): int(r["n"]) for r in rows}
 
     async def set_primary_team(self, guild_id: int, user_id: str, team_key: str) -> None:
         await self.db.execute(
@@ -170,9 +216,13 @@ class MemberRepository(BaseRepository):
         return True
 
     async def search_support(self, guild_id: int, team_key: str | None,
-                             skill: str | None) -> list[dict[str, Any]]:
-        """班・技能タグで支援候補を検索する（仕様 11.4.4）。"""
-        members = await self.list_members(guild_id)
+                             skill: str | None,
+                             include_alumni: bool = False) -> list[dict[str, Any]]:
+        """班・技能タグで支援候補を検索する（仕様 11.4.4）。
+
+        既定では現役のみ。卒業者に頼るケースのために include_alumni を残す。
+        """
+        members = await self.list_members(guild_id, include_alumni=include_alumni)
         out = []
         for m in members:
             if (team_key

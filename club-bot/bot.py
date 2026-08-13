@@ -35,6 +35,9 @@ log = get_logger("bot")
 
 COGS = [
     "cogs.core",
+    "cogs.help",           # /help コマンドカタログ
+    "cogs.data",           # /data エクスポート・削除
+    "cogs.season",         # /season 年度替わり
     "cogs.schedule",
     "cogs.tasks",
     "cogs.members",
@@ -174,9 +177,13 @@ class ClubBot(commands.Bot):
         """
         repo = SettingsRepository(self.db)
 
-        # (a) ギルド台帳への登録（冪等。既存なら名称のみ更新）
+        # (a) ギルド台帳への登録（冪等。既存なら名称のみ更新）。
+        #     参加中である以上、過去の退出で入った削除予定は取り消す
+        #     （Bot 停止中に退出→再参加した場合も起動時にここで復旧する）。
         try:
-            await GuildRepository(self.db).ensure(guild.id, guild.name)
+            repo_g = GuildRepository(self.db)
+            await repo_g.ensure(guild.id, guild.name)
+            await repo_g.clear_left(guild.id)
         except Exception as e:  # noqa: BLE001
             log.warning("ギルド台帳への登録に失敗 (guild=%s): %s", guild.id, e)
 
@@ -321,6 +328,24 @@ class ClubBot(commands.Bot):
             "次のステップ: 管理者が `/setup` を実行し、通知チャンネル・ロールの設定と"
             "班の作成を行ってください（班は自動作成されません）。",
             guild_id=guild.id)
+
+    async def on_guild_remove(self, guild: discord.Guild) -> None:
+        """サーバーから外れたとき。
+
+        **データはここでは消さない。** 退出日時と削除予定日時だけを記録し、
+        猶予期間（既定30日 / ギルド別設定 DATA_RETENTION_DAYS）を過ぎたものを
+        日次ジョブが削除する。誤キックや一時的な離脱から再招待で復帰できる。
+        """
+        log.info("ギルドから退出しました: %s (id=%s)", guild.name, guild.id)
+        try:
+            gconf = await config.for_guild(guild.id)
+            _, purge_after = await GuildRepository(self.db).mark_left(
+                guild.id, gconf.data_retention_days)
+        except Exception:
+            log.exception("退出の記録に失敗しました (guild=%s)", guild.id)
+            return
+        log.info("データの削除予定を記録しました (guild=%s, purge_after=%s)",
+                 guild.id, purge_after)
 
     async def log_to_channel(self, message: str, guild_id: int | None = None) -> None:
         """

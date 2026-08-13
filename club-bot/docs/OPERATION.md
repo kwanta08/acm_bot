@@ -30,6 +30,34 @@
 |---|---|---|
 | `/ping` | L1 | 応答確認 |
 | `/health` | L1 | Bot・各連携サービスの状態表示 |
+| `/help [command]` | L1 | コマンド一覧をカテゴリから探す。`command:` で個別の説明・引数・必要権限 |
+| `/setup-status` | L1 | 初期設定（通知/ログチャンネル・管理者ロール・班・桁）の未完了項目を表示 |
+
+### Settings（サーバー設定）
+| コマンド | 権限 | 説明 |
+|---|---|---|
+| `/setup` | L4 | 初期設定ウィザード（対話形式） |
+| `/settings_list` | L4 | 設定値の一覧 |
+| `/settings_get key:` | L4 | 設定値の取得 |
+| `/settings_set key: value:` | L4 | 設定値の保存（`COMPETITION_DATE` `DATA_RETENTION_DAYS` など） |
+| `/settings_delete key:` | L4 | 設定値の削除 |
+| `/set_channel` | L4 | 通知チャンネルの設定 |
+| `/set_role` | L4 | ロール（幹部・管理者・班長）の設定 |
+| `/set_common` | L4 | 共通設定 |
+
+### Data（エクスポート・削除）
+| コマンド | 権限 | 説明 |
+|---|---|---|
+| `/data export` | L4 または Manage Server | このサーバーの全データを ZIP（CSV 群）で受け取る。サーバーIDと認証情報は含まれない |
+| `/data delete` | L4 または Manage Server | データ削除を申告する。確認のためサーバー名の入力が必要。最後のバックアップが添付される |
+| `/data delete-cancel` | L4 または Manage Server | 予約済みの削除を取り消す |
+
+### Season（年度替わり）
+| コマンド | 権限 | 説明 |
+|---|---|---|
+| `/season list` | L1 | 年度の一覧と現役／卒業の人数 |
+| `/season new name:` | L4 | 現在の年度を終了して新しい年度を開始する |
+| `/season rollover name:` | L4 | 年度切り替えウィザード。卒業者の仕分け・班長フラグの全リセット・年度スナップショットの添付 |
 
 ### Schedule（日程調整・出欠）
 | コマンド | 権限 | 説明 |
@@ -39,6 +67,8 @@
 | `/schedule status <id>` | L1 | 投票の詳細表示 |
 | `/schedule close <id>` | L2 | 手動締切 |
 | `/schedule remind <id>` | L2 | 未回答者へ再通知 |
+| `/schedule edit-deadline <id>` | L2 | 開催中の日程調整の締切を変更 |
+| `/schedule list-closed` | L1 | 締切済みの一覧 |
 | `/schedule delete <id>` | L3 | 投票削除 |
 | `/schedule emoji set` | L4 | 出欠リアクションにサーバーのカスタム絵文字を設定（ステータス選択 + 絵文字名のオートコンプリート） |
 | `/schedule emoji show` | L4 | 現在の絵文字設定を表示 |
@@ -68,6 +98,7 @@
 | `/task sections` | L2 | Todoist のセクション一覧と班との紐付け状況を表示 |
 | `/task link-section <班> <section_id>` | L3 | Todoist セクションを班に紐付け |
 | `/task unlink-section <section_id>` | L3 | セクションの紐付けを解除 |
+| `/task unlink-team-sections <班>` | L3 | 指定した班に紐付いたセクションをまとめて解除 |
 | `/task push` | L2 | セクション別タスクを各班チャンネルへ手動プッシュ |
 | `/task sync` | L4 | Todoist 同期・ラベル整備 |
 | `/today task <タスク名>` | L1 | 完全一致で「今日やること」ラベル付与 |
@@ -114,6 +145,27 @@ Google Sheets へのエクスポート連携（旧 `/set_sheet` `/sheet_sync`）
 | `/progress spar-link` | L2 | 桁名と目標層数を進捗ノードへ紐付け（`/layer` の記録から進捗率を自動計算） |
 | `/progress setup` | L2 | Todoist プロジェクトを進捗ツリーに紐付けるウィザード（プロジェクト選択 → 紐付け先選択 → 通知先選択。手入力・再起動なし） |
 | `/progress sync` | L4 | Todoist 同期＋桁巻き反映＋再集計を即時実行（通常は20分ごとに自動実行） |
+
+#### 重量管理（機体重量はグラム固定）
+| コマンド | 権限 | 説明 |
+|---|---|---|
+| `/weight set node: actual: [target:]` | L2 | ノードの実測重量（と目標重量）を記録 |
+| `/weight view [node]` | L1 | 集計重量・目標との差・実測入力率を表示（省略時は機体全体） |
+| `/weight top` | L1 | 目標超過の大きい順に並べる（減量の着手先） |
+
+集計規則は「そのノードに実測が入っていればそれを採用、無ければ子の合計を積み上げる」。
+未計測は 0g ではなく「未計測」として扱い、実測入力率で確度を示します。
+
+#### 大会からの逆算
+| コマンド | 権限 | 説明 |
+|---|---|---|
+| `/milestone add node: name: due:` | L2 | ノードに期限（マイルストーン）を設定 |
+| `/milestone remove node: name:` | L2 | マイルストーンを削除 |
+| `/milestone list` | L1 | 登録済みのマイルストーンを期限順に表示 |
+| `/countdown` | L1 | 大会までの残り日数と、マイルストーンごとの必要ペース・実績ペース・遅延判定 |
+
+大会日はギルド別設定 `COMPETITION_DATE`（`YYYY-MM-DD`）に登録します（既定値なし）。
+遅れているマイルストーンがある週は、月曜 8:30 に自動通知されます（無い週は通知しません）。
 
 機体製作の進捗を **DB（`progress_nodes` テーブル）を正本** として管理し、
 Discord からドリルダウンで確認できる機能です。深さに制限はなく、
@@ -198,11 +250,13 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 | `/member register <user> [班]` | L2 | メンバー登録 |
 | `/member profile [user]` | L1 | プロフィール表示（省略時は自分） |
 | `/member assign-team <user> <班>` | L2 | 主所属班を設定 |
+| `/member assign-sub-team <user> <班>` | L2 | 副所属班を追加・削除 |
+| `/member setup <user>` | L3 | 主所属班・副所属班・班長を一括設定 |
 | `/member set-channel <班> <channel>` | L3 | 班の通知先チャンネルを設定（タスクの班別通知に使用） |
 | `/member set-leader <user> <bool>` | L3 | 班長フラグ設定 |
 | `/member skill add <技能> [user]` | L1 | 技能タグ追加（ギルドに登録済みのタグから選択） |
 | `/member skill remove <技能> [user]` | L1 | 技能タグ削除 |
-| `/member support [班] [技能]` | L2 | 支援候補検索（班横断作業向け） |
+| `/member support [班] [技能]` | L2 | 支援候補検索（班横断作業向け）。既定は現役のみ。`include_alumni:True` で卒業者も含む |
 
 班・技能の選択肢は、そのギルドの DB（teams / skill_tags テーブル）から
 入力途中の文字列で絞り込んで表示されます（autocomplete）。

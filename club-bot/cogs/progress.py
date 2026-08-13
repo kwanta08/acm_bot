@@ -29,15 +29,34 @@ from discord.ext import commands, tasks
 # タスク一覧の整形は既存の Reminders 通知とスタイルを揃える
 from cogs.reminders import _build_grouped_description
 from config import config
+from repositories.audit_log_repository import AuditLogRepository
 from repositories.progress_repository import ProgressRepository
 from services import progress_sync_service
 from services import progress_tree as pt
-from services.progress_tree import ProgressNode, ProgressTree
+from services.milestone_service import (
+    VERDICT_BEHIND,
+    VERDICT_DONE,
+    VERDICT_ON_TRACK,
+    VERDICT_OVERDUE,
+    VERDICT_UNKNOWN,
+    MilestoneStatus,
+    Pace,
+    days_until_competition,
+    evaluate_all,
+    parse_date,
+    spar_pace,
+)
+from services.progress_tree import (
+    ProgressNode,
+    ProgressTree,
+    nodes_over_target,
+    weight_summary,
+)
 from services.todoist_service import TodoistError
 from utils import progress_bar
 from utils.embeds import error_embed, info_embed, success_embed, task_embed
 from utils.logger import get_logger
-from utils.parser import TZ, now
+from utils.parser import TZ, now, parse_deadline
 from utils.permissions import Level, ensure_guild, is_admin, require
 
 if TYPE_CHECKING:
@@ -106,6 +125,112 @@ def source_label(source: str) -> str:
     return "手入力"
 
 
+def format_grams(value: float) -> str:
+    return f"{value:,.0f}g"
+
+
+def weight_line(tree: ProgressTree, node_id: str | None) -> str:
+    """「重量: 実測 1,240g / 目標 1,100g（+140g）」の1行。
+
+    実測も目標も入っていなければ空文字を返す。重量を使っていない
+    サーバーで /progress view の表示を変えないため、呼び出し側は
+    空文字なら行ごと出さない。
+    """
+    summary = weight_summary(tree, node_id)
+    if summary.actual_g is None and summary.target_g is None:
+        return ""
+    parts = []
+    if summary.actual_g is not None:
+        parts.append(f"実測 {format_grams(summary.actual_g)}")
+    if summary.target_g is not None:
+        parts.append(f"目標 {format_grams(summary.target_g)}")
+    text = " / ".join(parts)
+    diff = summary.diff_g
+    if diff is not None:
+        text += f"（{diff:+,.0f}g）"
+    return f"重量: {text}"
+
+
+def _with_weight(desc: str, tree: ProgressTree, node_id: str | None) -> str:
+    line = weight_line(tree, node_id)
+    if not line:
+        return desc
+    return f"{desc}\n{line}" if desc else line
+
+
+_VERDICT_MARK = {
+    VERDICT_DONE: "✅ 完了",
+    VERDICT_ON_TRACK: "✅ 間に合う",
+    VERDICT_BEHIND: "⚠️ 遅延",
+    VERDICT_OVERDUE: "🚨 期限超過",
+    VERDICT_UNKNOWN: "❓ 判定不能",
+}
+
+COMPETITION_DATE_HELP = (
+    "大会日が設定されていません。\n"
+    "`/settings_set` で `COMPETITION_DATE` に `YYYY-MM-DD` 形式の日付を"
+    "登録してください（例: `2026-07-25`）。"
+)
+
+
+def _pace_text(status: MilestoneStatus) -> str:
+    """必要ペースと実績ペースを %/日 で示す。"""
+    if status.required_per_day is None:
+        return ""
+    need = f"必要 {status.required_per_day * 100:.1f}%/日"
+    if status.actual_per_day is None:
+        return f"{need} / 実績 —"
+    return f"{need} / 実績 {status.actual_per_day * 100:.1f}%/日"
+
+
+def build_countdown_embed(competition_date: str | None,
+                          statuses: list[MilestoneStatus],
+                          today) -> discord.Embed:
+    """/countdown の Embed。大会までの残り日数とマイルストーンの判定。"""
+    left = days_until_competition(competition_date, today)
+    if left is None:
+        head = "大会日: 未設定"
+    elif left > 0:
+        head = f"大会（{competition_date}）まで **残り {left} 日**"
+    elif left == 0:
+        head = f"**本日が大会日です**（{competition_date}）"
+    else:
+        head = f"大会（{competition_date}）から {-left} 日が経過しています"
+
+    if not statuses:
+        return info_embed(
+            "🏁 大会カウントダウン",
+            f"{head}\n\nマイルストーンが登録されていません。\n"
+            "`/milestone add` で節目の期限を登録すると、"
+            "必要なペースと実績を突き合わせて遅延をお知らせします。")
+
+    behind = [s for s in statuses if s.is_behind]
+    unknown = [s for s in statuses if s.verdict == VERDICT_UNKNOWN]
+    summary = f"{head}\n遅延 **{len(behind)} 件** / 全 {len(statuses)} 件"
+    if unknown:
+        summary += f"（判定不能 {len(unknown)} 件）"
+
+    embed = info_embed("🏁 大会カウントダウン", summary)
+    for status in statuses[:25]:
+        when = (f"期限まで {status.days_left} 日" if status.days_left > 0
+                else "本日が期限" if status.days_left == 0
+                else f"{-status.days_left} 日超過")
+        lines = [f"{when} / 進捗 {status.progress * 100:.0f}%"]
+        pace = _pace_text(status)
+        if pace:
+            lines.append(pace)
+        if status.verdict == VERDICT_UNKNOWN and status.reason:
+            lines.append(f"※ {status.reason}ため判定できません")
+        embed.add_field(
+            name=f"{_VERDICT_MARK[status.verdict]}　"
+                 f"{status.node_name}: {status.name}",
+            value="\n".join(lines),
+            inline=False)
+    if len(statuses) > 25:
+        embed.description += f"\n…ほか {len(statuses) - 25} 件"
+    return embed
+
+
 def build_level_embed(tree: ProgressTree,
                       node_id: str | None) -> discord.Embed:
     """現在の階層（子ノード一覧 or 葉の詳細）の Embed を組み立てる。"""
@@ -115,7 +240,8 @@ def build_level_embed(tree: ProgressTree,
 
     if node is not None and not children:
         # 葉ノード: 詳細表示
-        embed = info_embed(title, f"進捗率: **{percent(node)}**")
+        embed = info_embed(
+            title, _with_weight(f"進捗率: **{percent(node)}**", tree, node_id))
         embed.add_field(name="担当者", value=node.assignee or "—", inline=True)
         embed.add_field(name="状態", value=node.status or "—", inline=True)
         embed.add_field(name="ソース", value=source_label(node.source),
@@ -129,7 +255,7 @@ def build_level_embed(tree: ProgressTree,
         return embed
 
     desc = f"全体進捗: **{percent(node)}**" if node is not None else ""
-    embed = info_embed(title, desc)
+    embed = info_embed(title, _with_weight(desc, tree, node_id))
     for child in children[:25]:
         detail = []
         if child.assignee:
@@ -1018,6 +1144,262 @@ class Progress(commands.Cog):
         view = ProgressView(self, tree, None, interaction.user.id, guild_id)
         await interaction.followup.send(embed=embed, view=view)
 
+    # ---------- /weight ----------
+    weight_group = app_commands.Group(
+        name="weight", description="機体重量の記録と集計")
+
+    @weight_group.command(
+        name="set",
+        description="ノードの重量（g）を記録します。")
+    @app_commands.describe(node="対象ノード", actual="実測重量（g）",
+                           target="目標重量（g。省略時は変更しない）")
+    @require(Level.L2)
+    async def weight_set(self, interaction: discord.Interaction, node: str,
+                         actual: float, target: float | None = None):
+        await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        if actual < 0 or (target is not None and target < 0):
+            await interaction.followup.send(
+                embed=error_embed("重量に負の値は指定できません。"),
+                ephemeral=True)
+            return
+        if not await self._resolve_node(interaction, guild_id, node):
+            return
+
+        fields: dict[str, float] = {"actual_weight_g": actual}
+        if target is not None:
+            fields["target_weight_g"] = target
+        await self.repo.update_node(guild_id, node,
+                                    now_text=now().strftime("%Y-%m-%d %H:%M"),
+                                    **fields)
+        await self._audit(guild_id, interaction, "weight.set", node,
+                          f"実測 {format_grams(actual)}"
+                          + (f" / 目標 {format_grams(target)}"
+                             if target is not None else ""))
+
+        tree = await self.load_tree(guild_id)
+        detail = weight_line(tree, node) or "重量: —"
+        await interaction.followup.send(
+            embed=success_embed(
+                "重量を記録しました",
+                f"`{node}`\n{detail}",
+                executor=interaction.user.display_name),
+            ephemeral=True)
+
+    @weight_group.command(
+        name="view",
+        description="重量の集計・目標との差・実測入力率を表示します。")
+    @app_commands.describe(node="対象ノード（省略時は機体全体）")
+    @require(Level.L1)
+    async def weight_view(self, interaction: discord.Interaction,
+                          node: str | None = None):
+        await interaction.response.defer()
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        tree = await self.load_tree(guild_id)
+        if not tree.roots:
+            await interaction.followup.send(
+                embed=info_embed("進捗データがありません", _EMPTY_TREE_DESC),
+                ephemeral=True)
+            return
+
+        summary = weight_summary(tree, node)
+        if summary.total_nodes == 0:
+            await interaction.followup.send(
+                embed=error_embed(f"ノード `{node}` が見つかりません。"),
+                ephemeral=True)
+            return
+
+        target_name = (tree.by_id[node].name or node) if node else "機体全体"
+        lines = [
+            f"実測合計: **{format_grams(summary.actual_g)}**"
+            if summary.actual_g is not None else "実測合計: **未計測**",
+            f"目標合計: **{format_grams(summary.target_g)}**"
+            if summary.target_g is not None else "目標合計: **未設定**",
+        ]
+        diff = summary.diff_g
+        if diff is not None:
+            mark = "⚠️ 超過" if diff > 0 else "✅ 目標内"
+            lines.append(f"差分: **{diff:+,.0f}g** {mark}")
+        lines.append(
+            f"実測入力率: **{summary.fill_rate * 100:.0f}%**"
+            f"（{summary.measured_nodes} / {summary.total_nodes} ノード）")
+        if summary.fill_rate < 1.0:
+            lines.append("※ 未計測のノードがあるため、合計は見積もりを含みます。")
+
+        await interaction.followup.send(
+            embed=info_embed(f"⚖️ 重量: {target_name}", "\n".join(lines)))
+
+    @weight_group.command(
+        name="top",
+        description="目標を超過しているノードを超過量の大きい順に表示します。")
+    @require(Level.L1)
+    async def weight_top(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        tree = await self.load_tree(guild_id)
+        ranked = nodes_over_target(tree)
+        if not ranked:
+            await interaction.followup.send(embed=info_embed(
+                "⚖️ 目標超過のノードはありません",
+                "目標と実測の両方が入っているノードのうち、超過しているものは"
+                "ありませんでした。\n"
+                "重量を登録するには `/weight set` を使います。"))
+            return
+
+        lines = []
+        for rank, (node, over) in enumerate(ranked[:20], start=1):
+            actual = node.aggregated_actual_weight_g
+            target = node.aggregated_target_weight_g
+            lines.append(
+                f"{rank}. **{node.name or node.node_id}** "
+                f"+{format_grams(over)}"
+                f"（実測 {format_grams(actual)} / 目標 {format_grams(target)}）")
+        if len(ranked) > 20:
+            lines.append(f"…ほか {len(ranked) - 20} 件")
+
+        await interaction.followup.send(embed=info_embed(
+            "⚖️ 目標超過ランキング", "\n".join(lines)))
+
+    # ---------- /milestone ----------
+    milestone_group = app_commands.Group(
+        name="milestone", description="大会に向けたマイルストーン（期限）の管理")
+
+    @milestone_group.command(
+        name="add",
+        description="ノードに期限（マイルストーン）を設定します。")
+    @app_commands.describe(node="対象ノード", name="マイルストーン名",
+                           due="期限（YYYY-MM-DD）")
+    @require(Level.L2)
+    async def milestone_add(self, interaction: discord.Interaction, node: str,
+                            name: str, due: str):
+        await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        if not await self._resolve_node(interaction, guild_id, node):
+            return
+        # 日付の解釈は既存パーサに任せる（失敗は INVALID_DATETIME として
+        # グローバルハンドラが案内する）
+        due_date = parse_deadline(due).strftime("%Y-%m-%d")
+
+        await self.repo.add_milestone(guild_id, node, name, due_date,
+                                      now().strftime("%Y-%m-%d %H:%M"))
+        await self._audit(guild_id, interaction, "milestone.add", node,
+                          f"{name} / {due_date}")
+        await interaction.followup.send(
+            embed=success_embed(
+                "マイルストーンを設定しました",
+                f"`{node}` — **{name}**\n期限: {due_date}",
+                executor=interaction.user.display_name),
+            ephemeral=True)
+
+    @milestone_group.command(
+        name="remove", description="マイルストーンを削除します。")
+    @app_commands.describe(node="対象ノード", name="マイルストーン名")
+    @require(Level.L2)
+    async def milestone_remove(self, interaction: discord.Interaction,
+                               node: str, name: str):
+        await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        if not await self.repo.remove_milestone(guild_id, node, name):
+            await interaction.followup.send(
+                embed=error_embed(
+                    f"`{node}` に「{name}」というマイルストーンはありません。"),
+                ephemeral=True)
+            return
+        await self._audit(guild_id, interaction, "milestone.remove", node, name)
+        await interaction.followup.send(
+            embed=success_embed("マイルストーンを削除しました",
+                                f"`{node}` — {name}",
+                                executor=interaction.user.display_name),
+            ephemeral=True)
+
+    @milestone_group.command(
+        name="list", description="登録済みのマイルストーンを期限順に表示します。")
+    @require(Level.L1)
+    async def milestone_list(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        rows = await self.repo.list_milestones(guild_id)
+        if not rows:
+            await interaction.followup.send(embed=info_embed(
+                "マイルストーンがありません",
+                "`/milestone add` で節目の期限を登録できます。"))
+            return
+        tree = await self.load_tree(guild_id)
+        lines = []
+        for row in rows:
+            node = tree.by_id.get(row["node_id"])
+            label = node.name if node is not None else f"{row['node_id']}（削除済み）"
+            lines.append(f"**{row['due_date']}** — {label}: {row['name']}")
+        await interaction.followup.send(embed=info_embed(
+            "🏁 マイルストーン一覧", "\n".join(lines[:50])))
+
+    # ---------- /countdown ----------
+    async def pace_overrides(self, guild_id: int) -> dict[str, Pace]:
+        """桁巻きに紐付いたノードのペースを layer_records から作る。
+
+        積層は作業日の履歴が残っているので、created_at / updated_at から
+        推定するより実際の作業ペースに近い。
+        """
+        links = await self.repo.list_spar_links(guild_id)
+        if not links:
+            return {}
+        dates_by_keta = await self.repo.list_layer_dates(guild_id)
+        overrides: dict[str, Pace] = {}
+        for link in links:
+            raw = dates_by_keta.get(link["keta_name"], [])
+            days = [d for d in (parse_date(x) for x in raw) if d is not None]
+            pace = spar_pace(days, int(link["target_layers"] or 0))
+            if pace.per_day is not None:
+                overrides[link["node_id"]] = pace
+        return overrides
+
+    @app_commands.command(
+        name="countdown",
+        description="大会までの残り日数と、遅れているマイルストーンを表示します。")
+    @require(Level.L1)
+    async def countdown(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        gconf = await config.for_guild(guild_id)
+        if not gconf.competition_date:
+            await interaction.followup.send(
+                embed=info_embed("大会日が未設定です", COMPETITION_DATE_HELP),
+                ephemeral=True)
+            return
+
+        today = now().date()
+        tree = await self.load_tree(guild_id)
+        rows = await self.repo.list_milestones(guild_id)
+        statuses = evaluate_all(tree, rows, today=today,
+                                pace_by_node=await self.pace_overrides(guild_id))
+        await interaction.followup.send(embed=build_countdown_embed(
+            gconf.competition_date, statuses, today))
+
+    async def _audit(self, guild_id: int, interaction: discord.Interaction,
+                     action: str, target: str, detail: str) -> None:
+        """監査ログへ記録する（記録の失敗で操作自体は止めない）。"""
+        try:
+            await AuditLogRepository(self.db).record(
+                guild_id, actor_id=str(interaction.user.id),
+                action=action, target=target, detail=detail)
+        except Exception as e:  # noqa: BLE001
+            log.warning("監査ログの記録に失敗 (guild=%s): %s", guild_id,
+                        type(e).__name__)
+
 
 # ノード指定を受け取るコマンドへオートコンプリートを紐付ける
 Progress.progress_add.autocomplete("parent")(Progress._node_autocomplete)
@@ -1026,6 +1408,10 @@ Progress.progress_edit.autocomplete("parent")(Progress._node_autocomplete)
 Progress.progress_remove.autocomplete("node")(Progress._node_autocomplete)
 Progress.progress_spar_link.autocomplete("node")(Progress._node_autocomplete)
 Progress.progress_spar_link.autocomplete("keta")(Progress._keta_autocomplete)
+Progress.weight_set.autocomplete("node")(Progress._node_autocomplete)
+Progress.weight_view.autocomplete("node")(Progress._node_autocomplete)
+Progress.milestone_add.autocomplete("node")(Progress._node_autocomplete)
+Progress.milestone_remove.autocomplete("node")(Progress._node_autocomplete)
 
 
 async def setup(bot: commands.Bot):

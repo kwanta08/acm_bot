@@ -463,12 +463,14 @@ class Members(commands.Cog):
 
     # ---------- support ----------
     @group.command(name="support", description="班・技能から支援候補を検索します。")
-    @app_commands.describe(team="班で絞り込み（任意）", skill="技能で絞り込み（任意）")
+    @app_commands.describe(team="班で絞り込み（任意）", skill="技能で絞り込み（任意）",
+                           include_alumni="卒業した人も含める（既定は現役のみ）")
     @app_commands.autocomplete(team=_team_ac, skill=_skill_ac)
     @require(Level.L2)
     async def support(self, interaction: discord.Interaction,
                       team: str | None = None,
-                      skill: str | None = None):
+                      skill: str | None = None,
+                      include_alumni: bool = False):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -478,12 +480,15 @@ class Members(commands.Cog):
                 embed=error_embed("班または技能のいずれかを指定してください。"), ephemeral=True)
             return
         team_names = await team_service.team_name_map(self.bot.db, guild_id)
-        candidates = await self.repo.search_support(guild_id, team, skill)
+        candidates = await self.repo.search_support(
+            guild_id, team, skill, include_alumni=include_alumni)
         cond = []
         if team:
             cond.append(f"班={team_names.get(team, team)}")
         if skill:
             cond.append(f"技能={skill}")
+        if include_alumni:
+            cond.append("卒業者を含む")
         embed = member_embed(f"支援候補検索（{' / '.join(cond)}）")
         if not candidates:
             embed.description = "該当者が見つかりませんでした。"

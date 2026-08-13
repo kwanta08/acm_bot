@@ -38,10 +38,21 @@ class ProgressNode:
     # 移行スクリプトがシートを読むときだけ設定する。DB 経路では常に None
     row_index: int | None = None
     weight: float = 1.0           # 集計時の重み
+    # 重量（g）。None は未入力。人力飛行機では重量が競技成績に直結するため、
+    # 進捗と同じ木で積み上げる
+    target_weight_g: float | None = None
+    actual_weight_g: float | None = None
+    # 進捗ペースの推定に使う（大会からの逆算）。DB の同名列をそのまま持つ
+    created_at: str = ""
+    updated_at: str = ""
 
     # 計算結果（compute_tree が設定する）
     depth: int | None = None
     aggregated: float | None = None
+    # 集計重量（g）。実測が入っていればそれ、無ければ子の合計。
+    # すべて未入力の部分木では None のまま（0.0 と区別する）
+    aggregated_actual_weight_g: float | None = None
+    aggregated_target_weight_g: float | None = None
     children: list[ProgressNode] = field(default_factory=list)
 
     @property
@@ -175,12 +186,31 @@ def _find_invalid_ids(tree: ProgressTree) -> set[str]:
     return invalid
 
 
+def _resolve_weight(own: float | None,
+                    child_values: list[float | None]) -> float | None:
+    """重量の集計規則。
+
+    **実測値（またはそのノードに入力された値）が入っていればそれを採用**し、
+    無ければ子の合計を積み上げる。機体側で実測した値のほうが、部品の
+    見積もりを足し上げた値より信用できるため。
+
+    子がすべて未入力なら None を返す（「0 g」と「未計測」を区別する）。
+    """
+    if own is not None:
+        return float(own)
+    present = [v for v in child_values if v is not None]
+    if not present:
+        return None
+    return sum(present)
+
+
 def aggregate(tree: ProgressTree) -> None:
-    """集計進捗率と深さを末端から根に向けて計算し、各ノードに書き込む。
+    """集計進捗率・集計重量と深さを末端から根に向けて計算し、各ノードに書き込む。
 
     - 葉: manual_progress（未入力は 0.0）
     - 親: 子の aggregated の加重平均（weight は現状すべて 1.0）
     - depth: ルート = 0
+    - 重量: 自ノードの入力値が優先、無ければ子の合計（_resolve_weight）
     build_tree 済みのツリーは非循環が保証されているため再帰は停止する。
     Python の再帰上限を避けるため明示的なスタックで後行順に処理する。
     """
@@ -207,6 +237,13 @@ def aggregate(tree: ProgressTree) -> None:
                     node.aggregated = sum(
                         (c.aggregated or 0.0) * c.weight
                         for c in node.children) / total_weight
+            # 重量は進捗率と同じ後行順の中で積み上げる
+            node.aggregated_actual_weight_g = _resolve_weight(
+                node.actual_weight_g,
+                [c.aggregated_actual_weight_g for c in node.children])
+            node.aggregated_target_weight_g = _resolve_weight(
+                node.target_weight_g,
+                [c.aggregated_target_weight_g for c in node.children])
 
 
 def build_and_aggregate(nodes: list[ProgressNode]) -> ProgressTree:
@@ -214,6 +251,98 @@ def build_and_aggregate(nodes: list[ProgressNode]) -> ProgressTree:
     tree = build_tree(nodes)
     aggregate(tree)
     return tree
+
+
+# ---------------------------------------------------------------------
+# 重量サマリ
+# ---------------------------------------------------------------------
+@dataclass
+class WeightSummary:
+    """ツリー（または部分木）の重量集計。
+
+    measured / total は「実測がどれだけ埋まっているか」を示す。
+    実測が少ないほど集計値は見積もりに近く、確度が低い。
+    """
+    actual_g: float | None = None
+    target_g: float | None = None
+    measured_nodes: int = 0
+    total_nodes: int = 0
+
+    @property
+    def fill_rate(self) -> float:
+        """実測が入っているノードの割合（0.0〜1.0）。"""
+        if self.total_nodes <= 0:
+            return 0.0
+        return self.measured_nodes / self.total_nodes
+
+    @property
+    def diff_g(self) -> float | None:
+        """目標との差分（実測 − 目標）。どちらか欠けていれば None。"""
+        if self.actual_g is None or self.target_g is None:
+            return None
+        return self.actual_g - self.target_g
+
+    @property
+    def is_over_target(self) -> bool:
+        diff = self.diff_g
+        return diff is not None and diff > 0
+
+
+def iter_subtree(node: ProgressNode):
+    """ノードとその子孫を順に返す（非循環が保証済みなので停止する）。"""
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        yield current
+        stack.extend(current.children)
+
+
+def weight_summary(tree: ProgressTree,
+                   node_id: str | None = None) -> WeightSummary:
+    """ツリー全体、または指定ノードの部分木の重量サマリを返す。
+
+    node_id を省略すると全ルートの合計。存在しない node_id では
+    空のサマリを返す（例外にしない）。
+    """
+    if node_id is None:
+        roots = list(tree.roots)
+    else:
+        node = tree.by_id.get(node_id)
+        roots = [node] if node is not None else []
+
+    actual_parts = [r.aggregated_actual_weight_g for r in roots]
+    target_parts = [r.aggregated_target_weight_g for r in roots]
+    measured = total = 0
+    for root in roots:
+        for node in iter_subtree(root):
+            total += 1
+            if node.actual_weight_g is not None:
+                measured += 1
+
+    return WeightSummary(
+        actual_g=_resolve_weight(None, actual_parts),
+        target_g=_resolve_weight(None, target_parts),
+        measured_nodes=measured,
+        total_nodes=total,
+    )
+
+
+def nodes_over_target(tree: ProgressTree) -> list[tuple[ProgressNode, float]]:
+    """目標超過のノードを超過量の大きい順に返す（減量の着手先）。
+
+    目標と集計実測の両方が分かるノードだけが対象。
+    """
+    rows: list[tuple[ProgressNode, float]] = []
+    for node in tree.by_id.values():
+        actual = node.aggregated_actual_weight_g
+        target = node.aggregated_target_weight_g
+        if actual is None or target is None:
+            continue
+        over = actual - target
+        if over > 0:
+            rows.append((node, over))
+    rows.sort(key=lambda pair: (-pair[1], pair[0].node_id))
+    return rows
 
 
 # ---------------------------------------------------------------------
@@ -237,6 +366,12 @@ def node_from_row(row: dict[str, Any]) -> ProgressNode:
         source=row.get("source") or SOURCE_MANUAL,
         todoist_task_id=row.get("todoist_task_id") or "",
         weight=float(row["weight"]) if row.get("weight") is not None else 1.0,
+        target_weight_g=(None if row.get("target_weight_g") is None
+                         else float(row["target_weight_g"])),
+        actual_weight_g=(None if row.get("actual_weight_g") is None
+                         else float(row["actual_weight_g"])),
+        created_at=row.get("created_at") or "",
+        updated_at=row.get("updated_at") or "",
     )
 
 

@@ -10,6 +10,8 @@
 """
 from __future__ import annotations
 
+import csv
+import io
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -18,6 +20,12 @@ from utils.db import Database
 
 MAX_LIMIT = 500
 DEFAULT_LIMIT = 200
+
+# Excel が UTF-8 と認識するための BOM
+CSV_BOM = "﻿"
+
+# 表計算ソフトが数式として解釈してしまう先頭文字（CSV インジェクション）
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
 
 
 @dataclass(frozen=True)
@@ -162,6 +170,9 @@ TABLES: dict[str, TableSpec] = {
             _c("assignee", "担当者", "text", editable=True),
             _c("status", "状態", "text", editable=True),
             _c("manual_progress", "進捗率", "progress", editable=True),
+            # 重量はグラム固定（列名の _g で明示。単位設定は作らない）
+            _c("target_weight_g", "目標重量(g)", "number", editable=True),
+            _c("actual_weight_g", "実測重量(g)", "number", editable=True),
             _c("source", "ソース"),
             _c("todoist_task_id", "TodoistタスクID"),
             _c("updated_at", "更新日時", "datetime"),
@@ -182,6 +193,36 @@ def get_spec(table_key: str) -> TableSpec:
     if spec is None:
         raise UnknownTableError(table_key)
     return spec
+
+
+def csv_safe(value: Any) -> str:
+    """CSV インジェクション対策として先頭の数式記号を無害化する。
+
+    タスク名やメモは Discord の利用者が自由に入力できるため、
+    `=cmd|...` のような値をそのまま出すと表計算ソフトが数式として実行する。
+    """
+    if value is None:
+        return ""
+    text = str(value)
+    if text and text[0] in _CSV_FORMULA_PREFIXES:
+        return "'" + text
+    return text
+
+
+def rows_to_csv(spec: TableSpec, rows: list[dict[str, Any]]) -> str:
+    """行を CSV 文字列にする（BOM 付き UTF-8。Excel でそのまま開ける）。
+
+    出力するのは spec.columns のホワイトリスト列だけ。guild_id も
+    Todoist トークンのような機密列も TABLES に無いため、
+    ここを通る限り構造的に出力されない。
+    """
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow([column.label for column in spec.columns])
+    for row in rows:
+        writer.writerow([csv_safe(row.get(column.name))
+                         for column in spec.columns])
+    return CSV_BOM + buf.getvalue()
 
 
 class TableRepository(BaseRepository):
@@ -217,6 +258,23 @@ class TableRepository(BaseRepository):
             f" ORDER BY {spec.order_by} LIMIT ? OFFSET ?",
             (guild_id, limit, offset))
         return [dict(r) for r in rows]
+
+    async def list_all_rows(self, guild_id: int,
+                            table_key: str) -> list[dict[str, Any]]:
+        """指定テーブルの全行を返す（エクスポート用）。
+
+        list_rows は画面表示用に MAX_LIMIT の上限を持つため、
+        全件が必要なエクスポートではページングで読み切る。
+        """
+        out: list[dict[str, Any]] = []
+        offset = 0
+        while True:
+            chunk = await self.list_rows(guild_id, table_key,
+                                         limit=MAX_LIMIT, offset=offset)
+            out.extend(chunk)
+            if len(chunk) < MAX_LIMIT:
+                return out
+            offset += MAX_LIMIT
 
     async def get_row(self, guild_id: int, table_key: str,
                       row_id: Any) -> dict[str, Any] | None:

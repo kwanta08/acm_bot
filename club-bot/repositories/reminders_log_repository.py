@@ -32,6 +32,20 @@ class RemindersLogRepository(BaseRepository):
         )
         return cur.lastrowid
 
+    async def exists(self, guild_id: int, reminder_type: str,
+                     target_id: str) -> bool:
+        """同じ通知が既に記録されているか（二重送信の防止に使う）。
+
+        週次アラートは target_id に週番号（例 `milestone:2026-W33`）を
+        入れることで、同じ週に二度送らないようにする。
+        """
+        row = await self.db.fetchone(
+            "SELECT 1 AS hit FROM reminders_log"
+            " WHERE guild_id = ? AND reminder_type = ? AND target_id = ?"
+            " LIMIT 1",
+            (guild_id, reminder_type, target_id))
+        return row is not None
+
     async def list_recent(self, guild_id: int, limit: int = 10) -> list[dict[str, Any]]:
         """指定ギルドの直近ログを新しい順に返す。"""
         rows = await self.db.fetchall(

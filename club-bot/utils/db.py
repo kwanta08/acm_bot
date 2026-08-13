@@ -99,7 +99,11 @@ CREATE TABLE IF NOT EXISTS guilds (
     guild_id      INTEGER PRIMARY KEY CHECK (guild_id > 0),
     guild_name    TEXT NOT NULL,
     joined_at     TEXT NOT NULL,
-    setup_version INTEGER NOT NULL DEFAULT 2
+    setup_version INTEGER NOT NULL DEFAULT 2,
+    -- 退出日時と自動削除の予定日時（参加中はどちらも NULL）。
+    -- 退出しただけではデータを消さず、purge_after を過ぎたものだけを消す。
+    left_at       TEXT,
+    purge_after   TEXT
 );
 """,
     "settings": f"""
@@ -144,6 +148,11 @@ CREATE TABLE IF NOT EXISTS members (
     notes           TEXT,
     joined_at       TEXT NOT NULL,
     active_flag     INTEGER NOT NULL DEFAULT 1,
+    -- 在籍状態（active / alumni / inactive）。年度替わりの仕分けで使う。
+    -- 卒業しても行は消さない（過去の作業記録の担当者名が壊れるため）。
+    status          TEXT NOT NULL DEFAULT 'active',
+    -- 卒業した年度の名前（seasons.name）。在籍中は NULL
+    left_season     TEXT,
     UNIQUE (guild_id, user_id)
 );
 """,
@@ -355,6 +364,10 @@ CREATE TABLE IF NOT EXISTS progress_nodes (
     source          TEXT NOT NULL DEFAULT 'manual',
     todoist_task_id TEXT,
     weight          REAL NOT NULL DEFAULT 1,
+    -- 重量（グラム固定。単位設定は作らない）。NULL は未入力。
+    -- 人力飛行機は重量が競技成績に直結するため、進捗と同じ木で積み上げる。
+    target_weight_g REAL,
+    actual_weight_g REAL,
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
     UNIQUE (guild_id, node_id)
@@ -394,10 +407,50 @@ CREATE TABLE IF NOT EXISTS progress_spar_links (
     UNIQUE (guild_id, keta_name)
 );
 """,
+    # 大会からの逆算アラート用のマイルストーン（F4）。
+    #
+    # node_id は progress_nodes と同じく外部キーを張らない（同期・移行で
+    # 親より先に子が入る順序を許す既存方針に合わせる）。存在しないノードを
+    # 指す行は表示から除外する。
+    # due_date は 'YYYY-MM-DD'。大会日そのものはギルド別設定
+    # COMPETITION_DATE に持ち、既定値は持たない（大会も日程もサークルごとに違う）。
+    "progress_milestones": f"""
+CREATE TABLE IF NOT EXISTS progress_milestones (
+    milestone_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    {_GUILD_COL},
+    node_id      TEXT NOT NULL,
+    name         TEXT NOT NULL,
+    due_date     TEXT NOT NULL,
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    UNIQUE (guild_id, node_id, name)
+);
+""",
+    # 年度（世代）の境界（F5）。
+    #
+    # 全テーブルに season_id は張らない。既存の全テーブルへの列追加と
+    # 全クエリの改修は後方互換のリスクが大きすぎるうえ、各記録には
+    # created_at があるので年度での絞り込みは日付範囲で足りる。
+    # ここで持つのは「年度の境界」と members.status（在籍状態）だけ。
+    #
+    # 「現役の年度」は ended_at IS NULL の最新1件。年度名に既定値は持たない
+    # （「2026年度」も「第30代」もサークルごとに違う）。
+    "seasons": f"""
+CREATE TABLE IF NOT EXISTS seasons (
+    season_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+    {_GUILD_COL},
+    name       TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    ended_at   TEXT,
+    created_at TEXT NOT NULL,
+    UNIQUE (guild_id, name)
+);
+""",
 }
 
 # インデックス（guild_id を先頭に含む複合インデックス）
 INDEX_DDL = """
+CREATE INDEX IF NOT EXISTS idx_guilds_purge_after ON guilds(purge_after);
 CREATE INDEX IF NOT EXISTS idx_teams_guild ON teams(guild_id, active_flag);
 CREATE INDEX IF NOT EXISTS idx_members_guild ON members(guild_id, active_flag);
 CREATE INDEX IF NOT EXISTS idx_schedules_guild ON schedules(guild_id, closed_flag, deadline);
@@ -414,6 +467,9 @@ CREATE INDEX IF NOT EXISTS idx_skill_tags_guild ON skill_tags(guild_id, active_f
 CREATE INDEX IF NOT EXISTS idx_progress_nodes_guild_parent ON progress_nodes(guild_id, parent_id);
 CREATE INDEX IF NOT EXISTS idx_progress_nodes_guild_source ON progress_nodes(guild_id, source);
 CREATE INDEX IF NOT EXISTS idx_progress_todoist_links_guild ON progress_todoist_links(guild_id);
+CREATE INDEX IF NOT EXISTS idx_progress_milestones_guild_due ON progress_milestones(guild_id, due_date);
+CREATE INDEX IF NOT EXISTS idx_seasons_guild_ended ON seasons(guild_id, ended_at);
+CREATE INDEX IF NOT EXISTS idx_members_guild_status ON members(guild_id, status);
 CREATE INDEX IF NOT EXISTS idx_progress_spar_links_guild ON progress_spar_links(guild_id);
 """
 
@@ -497,7 +553,14 @@ POSTGRES_VIEW_DDL = "\n".join(
 #    Directus の初回セットアップが失敗して起動できない）
 # 10: progress_nodes / progress_todoist_links / progress_spar_links 追加
 #    （/progress の正本を Google Sheets から DB へ移行。migrations/009）
-SCHEMA_VERSION = 10
+# 11: guilds に left_at / purge_after を追加（サーバー退出後の猶予付き
+#    自動削除。退出しただけでは消さない。migrations/010）
+# 12: progress_nodes に target_weight_g / actual_weight_g を追加
+#    （機体重量を進捗と同じツリーで積み上げる。migrations/011）
+# 13: progress_milestones を追加（大会日からの逆算アラート。migrations/012）
+# 14: seasons を追加し、members に status / left_season を追加
+#    （年度替わり。既存メンバーはすべて active。migrations/013）
+SCHEMA_VERSION = 14
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
@@ -899,6 +962,18 @@ class Database:
         if version < 10:
             await self._migrate_v10_progress_tables()
 
+        if version < 11:
+            await self._migrate_v11_guild_lifecycle()
+
+        if version < 12:
+            await self._migrate_v12_progress_weight()
+
+        if version < 13:
+            await self._migrate_v13_progress_milestones()
+
+        if version < 14:
+            await self._migrate_v14_seasons()
+
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
 
@@ -1017,6 +1092,75 @@ class Database:
             await self._executescript(ddl_map[name])
         log.info("機体進捗テーブル（%s）を作成しました（v10）。",
                  ", ".join(self._PROGRESS_TABLES))
+
+    async def _migrate_v11_guild_lifecycle(self) -> None:
+        """
+        v11: guilds に left_at / purge_after を追加する（冪等）。
+
+        どちらも NULL 許容で追加するため既存行は壊れない。参加中のギルドは
+        NULL のままで、退出時に on_guild_remove が値を入れる。
+        既存の全ギルドは「参加中」として扱われる（勝手に削除予定にしない）。
+        """
+        cols = await self._table_columns("guilds")
+        for col in ("left_at", "purge_after"):
+            if col not in cols:
+                await self.execute(f"ALTER TABLE guilds ADD COLUMN {col} TEXT")
+                log.info("guilds テーブルに %s カラムを追加しました（v11）。", col)
+
+    async def _migrate_v12_progress_weight(self) -> None:
+        """
+        v12: progress_nodes に目標重量・実測重量を追加する（冪等）。
+
+        単位はグラム固定（列名の _g で明示する。単位設定は作らない）。
+        NULL 許容で追加するため既存ノードは壊れず、重量未入力として扱われる。
+
+        新規 DB は TABLE_DDL / TABLE_DDL_PG が作るので to_pg_ddl() の
+        REAL → DOUBLE PRECISION 変換が効くが、ALTER 文はそこを通らないため
+        ここでドライバ別に型を指定する（PostgreSQL の REAL は 4 バイトで
+        SQLite の REAL より精度が低い）。
+        """
+        col_type = "DOUBLE PRECISION" if self._is_pg else "REAL"
+        cols = await self._table_columns("progress_nodes")
+        for col in ("target_weight_g", "actual_weight_g"):
+            if col not in cols:
+                await self.execute(
+                    f"ALTER TABLE progress_nodes ADD COLUMN {col} {col_type}")
+                log.info("progress_nodes テーブルに %s カラムを追加しました（v12）。",
+                         col)
+
+    async def _migrate_v13_progress_milestones(self) -> None:
+        """
+        v13: progress_milestones テーブルを追加する（冪等）。
+
+        新規 DB では init_schema / _connect_pg が CREATE TABLE IF NOT EXISTS で
+        作成済みだが、既存 DB でも確実に作られるようここでも実行する
+        （v10 と同じ方式）。既存データには触れないため後方互換。
+        """
+        ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
+        await self._executescript(ddl_map["progress_milestones"])
+        log.info("progress_milestones テーブルを作成しました（v13）。")
+
+    async def _migrate_v14_seasons(self) -> None:
+        """
+        v14: seasons テーブルと members の在籍状態を追加する（冪等）。
+
+        **既存メンバーはすべて status='active' になる。** NOT NULL DEFAULT で
+        列を足すため既存行にはデフォルト値が入り、誰も勝手に卒業扱いには
+        ならない（卒業の仕分けは /season rollover を実行したときだけ）。
+        left_season は NULL 許容。
+        """
+        ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
+        await self._executescript(ddl_map["seasons"])
+
+        cols = await self._table_columns("members")
+        if "status" not in cols:
+            await self.execute(
+                "ALTER TABLE members ADD COLUMN status TEXT NOT NULL"
+                " DEFAULT 'active'")
+            log.info("members テーブルに status カラムを追加しました（v14）。")
+        if "left_season" not in cols:
+            await self.execute("ALTER TABLE members ADD COLUMN left_season TEXT")
+            log.info("members テーブルに left_season カラムを追加しました（v14）。")
 
     async def _migrate_v8_members_surrogate_pk(self) -> None:
         """
