@@ -2,7 +2,10 @@
 # 鳥人間サークル運営 Discord Bot の常駐サービス定義（さくらのVPS / Ubuntu）
 #
 # このファイル内のパス・ユーザー名は「作業用ユーザーを ubuntu、
-# 配置先を /home/ubuntu/club-bot」とした場合の例です。
+# リポジトリのクローン先を /home/ubuntu/club-bot」とした場合の例です。
+# その場合、コード本体は 1 階層下の /home/ubuntu/club-bot/club-bot、
+# venv はさらにその下の .../club-bot/venv になります
+# （.github/workflows/deploy.yml も同じ前提でデプロイします）。
 # 別のユーザー名・パスにした場合は User / WorkingDirectory /
 # ExecStart / EnvironmentFile / Standard* をすべて書き換えてください。
 [Unit]
@@ -13,8 +16,8 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=ubuntu
-WorkingDirectory=/home/ubuntu/club-bot/app
-ExecStart=/home/ubuntu/club-bot/venv/bin/python bot.py
+WorkingDirectory=/home/ubuntu/club-bot/club-bot
+ExecStart=/home/ubuntu/club-bot/club-bot/venv/bin/python bot.py
 Restart=always
 RestartSec=10
 # .env に DISCORD_TOKEN / ENCRYPTION_KEY / TZ / DB_PATH を設定する。

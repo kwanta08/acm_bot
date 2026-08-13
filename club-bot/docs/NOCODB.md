@@ -35,7 +35,7 @@ Discord ユーザー → club-bot ─┐
 1. 環境変数ファイルを作る（秘密情報。**絶対にコミットしない**。
    `.gitignore` の `.env` パターンで除外される）。
    ```bash
-   $ cd ~/club-bot/app/deploy
+   $ cd ~/club-bot/club-bot/deploy
    $ cp .env.example .env
    $ nano .env
    ```

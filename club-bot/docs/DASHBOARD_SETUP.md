@@ -109,8 +109,8 @@ http://127.0.0.1:8000/auth/callback
 VPS にログインし、bot を置いたディレクトリで実行します。
 
 ```bash
-cd ~/club-bot/app
-~/club-bot/venv/bin/pip install -r dashboard/requirements.txt
+cd ~/club-bot/club-bot
+~/club-bot/club-bot/venv/bin/pip install -r dashboard/requirements.txt
 ```
 
 入るのは `fastapi` / `uvicorn` / `itsdangerous` / `httpx` の4つです
@@ -119,7 +119,7 @@ cd ~/club-bot/app
 確認:
 
 ```bash
-~/club-bot/venv/bin/python -c "import fastapi, uvicorn; print('ok')"
+~/club-bot/club-bot/venv/bin/python -c "import fastapi, uvicorn; print('ok')"
 ```
 
 ---
@@ -131,7 +131,7 @@ cd ~/club-bot/app
 セッション Cookie の署名に使う鍵です。推測不能な値を生成します。
 
 ```bash
-~/club-bot/venv/bin/python -c "import secrets; print(secrets.token_urlsafe(48))"
+~/club-bot/club-bot/venv/bin/python -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
 出力された文字列を控えてください。
@@ -205,9 +205,9 @@ chmod 600 ~/club-bot/dashboard.env
 まず HTTPS を挟まずに、アプリ単体が動くか確かめます。
 
 ```bash
-cd ~/club-bot/app
+cd ~/club-bot/club-bot
 set -a; source ~/club-bot/dashboard.env; set +a
-~/club-bot/venv/bin/uvicorn dashboard.main:app --host 127.0.0.1 --port 8000
+~/club-bot/club-bot/venv/bin/uvicorn dashboard.main:app --host 127.0.0.1 --port 8000
 ```
 
 別のターミナル（または `Ctrl+C` で止めずに別セッション）で確認します。
@@ -228,6 +228,13 @@ curl -s http://127.0.0.1:8000/healthz
 
 確認できたら `Ctrl+C` で止めます。
 
+> 手動起動では `dashboard.env` は自動で読まれません（読み込むのは systemd の
+> `EnvironmentFile` です）。上のように `source` せずに起動すると
+> 「ダッシュボードの設定が不足しています」と出ますが、常駐運用には影響しません。
+> また常駐サービスが動いている間は 8000 番が塞がっているため、手動起動すると
+> `address already in use` になります。確認したいだけなら
+> `sudo systemctl stop club-bot-dashboard` してから起動してください。
+
 ---
 
 ## 5.【STEP4】ドメインを VPS へ向ける
@@ -236,7 +243,19 @@ curl -s http://127.0.0.1:8000/healthz
 
 | 種別 | 名前 | 値 |
 |---|---|---|
-| A | `dashboard`（または `@`） | VPS の IP アドレス |
+| A | `dashboard`（サブドメイン） | VPS の IP アドレス |
+
+**サブドメインで公開してください。** `example.com/dashboard` のような
+サブパス配信には対応していません（アプリはルート直下で `/auth/callback`・
+`/static/...` を配信します）。既にサイトを運用しているドメインでも、
+`dashboard.` のサブドメインを1つ足すだけで済み、既存サイトの DNS は
+そのままで構いません。
+
+VPS の IP は次で確認できます。
+
+```bash
+curl -s https://ifconfig.me; echo
+```
 
 反映を確認します（数分〜数時間かかることがあります）。
 
@@ -278,10 +297,14 @@ sudo apt install caddy
 リポジトリに用意してある設定をコピーし、ドメインを書き換えます。
 
 ```bash
-sudo cp ~/club-bot/app/deploy/Caddyfile /etc/caddy/Caddyfile
+sudo cp ~/club-bot/club-bot/deploy/Caddyfile /etc/caddy/Caddyfile
 sudo sed -i 's/dashboard.example.com/実際のドメイン/' /etc/caddy/Caddyfile
-sudo mkdir -p /var/log/caddy && sudo chown caddy:caddy /var/log/caddy
 ```
+
+> アクセスログの出力先は `/var/lib/caddy/dashboard.log` にしてあります。
+> 公式パッケージの `caddy.service` は sandbox が有効で `/var/log/caddy` へ
+> 書けないため（`chown` しても解消しません）、そこを指定すると
+> `permission denied` で **Caddy 自体が起動しなくなります**。
 
 証明書の期限切れ通知を受け取りたい場合は、`/etc/caddy/Caddyfile` 冒頭の
 `# email admin@example.com` のコメントを外してアドレスを設定します。
@@ -306,7 +329,7 @@ sudo systemctl status caddy --no-pager
 ## 7.【STEP6】systemd で常駐させる
 
 ```bash
-sudo cp ~/club-bot/app/deploy/club-bot-dashboard.service /etc/systemd/system/
+sudo cp ~/club-bot/club-bot/deploy/club-bot-dashboard.service /etc/systemd/system/
 sudo nano /etc/systemd/system/club-bot-dashboard.service
 ```
 
@@ -315,7 +338,9 @@ sudo nano /etc/systemd/system/club-bot-dashboard.service
 （既定は作業ユーザー `ubuntu`、配置先 `/home/ubuntu/club-bot`）。
 
 ```bash
-mkdir -p ~/club-bot/logs
+# ユニットの ReadWritePaths が指すディレクトリ。**先に作っておくこと**
+# （無いと status=226/NAMESPACE で起動できず 10 秒ごとに再起動を繰り返す）
+mkdir -p ~/club-bot/logs ~/club-bot/data
 sudo systemctl daemon-reload
 sudo systemctl enable --now club-bot-dashboard
 sudo systemctl status club-bot-dashboard --no-pager
@@ -356,7 +381,7 @@ journalctl -u club-bot-dashboard -f
 systemd を使わず、Caddy ごとコンテナで動かす構成も用意しています。
 
 ```bash
-cd ~/club-bot/app/deploy
+cd ~/club-bot/club-bot/deploy
 cp ~/club-bot/dashboard.env ./dashboard.env      # 3-2 で作ったもの
 echo "DASHBOARD_DOMAIN=dashboard.example.com" >> .env
 docker compose -f docker-compose.dashboard.yml up -d --build
@@ -404,8 +429,8 @@ venv/bin/uvicorn dashboard.main:app --reload --port 8000
 
 ```bash
 # コードを更新したあと
-cd ~/club-bot/app
-~/club-bot/venv/bin/pip install -r dashboard/requirements.txt   # 依存が増えたとき
+cd ~/club-bot/club-bot
+~/club-bot/club-bot/venv/bin/pip install -r dashboard/requirements.txt   # 依存が増えたとき
 sudo systemctl restart club-bot-dashboard
 
 # 一時停止 / 再開
@@ -454,6 +479,12 @@ sudo systemctl daemon-reload
 | 症状 | 原因と対処 |
 |---|---|
 | ブラウザで 502 Bad Gateway | uvicorn が落ちています。`systemctl status club-bot-dashboard` と `journalctl -u club-bot-dashboard -e` を確認 |
+| サービスが `226/NAMESPACE` で再起動を繰り返す | `ReadWritePaths` のディレクトリが無い。`mkdir -p ~/club-bot/logs ~/club-bot/data` |
+| サービスが `203/EXEC` で起動しない | `ExecStart` のパスが実際の配置と違う。`systemctl show club-bot-dashboard -p ExecStart -p WorkingDirectory` で確認し、`sudo systemctl edit club-bot-dashboard` で上書きする |
+| 手動起動で `address already in use` | 常駐サービスが既に 8000 を使っています。`sudo ss -lptn 'sport = :8000'` で確認。通常は手動起動不要 |
+| `caddy` が `permission denied` で起動しない | Caddyfile のログ出力先が `/var/log/caddy` になっている。`/var/lib/caddy` へ変えるか、`caddy.service` に `LogsDirectory=caddy` と `ReadWritePaths=/var/log/caddy` を足す |
+| 証明書取得が `NXDOMAIN` で失敗する | DNS の A レコードが未作成。`dig +short <ドメイン>` が VPS の IP を返すか確認。作成後は Caddy が自動で再試行します |
+| ブラウザに Apache 風の `Forbidden` が出る | リクエストが VPS に届かず、別サーバー（既存サイト等）が返しています。`dig +short <ドメイン>` と VPS の IP（`curl -s https://ifconfig.me`）を突き合わせてください |
 | 証明書が取得できない | 80/443 が開いているか、DNS が VPS を向いているかを確認。`journalctl -u caddy -e` にエラーが出ます |
 | `/healthz` が `degraded` | DB に接続できていません。`DATABASE_URL` と PostgreSQL の稼働を確認 |
 | 表示が重い・タイムアウトする | `/healthz` の `pool.in_use` が `max_size` に張り付いていれば `DASHBOARD_DB_POOL_MAX_SIZE` を上げてください |

@@ -5,10 +5,19 @@
 # Discord 接続へ波及しないようにするため（設計方針 2.2）。
 #
 # このファイル内のパス・ユーザー名は「作業用ユーザーを ubuntu、
-# 配置先を /home/ubuntu/club-bot」とした場合の例です。
+# リポジトリのクローン先を /home/ubuntu/club-bot」とした場合の例です。
+# その場合、コード本体は 1 階層下の /home/ubuntu/club-bot/club-bot、
+# venv はさらにその下の .../club-bot/venv になります
+# （.github/workflows/deploy.yml も同じ前提でデプロイします）。
+# 手動で app/ 等に配置している場合は WorkingDirectory / ExecStart を実際の
+# パスへ書き換えてください。
 #
 # 導入:
-#   /home/ubuntu/club-bot/venv/bin/pip install -r app/dashboard/requirements.txt
+#   cd /home/ubuntu/club-bot/club-bot
+#   venv/bin/pip install -r dashboard/requirements.txt
+#   # ReadWritePaths のディレクトリは**事前に作る**。無いと systemd が
+#   # 名前空間を作れず status=226/NAMESPACE で無限再起動になる。
+#   mkdir -p /home/ubuntu/club-bot/logs /home/ubuntu/club-bot/data
 #   sudo cp deploy/club-bot-dashboard.service /etc/systemd/system/
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now club-bot-dashboard
@@ -22,10 +31,10 @@ After=docker.service
 [Service]
 Type=simple
 User=ubuntu
-WorkingDirectory=/home/ubuntu/club-bot/app
+WorkingDirectory=/home/ubuntu/club-bot/club-bot
 # 127.0.0.1 にのみバインドする（公開は Caddy 経由。直接公開しない）。
 # --proxy-headers で Caddy の X-Forwarded-* を解釈する。
-ExecStart=/home/ubuntu/club-bot/venv/bin/uvicorn dashboard.main:app \
+ExecStart=/home/ubuntu/club-bot/club-bot/venv/bin/uvicorn dashboard.main:app \
     --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1
 Restart=always
 RestartSec=10
@@ -41,6 +50,10 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
+# 下の 2 つのディレクトリは**サービス開始前に実在している必要がある**。
+# 無いと "Failed to set up mount namespacing: ... No such file or directory"
+# （status=226/NAMESPACE）で起動できず、Restart=always と相まって
+# 10 秒ごとに再起動を繰り返す。
 ReadWritePaths=/home/ubuntu/club-bot/logs /home/ubuntu/club-bot/data
 
 [Install]
