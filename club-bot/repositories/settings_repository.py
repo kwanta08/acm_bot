@@ -4,6 +4,7 @@
 データベースから設定を読み書きするためのリポジトリ。
 設定は settings テーブルに (guild_id, setting_key) 単位で保存される。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -86,8 +87,9 @@ class SettingsRepository(BaseRepository):
         """全ての設定を取得する"""
         return await self.db.get_all_settings(guild_id)
 
-    async def set_from_env(self, guild_id: int, key: str, env_value: str | None,
-                           default: str | None = None) -> None:
+    async def set_from_env(
+        self, guild_id: int, key: str, env_value: str | None, default: str | None = None
+    ) -> None:
         """
         環境変数から設定を読み込む（環境変数があれば優先）
         """

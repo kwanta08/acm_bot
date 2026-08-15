@@ -15,6 +15,7 @@ progress_nodes テーブル（ギルドごとに独立）。Google Sheets は不
 - /progress sync       : Todoist 同期＋桁巻き反映＋再集計を即時実行（管理者）
 - 定期同期             : 20分ごとに全ギルドを同期。エラーは #bot-log へ通知
 """
+
 from __future__ import annotations
 
 import uuid
@@ -99,8 +100,7 @@ def breadcrumb(tree: ProgressTree, node_id: str | None) -> str:
     while current is not None and current.node_id not in seen:
         seen.add(current.node_id)
         names.append(current.name or current.node_id)
-        current = (tree.by_id.get(current.parent_id)
-                   if current.parent_id else None)
+        current = tree.by_id.get(current.parent_id) if current.parent_id else None
     return " > ".join(reversed(names))
 
 
@@ -183,9 +183,9 @@ def _pace_text(status: MilestoneStatus) -> str:
     return f"{need} / 実績 {status.actual_per_day * 100:.1f}%/日"
 
 
-def build_countdown_embed(competition_date: str | None,
-                          statuses: list[MilestoneStatus],
-                          today) -> discord.Embed:
+def build_countdown_embed(
+    competition_date: str | None, statuses: list[MilestoneStatus], today
+) -> discord.Embed:
     """/countdown の Embed。大会までの残り日数とマイルストーンの判定。"""
     left = days_until_competition(competition_date, today)
     if left is None:
@@ -202,7 +202,8 @@ def build_countdown_embed(competition_date: str | None,
             "🏁 大会カウントダウン",
             f"{head}\n\nマイルストーンが登録されていません。\n"
             "`/milestone add` で節目の期限を登録すると、"
-            "必要なペースと実績を突き合わせて遅延をお知らせします。")
+            "必要なペースと実績を突き合わせて遅延をお知らせします。",
+        )
 
     behind = [s for s in statuses if s.is_behind]
     unknown = [s for s in statuses if s.verdict == VERDICT_UNKNOWN]
@@ -212,9 +213,13 @@ def build_countdown_embed(competition_date: str | None,
 
     embed = info_embed("🏁 大会カウントダウン", summary)
     for status in statuses[:25]:
-        when = (f"期限まで {status.days_left} 日" if status.days_left > 0
-                else "本日が期限" if status.days_left == 0
-                else f"{-status.days_left} 日超過")
+        when = (
+            f"期限まで {status.days_left} 日"
+            if status.days_left > 0
+            else "本日が期限"
+            if status.days_left == 0
+            else f"{-status.days_left} 日超過"
+        )
         lines = [f"{when} / 進捗 {status.progress * 100:.0f}%"]
         pace = _pace_text(status)
         if pace:
@@ -222,17 +227,16 @@ def build_countdown_embed(competition_date: str | None,
         if status.verdict == VERDICT_UNKNOWN and status.reason:
             lines.append(f"※ {status.reason}ため判定できません")
         embed.add_field(
-            name=f"{_VERDICT_MARK[status.verdict]}　"
-                 f"{status.node_name}: {status.name}",
+            name=f"{_VERDICT_MARK[status.verdict]}　{status.node_name}: {status.name}",
             value="\n".join(lines),
-            inline=False)
+            inline=False,
+        )
     if len(statuses) > 25:
         embed.description += f"\n…ほか {len(statuses) - 25} 件"
     return embed
 
 
-def build_level_embed(tree: ProgressTree,
-                      node_id: str | None) -> discord.Embed:
+def build_level_embed(tree: ProgressTree, node_id: str | None) -> discord.Embed:
     """現在の階層（子ノード一覧 or 葉の詳細）の Embed を組み立てる。"""
     title = f"📊 {breadcrumb(tree, node_id)}"
     children = child_nodes(tree, node_id)
@@ -240,17 +244,16 @@ def build_level_embed(tree: ProgressTree,
 
     if node is not None and not children:
         # 葉ノード: 詳細表示
-        embed = info_embed(
-            title, _with_weight(f"進捗率: **{percent(node)}**", tree, node_id))
+        embed = info_embed(title, _with_weight(f"進捗率: **{percent(node)}**", tree, node_id))
         embed.add_field(name="担当者", value=node.assignee or "—", inline=True)
         embed.add_field(name="状態", value=node.status or "—", inline=True)
-        embed.add_field(name="ソース", value=source_label(node.source),
-                        inline=True)
+        embed.add_field(name="ソース", value=source_label(node.source), inline=True)
         if node.todoist_task_id:
             embed.add_field(
                 name="Todoist",
                 value=f"[タスクを開く]({_todoist_task_url(node.todoist_task_id)})",
-                inline=False)
+                inline=False,
+            )
         embed.set_footer(text=f"ID: {node.node_id}")
         return embed
 
@@ -267,26 +270,23 @@ def build_level_embed(tree: ProgressTree,
         embed.add_field(
             name=f"{child.name or child.node_id} — {percent(child)}",
             value=" / ".join(detail) or "\u200b",  # 空はゼロ幅スペース
-            inline=False)
+            inline=False,
+        )
     if len(children) > 25:
         embed.set_footer(text=f"他 {len(children) - 25} 件")
-    block = progress_bar.render_block(chart_items(tree, node_id),
-                                      width=BAR_WIDTH)
+    block = progress_bar.render_block(chart_items(tree, node_id), width=BAR_WIDTH)
     if block:
         head = embed.description or ""
         embed.description = f"{head}\n{block}".strip()
     return embed
 
 
-def chart_items(tree: ProgressTree,
-                node_id: str | None) -> list[tuple[str, float]]:
+def chart_items(tree: ProgressTree, node_id: str | None) -> list[tuple[str, float]]:
     """グラフ描画用の (名前, 進捗率) 一覧を返す。"""
-    return [(c.name or c.node_id, c.aggregated or 0.0)
-            for c in child_nodes(tree, node_id)[:25]]
+    return [(c.name or c.node_id, c.aggregated or 0.0) for c in child_nodes(tree, node_id)[:25]]
 
 
-def node_choices(tree: ProgressTree, current: str,
-                 limit: int = 25) -> list[tuple[str, str]]:
+def node_choices(tree: ProgressTree, current: str, limit: int = 25) -> list[tuple[str, str]]:
     """オートコンプリート用の (表示名, node_id) 一覧を返す。
 
     ツリーの行きがけ順（機体 → 配下のパーツ → …）で、階層を全角スペースで
@@ -313,12 +313,10 @@ def node_choices(tree: ProgressTree, current: str,
 def unmapped_projects(projects: list, links: list[dict]) -> list:
     """まだ紐付けられていない Todoist プロジェクトの一覧を返す。"""
     mapped_names = {link["project_name"] for link in links}
-    return [p for p in projects
-            if getattr(p, "name", "") not in mapped_names]
+    return [p for p in projects if getattr(p, "name", "") not in mapped_names]
 
 
-def anchor_candidates(tree: ProgressTree,
-                      max_depth: int = 1) -> list[ProgressNode]:
+def anchor_candidates(tree: ProgressTree, max_depth: int = 1) -> list[ProgressNode]:
     """紐付け先候補ノード（深さ max_depth 以下）を表示順で返す。
 
     機体（深さ0）とパーツ（深さ1）を候補にする。表示順はツリーの
@@ -364,13 +362,15 @@ def due_items(tasks: list, until, category: str) -> list[dict]:
             continue
         raw_pr = getattr(t, "priority", None)
         pr_int = raw_pr.value if hasattr(raw_pr, "value") else (raw_pr or 1)
-        items.append({
-            "due_date": due_date,
-            "title": t.content,
-            "priority": pr_int,
-            "url": _todoist_task_url(t.id),
-            "category": category,
-        })
+        items.append(
+            {
+                "due_date": due_date,
+                "title": t.content,
+                "priority": pr_int,
+                "url": _todoist_task_url(t.id),
+                "category": category,
+            }
+        )
     return items
 
 
@@ -385,8 +385,9 @@ class ProgressView(discord.ui.View):
     View 内に保持する（🔄 ボタンで DB から読み直せる）。
     """
 
-    def __init__(self, cog: Progress, tree: ProgressTree,
-                 node_id: str | None, owner_id: int, guild_id: int):
+    def __init__(
+        self, cog: Progress, tree: ProgressTree, node_id: str | None, owner_id: int, guild_id: int
+    ):
         super().__init__(timeout=600)
         self.cog = cog
         self.tree = tree
@@ -407,19 +408,22 @@ class ProgressView(discord.ui.View):
                 )
                 for c in children[:25]
             ]
-            select = discord.ui.Select(
-                placeholder="ノードを選択して詳細を表示", options=options)
+            select = discord.ui.Select(placeholder="ノードを選択して詳細を表示", options=options)
             select.callback = self._on_select
             self.add_item(select)
 
         back = discord.ui.Button(
-            label="戻る", emoji="⬆️", style=discord.ButtonStyle.secondary,
-            disabled=self.node_id is None)
+            label="戻る",
+            emoji="⬆️",
+            style=discord.ButtonStyle.secondary,
+            disabled=self.node_id is None,
+        )
         back.callback = self._on_back
         self.add_item(back)
 
         reload_btn = discord.ui.Button(
-            label="再読込", emoji="🔄", style=discord.ButtonStyle.secondary)
+            label="再読込", emoji="🔄", style=discord.ButtonStyle.secondary
+        )
         reload_btn.callback = self._on_reload
         self.add_item(reload_btn)
 
@@ -427,7 +431,9 @@ class ProgressView(discord.ui.View):
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message(
                 "この表示はコマンドを実行した本人のみ操作できます。"
-                "`/progress view` で自分の表示を開いてください。", ephemeral=True)
+                "`/progress view` で自分の表示を開いてください。",
+                ephemeral=True,
+            )
             return False
         return True
 
@@ -451,27 +457,23 @@ class ProgressView(discord.ui.View):
         try:
             self.tree = await self.cog.load_tree(self.guild_id)
         except Exception as e:  # noqa: BLE001
-            log.warning("進捗ツリー再読込失敗 (guild=%s): %s",
-                        self.guild_id, type(e).__name__)
+            log.warning("進捗ツリー再読込失敗 (guild=%s): %s", self.guild_id, type(e).__name__)
             await interaction.followup.send(
-                embed=error_embed("進捗データの再読込に失敗しました。"),
-                ephemeral=True)
+                embed=error_embed("進捗データの再読込に失敗しました。"), ephemeral=True
+            )
             return
         if self.node_id and self.node_id not in self.tree.by_id:
             self.node_id = None  # 再読込でノードが消えていたらルートへ
         await self._render(interaction, deferred=True)
 
-    async def _render(self, interaction: discord.Interaction,
-                      deferred: bool = False) -> None:
+    async def _render(self, interaction: discord.Interaction, deferred: bool = False) -> None:
         self._rebuild_items()
         embed = build_level_embed(self.tree, self.node_id)
         # 進捗バーは Embed 内のテキスト。画像の生成・添付は行わない
         if deferred:
-            await interaction.edit_original_response(
-                embed=embed, attachments=[], view=self)
+            await interaction.edit_original_response(embed=embed, attachments=[], view=self)
         else:
-            await interaction.response.edit_message(
-                embed=embed, attachments=[], view=self)
+            await interaction.response.edit_message(embed=embed, attachments=[], view=self)
 
     async def on_timeout(self) -> None:
         for item in self.children:
@@ -492,13 +494,14 @@ class ProjectSetupWizard(discord.ui.View):
 
     NEW_PART = "__new_part__"
 
-    def __init__(self, cog: Progress, guild_id: int, owner_id: int,
-                 projects: list, tree: ProgressTree):
+    def __init__(
+        self, cog: Progress, guild_id: int, owner_id: int, projects: list, tree: ProgressTree
+    ):
         super().__init__(timeout=600)
         self.cog = cog
         self.guild_id = guild_id
         self.owner_id = owner_id
-        self.projects = projects          # 未登録プロジェクトのみ
+        self.projects = projects  # 未登録プロジェクトのみ
         self.tree = tree
         # 選択状態
         self.project_id: str | None = None
@@ -513,50 +516,56 @@ class ProjectSetupWizard(discord.ui.View):
         self.clear_items()
         if self.step == "project":
             options = [
-                discord.SelectOption(
-                    label=str(getattr(p, "name", p.id))[:100],
-                    value=str(p.id))
+                discord.SelectOption(label=str(getattr(p, "name", p.id))[:100], value=str(p.id))
                 for p in self.projects[:25]
             ]
             select = discord.ui.Select(
-                placeholder="紐付ける Todoist プロジェクトを選択",
-                options=options)
+                placeholder="紐付ける Todoist プロジェクトを選択", options=options
+            )
             select.callback = self._on_project
             self.add_item(select)
         elif self.step == "anchor":
-            options = [discord.SelectOption(
-                label="➕ 新規パーツとして追加", value=self.NEW_PART,
-                description="プロジェクト名のパーツを機体の下に作成")]
+            options = [
+                discord.SelectOption(
+                    label="➕ 新規パーツとして追加",
+                    value=self.NEW_PART,
+                    description="プロジェクト名のパーツを機体の下に作成",
+                )
+            ]
             for node in anchor_candidates(self.tree)[:24]:
                 indent = "└ " if (node.depth or 0) > 0 else ""
-                options.append(discord.SelectOption(
-                    label=f"{indent}{node.name or node.node_id}"[:100],
-                    value=node.node_id,
-                    description=f"ID: {node.node_id}"[:100]))
+                options.append(
+                    discord.SelectOption(
+                        label=f"{indent}{node.name or node.node_id}"[:100],
+                        value=node.node_id,
+                        description=f"ID: {node.node_id}"[:100],
+                    )
+                )
             select = discord.ui.Select(
-                placeholder="紐付け先ノード（機体 or パーツ）を選択",
-                options=options)
+                placeholder="紐付け先ノード（機体 or パーツ）を選択", options=options
+            )
             select.callback = self._on_anchor
             self.add_item(select)
         elif self.step == "root":
             options = [
-                discord.SelectOption(
-                    label=(r.name or r.node_id)[:100], value=r.node_id)
+                discord.SelectOption(label=(r.name or r.node_id)[:100], value=r.node_id)
                 for r in self.tree.roots[:25]
             ]
             select = discord.ui.Select(
-                placeholder="新規パーツを追加する機体を選択", options=options)
+                placeholder="新規パーツを追加する機体を選択", options=options
+            )
             select.callback = self._on_root
             self.add_item(select)
         elif self.step == "notify":
             channel_select = discord.ui.ChannelSelect(
                 placeholder="①このプロジェクト専用の通知チャンネルを選択",
-                channel_types=[discord.ChannelType.text])
+                channel_types=[discord.ChannelType.text],
+            )
             channel_select.callback = self._on_channel
             self.add_item(channel_select)
             common = discord.ui.Button(
-                label="②共通の通知チャンネルにまとめる",
-                style=discord.ButtonStyle.primary)
+                label="②共通の通知チャンネルにまとめる", style=discord.ButtonStyle.primary
+            )
             common.callback = self._on_common
             self.add_item(common)
 
@@ -564,8 +573,8 @@ class ProjectSetupWizard(discord.ui.View):
     async def _check_owner(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message(
-                "このウィザードはコマンドを実行した本人のみ操作できます。",
-                ephemeral=True)
+                "このウィザードはコマンドを実行した本人のみ操作できます。", ephemeral=True
+            )
             return False
         return True
 
@@ -574,17 +583,18 @@ class ProjectSetupWizard(discord.ui.View):
             return
         self.project_id = interaction.data["values"][0]
         self.project_name = next(
-            (str(getattr(p, "name", ""))
-             for p in self.projects if str(p.id) == self.project_id),
-            self.project_id)
+            (str(getattr(p, "name", "")) for p in self.projects if str(p.id) == self.project_id),
+            self.project_id,
+        )
         self.step = "anchor"
         self._build()
         await interaction.response.edit_message(
             embed=info_embed(
                 "紐付け先の選択",
-                f"プロジェクト「{self.project_name}」のタスクを"
-                "どのノードの下にぶら下げますか？"),
-            view=self)
+                f"プロジェクト「{self.project_name}」のタスクをどのノードの下にぶら下げますか？",
+            ),
+            view=self,
+        )
 
     async def _on_anchor(self, interaction: discord.Interaction):
         if not await self._check_owner(interaction):
@@ -602,8 +612,7 @@ class ProjectSetupWizard(discord.ui.View):
             self.anchor_id = value
             self.step = "notify"
         self._build()
-        await interaction.response.edit_message(
-            embed=self._step_embed(), view=self)
+        await interaction.response.edit_message(embed=self._step_embed(), view=self)
 
     async def _on_root(self, interaction: discord.Interaction):
         if not await self._check_owner(interaction):
@@ -612,20 +621,19 @@ class ProjectSetupWizard(discord.ui.View):
         self.anchor_id = new_part_node_id(self.project_id)
         self.step = "notify"
         self._build()
-        await interaction.response.edit_message(
-            embed=self._step_embed(), view=self)
+        await interaction.response.edit_message(embed=self._step_embed(), view=self)
 
     def _step_embed(self) -> discord.Embed:
         if self.step == "root":
-            return info_embed("機体の選択",
-                              "新規パーツをどの機体の下に追加しますか？")
+            return info_embed("機体の選択", "新規パーツをどの機体の下に追加しますか？")
         return info_embed(
             "通知先の選択",
             f"プロジェクト「{self.project_name}」のタスク通知を"
             "どこへ送りますか？\n"
             "① 専用チャンネル: 下のメニューから選択\n"
             "② 共通チャンネル: ボタンを押す（このサーバーの既定の"
-            "通知チャンネルへ送られます）")
+            "通知チャンネルへ送られます）",
+        )
 
     async def _on_channel(self, interaction: discord.Interaction):
         if not await self._check_owner(interaction):
@@ -639,42 +647,50 @@ class ProjectSetupWizard(discord.ui.View):
         await self._finish(interaction, "")
 
     # ---------- 完了処理 ----------
-    async def _finish(self, interaction: discord.Interaction,
-                      notify_channel_id: str) -> None:
+    async def _finish(self, interaction: discord.Interaction, notify_channel_id: str) -> None:
         await interaction.response.defer()
         repo = self.cog.repo
         now_text = progress_sync_service._now_text()
         try:
             if self.new_part_root_id is not None:
                 await repo.upsert_node(
-                    self.guild_id, self.anchor_id,
+                    self.guild_id,
+                    self.anchor_id,
                     parent_id=self.new_part_root_id,
                     name=self.project_name or self.anchor_id,
-                    now_text=now_text)
+                    now_text=now_text,
+                )
             await repo.upsert_todoist_link(
-                self.guild_id, self.project_name, self.anchor_id, now_text,
+                self.guild_id,
+                self.project_name,
+                self.anchor_id,
+                now_text,
                 notify_channel_id=notify_channel_id,
-                created_by=str(interaction.user.id))
+                created_by=str(interaction.user.id),
+            )
         except Exception as e:  # noqa: BLE001  (DB エラー)
-            log.warning("Todoist 紐付けの登録失敗 (guild=%s): %s",
-                        self.guild_id, type(e).__name__)
+            log.warning("Todoist 紐付けの登録失敗 (guild=%s): %s", self.guild_id, type(e).__name__)
             await interaction.edit_original_response(
-                embed=error_embed("登録に失敗しました。"
-                                  "時間をおいて再試行してください。"),
-                view=None)
+                embed=error_embed("登録に失敗しました。時間をおいて再試行してください。"), view=None
+            )
             return
 
-        notify_disp = (f"<#{notify_channel_id}>" if notify_channel_id
-                       else "共通チャンネル（このサーバーの既定）")
-        desc = (f"プロジェクト: {self.project_name}\n"
-                f"紐付け先ノード: `{self.anchor_id}`"
-                + ("（新規パーツとして追加）" if self.new_part_root_id else "")
-                + f"\n通知先: {notify_disp}\n\n"
-                f"{SYNC_INTERVAL_MINUTES} 分ごとの自動同期でタスクが"
-                "取り込まれます（`/progress sync` で即時実行）。")
+        notify_disp = (
+            f"<#{notify_channel_id}>"
+            if notify_channel_id
+            else "共通チャンネル（このサーバーの既定）"
+        )
+        desc = (
+            f"プロジェクト: {self.project_name}\n"
+            f"紐付け先ノード: `{self.anchor_id}`"
+            + ("（新規パーツとして追加）" if self.new_part_root_id else "")
+            + f"\n通知先: {notify_disp}\n\n"
+            f"{SYNC_INTERVAL_MINUTES} 分ごとの自動同期でタスクが"
+            "取り込まれます（`/progress sync` で即時実行）。"
+        )
         await interaction.edit_original_response(
-            embed=success_embed("プロジェクトを登録しました", desc),
-            view=None)
+            embed=success_embed("プロジェクトを登録しました", desc), view=None
+        )
         self.stop()
 
     async def on_timeout(self) -> None:
@@ -688,8 +704,7 @@ class ProjectSetupWizard(discord.ui.View):
 class Progress(commands.Cog):
     """機体進捗管理コグ（DB 正本）。"""
 
-    group = app_commands.Group(
-        name="progress", description="機体進捗管理")
+    group = app_commands.Group(name="progress", description="機体進捗管理")
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -715,41 +730,47 @@ class Progress(commands.Cog):
 
     async def _run_sync(self, guild_id: int):
         svc = await self.bot.todoist_manager.for_guild(guild_id)
-        return await progress_sync_service.sync_guild_db(
-            self.db, guild_id, svc)
+        return await progress_sync_service.sync_guild_db(self.db, guild_id, svc)
 
-    async def _resolve_node(self, interaction: discord.Interaction,
-                            guild_id: int, node_id: str) -> bool:
+    async def _resolve_node(
+        self, interaction: discord.Interaction, guild_id: int, node_id: str
+    ) -> bool:
         """ノードの存在確認。無ければ ephemeral で案内して False。"""
         if await self.repo.exists(guild_id, node_id):
             return True
         await interaction.followup.send(
             embed=error_embed(
-                f"ノード `{node_id}` が見つかりません。"
-                "オートコンプリートの候補から選んでください。"),
-            ephemeral=True)
+                f"ノード `{node_id}` が見つかりません。オートコンプリートの候補から選んでください。"
+            ),
+            ephemeral=True,
+        )
         return False
 
-    async def _node_autocomplete(self, interaction: discord.Interaction,
-                                 current: str) -> list[app_commands.Choice[str]]:
+    async def _node_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
         if interaction.guild is None:
             return []
         try:
             tree = await self.load_tree(interaction.guild.id)
         except Exception:  # noqa: BLE001  (補完は失敗しても致命的でない)
             return []
-        return [app_commands.Choice(name=label, value=node_id)
-                for label, node_id in node_choices(tree, current)]
+        return [
+            app_commands.Choice(name=label, value=node_id)
+            for label, node_id in node_choices(tree, current)
+        ]
 
-    async def _keta_autocomplete(self, interaction: discord.Interaction,
-                                 current: str) -> list[app_commands.Choice[str]]:
+    async def _keta_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
         if interaction.guild is None:
             return []
         from repositories.layer_keta_repository import LayerKetaRepository
-        names = await LayerKetaRepository(self.db).list_active(
-            interaction.guild.id)
-        return [app_commands.Choice(name=n, value=n)
-                for n in names if current.lower() in n.lower()][:25]
+
+        names = await LayerKetaRepository(self.db).list_active(interaction.guild.id)
+        return [
+            app_commands.Choice(name=n, value=n) for n in names if current.lower() in n.lower()
+        ][:25]
 
     # ---------- 定期同期（20分ごと・bot全体で単一ジョブ） ----------
     @tasks.loop(minutes=SYNC_INTERVAL_MINUTES)
@@ -761,7 +782,8 @@ class Progress(commands.Cog):
         guild_ids = [g.id for g in self.bot.guilds]
         try:
             results = await progress_sync_service.sync_all_guilds(
-                self.db, guild_ids, self.bot.todoist_manager)
+                self.db, guild_ids, self.bot.todoist_manager
+            )
         except Exception as e:  # noqa: BLE001  (次周期でリトライ)
             log.warning("進捗定期同期失敗: %s", type(e).__name__)
             return
@@ -770,8 +792,8 @@ class Progress(commands.Cog):
                 continue
             lines = "\n".join(f"- {e}" for e in result.errors[:10])
             await self.bot.log_to_channel(
-                f"[進捗同期] 問題があります:\n{lines}",
-                guild_id=result.guild_id)
+                f"[進捗同期] 問題があります:\n{lines}", guild_id=result.guild_id
+            )
 
     @periodic_sync.before_loop
     async def _before_sync(self):
@@ -784,8 +806,7 @@ class Progress(commands.Cog):
             try:
                 await self.push_project_tasks(guild.id)
             except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
-                log.warning("プロジェクト別通知失敗 (guild=%s): %s",
-                            guild.id, type(e).__name__)
+                log.warning("プロジェクト別通知失敗 (guild=%s): %s", guild.id, type(e).__name__)
 
     async def push_project_tasks(self, guild_id: int) -> int:
         """紐付け済み各プロジェクトの期限タスク（7日以内・超過）を通知する。
@@ -803,9 +824,9 @@ class Progress(commands.Cog):
 
         projects = await svc.get_projects()
         project_ids = {getattr(p, "name", ""): str(p.id) for p in projects}
-        default_channel_id = (
-            await progress_sync_service.resolve_default_channel_id(
-                self.db, guild_id))
+        default_channel_id = await progress_sync_service.resolve_default_channel_id(
+            self.db, guild_id
+        )
 
         gconf = await config.for_guild(guild_id)
         today = now().date()
@@ -819,27 +840,29 @@ class Progress(commands.Cog):
             try:
                 proj_tasks = await svc.get_tasks(project_id=project_id)
             except TodoistError:
-                log.warning("プロジェクト %s のタスク取得失敗 (guild=%s)",
-                            link["project_name"], guild_id)
+                log.warning(
+                    "プロジェクト %s のタスク取得失敗 (guild=%s)", link["project_name"], guild_id
+                )
                 continue
             items = due_items(proj_tasks, until, link["project_name"])
             if not items:
                 continue
 
-            channel_id = progress_sync_service.resolve_link_channel_id(
-                link, default_channel_id) or gconf.default_task_channel_id
-            channel = (self.bot.get_channel(channel_id)
-                       if channel_id else None)
+            channel_id = (
+                progress_sync_service.resolve_link_channel_id(link, default_channel_id)
+                or gconf.default_task_channel_id
+            )
+            channel = self.bot.get_channel(channel_id) if channel_id else None
             if channel is None:
                 await self.bot.log_to_channel(
                     f"[進捗通知] 送信先チャンネルがありません"
                     f"（{link['project_name']}）。`/progress setup` で"
                     "通知チャンネルを設定し直してください。",
-                    guild_id=guild_id)
+                    guild_id=guild_id,
+                )
                 continue
 
-            desc = _build_grouped_description(
-                today, until, "今日から7日以内", items)
+            desc = _build_grouped_description(today, until, "今日から7日以内", items)
             embed = task_embed(f"【進捗・{link['project_name']}】期限タスク")
             embed.description = desc[:4096]
             try:
@@ -847,8 +870,8 @@ class Progress(commands.Cog):
                 sent += 1
             except discord.HTTPException as e:
                 await self.bot.log_to_channel(
-                    f"[進捗通知] 送信失敗（{link['project_name']}）: {e}",
-                    guild_id=guild_id)
+                    f"[進捗通知] 送信失敗（{link['project_name']}）: {e}", guild_id=guild_id
+                )
         return sent
 
     @daily_project_notify.before_loop
@@ -856,37 +879,44 @@ class Progress(commands.Cog):
         await self.bot.wait_until_ready()
 
     # ---------- /progress add ----------
-    @group.command(
-        name="add",
-        description="機体・パーツ・部品を追加します（班長以上）。")
+    @group.command(name="add", description="機体・パーツ・部品を追加します（班長以上）。")
     @app_commands.describe(
         name="表示名（例: 1号機 / 主翼 / 主桁）",
         parent="親ノード（省略すると機体＝一番上のノードになります）",
         assignee="担当者名（任意）",
         status="状態（未着手／製作中／完了 など・任意）",
-        progress="進捗率（0.5 / 50% どちらでも可・任意。葉ノードのみ有効）")
+        progress="進捗率（0.5 / 50% どちらでも可・任意。葉ノードのみ有効）",
+    )
     @require(Level.L2)
-    async def progress_add(self, interaction: discord.Interaction, name: str,
-                           parent: str | None = None,
-                           assignee: str | None = None,
-                           status: str | None = None,
-                           progress: str | None = None):
+    async def progress_add(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        parent: str | None = None,
+        assignee: str | None = None,
+        status: str | None = None,
+        progress: str | None = None,
+    ):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
             return
-        if parent and not await self._resolve_node(interaction, guild_id,
-                                                   parent):
+        if parent and not await self._resolve_node(interaction, guild_id, parent):
             return
 
         node_id = new_node_id()
         siblings = await self.repo.list_children(guild_id, parent or None)
         await self.repo.upsert_node(
-            guild_id, node_id, parent_id=parent or None,
-            sort_order=float(len(siblings) + 1), name=name,
-            assignee=assignee, status=status,
+            guild_id,
+            node_id,
+            parent_id=parent or None,
+            sort_order=float(len(siblings) + 1),
+            name=name,
+            assignee=assignee,
+            status=status,
             manual_progress=pt.parse_progress(progress),
-            now_text=progress_sync_service._now_text())
+            now_text=progress_sync_service._now_text(),
+        )
 
         where = f"`{parent}` の下" if parent else "機体（最上位）として"
         await interaction.followup.send(
@@ -894,27 +924,34 @@ class Progress(commands.Cog):
                 "進捗ノードを追加しました",
                 f"名前: **{name}**\n位置: {where}\nID: `{node_id}`\n\n"
                 "`/progress view` で確認できます。",
-                executor=interaction.user.display_name),
-            ephemeral=True)
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     # ---------- /progress edit ----------
     @group.command(
-        name="edit",
-        description="ノードの名前・担当・状態・進捗率を変更します（班長以上）。")
+        name="edit", description="ノードの名前・担当・状態・進捗率を変更します（班長以上）。"
+    )
     @app_commands.describe(
         node="対象ノード",
         name="新しい表示名（任意）",
         assignee="担当者名（任意）",
         status="状態（任意）",
         progress="進捗率（0.5 / 50% どちらでも可・任意）",
-        parent="親ノードを変更する場合に指定（任意）")
+        parent="親ノードを変更する場合に指定（任意）",
+    )
     @require(Level.L2)
-    async def progress_edit(self, interaction: discord.Interaction, node: str,
-                            name: str | None = None,
-                            assignee: str | None = None,
-                            status: str | None = None,
-                            progress: str | None = None,
-                            parent: str | None = None):
+    async def progress_edit(
+        self,
+        interaction: discord.Interaction,
+        node: str,
+        name: str | None = None,
+        assignee: str | None = None,
+        status: str | None = None,
+        progress: str | None = None,
+        parent: str | None = None,
+    ):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -924,8 +961,8 @@ class Progress(commands.Cog):
         if parent:
             if parent == node:
                 await interaction.followup.send(
-                    embed=error_embed("自分自身を親にはできません。"),
-                    ephemeral=True)
+                    embed=error_embed("自分自身を親にはできません。"), ephemeral=True
+                )
                 return
             if not await self._resolve_node(interaction, guild_id, parent):
                 return
@@ -944,27 +981,27 @@ class Progress(commands.Cog):
             fields["parent_id"] = parent
         if not fields:
             await interaction.followup.send(
-                embed=info_embed("変更内容がありません",
-                                 "変更したい項目を1つ以上指定してください。"),
-                ephemeral=True)
+                embed=info_embed(
+                    "変更内容がありません", "変更したい項目を1つ以上指定してください。"
+                ),
+                ephemeral=True,
+            )
             return
 
-        await self.repo.update_node(
-            guild_id, node, progress_sync_service._now_text(), **fields)
+        await self.repo.update_node(guild_id, node, progress_sync_service._now_text(), **fields)
         changed = "\n".join(f"- {k}: {v}" for k, v in fields.items())
         await interaction.followup.send(
-            embed=success_embed(f"`{node}` を更新しました", changed,
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed(
+                f"`{node}` を更新しました", changed, executor=interaction.user.display_name
+            ),
+            ephemeral=True,
+        )
 
     # ---------- /progress remove ----------
-    @group.command(
-        name="remove",
-        description="ノードを配下ごと削除します（班長以上）。")
+    @group.command(name="remove", description="ノードを配下ごと削除します（班長以上）。")
     @app_commands.describe(node="削除するノード（配下も一緒に削除されます）")
     @require(Level.L2)
-    async def progress_remove(self, interaction: discord.Interaction,
-                              node: str):
+    async def progress_remove(self, interaction: discord.Interaction, node: str):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -976,35 +1013,40 @@ class Progress(commands.Cog):
             embed=success_embed(
                 "進捗ノードを削除しました",
                 f"`{node}` とその配下 合計 **{deleted}** 件を削除しました。",
-                executor=interaction.user.display_name),
-            ephemeral=True)
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     # ---------- /progress spar-link ----------
     @group.command(
         name="spar-link",
-        description="桁巻き（/layer）の記録を進捗ノードへ反映する紐付け（班長以上）。")
+        description="桁巻き（/layer）の記録を進捗ノードへ反映する紐付け（班長以上）。",
+    )
     @app_commands.describe(
         keta="桁名（/layer keta-add で登録済みのもの）",
         node="進捗を反映する葉ノード",
-        target_layers="目標層数（この層数を巻き終えたら 100%）")
+        target_layers="目標層数（この層数を巻き終えたら 100%）",
+    )
     @require(Level.L2)
-    async def progress_spar_link(self, interaction: discord.Interaction,
-                                 keta: str, node: str, target_layers: int):
+    async def progress_spar_link(
+        self, interaction: discord.Interaction, keta: str, node: str, target_layers: int
+    ):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
             return
         if target_layers <= 0:
             await interaction.followup.send(
-                embed=error_embed("目標層数は 1 以上を指定してください。"),
-                ephemeral=True)
+                embed=error_embed("目標層数は 1 以上を指定してください。"), ephemeral=True
+            )
             return
         if not await self._resolve_node(interaction, guild_id, node):
             return
 
         await self.repo.upsert_spar_link(
-            guild_id, keta, node, target_layers,
-            progress_sync_service._now_text())
+            guild_id, keta, node, target_layers, progress_sync_service._now_text()
+        )
         await interaction.followup.send(
             embed=success_embed(
                 "桁巻きの紐付けを登録しました",
@@ -1013,13 +1055,15 @@ class Progress(commands.Cog):
                 "`/layer end` で積層を記録するたびに進捗率が更新されます"
                 f"（{SYNC_INTERVAL_MINUTES} 分ごとの自動同期。"
                 "`/progress sync` で即時実行）。",
-                executor=interaction.user.display_name),
-            ephemeral=True)
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     # ---------- /progress sync ----------
     @group.command(
-        name="sync",
-        description="Todoist 同期と進捗の再集計を今すぐ実行します（管理者）。")
+        name="sync", description="Todoist 同期と進捗の再集計を今すぐ実行します（管理者）。"
+    )
     @app_commands.check(is_admin)
     async def progress_sync(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -1030,31 +1074,35 @@ class Progress(commands.Cog):
             result = await self._run_sync(guild_id)
         except TodoistError:
             await interaction.followup.send(
-                embed=error_embed("Todoist の取得に失敗しました。",
-                                  code="TODOIST_API_FAILED"),
-                ephemeral=True)
+                embed=error_embed("Todoist の取得に失敗しました。", code="TODOIST_API_FAILED"),
+                ephemeral=True,
+            )
             return
         except Exception as e:  # noqa: BLE001
             log.warning("進捗手動同期失敗 (guild=%s): %s", guild_id, e)
             await interaction.followup.send(
-                embed=error_embed("進捗の同期に失敗しました。"), ephemeral=True)
+                embed=error_embed("進捗の同期に失敗しました。"), ephemeral=True
+            )
             return
 
-        desc = (f"対象プロジェクト: {result.projects} 件\n"
-                f"追加 {result.added} / 更新 {result.updated} / "
-                f"完了 {result.completed} / 桁巻き反映 {result.spar_updated}")
+        desc = (
+            f"対象プロジェクト: {result.projects} 件\n"
+            f"追加 {result.added} / 更新 {result.updated} / "
+            f"完了 {result.completed} / 桁巻き反映 {result.spar_updated}"
+        )
         if result.errors:
-            desc += "\n\n⚠️ 警告:\n" + "\n".join(
-                f"- {e}" for e in result.errors[:10])
+            desc += "\n\n⚠️ 警告:\n" + "\n".join(f"- {e}" for e in result.errors[:10])
         await interaction.followup.send(
-            embed=success_embed("進捗同期を実行しました", desc,
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed(
+                "進捗同期を実行しました", desc, executor=interaction.user.display_name
+            ),
+            ephemeral=True,
+        )
 
     # ---------- /progress setup ----------
     @group.command(
-        name="setup",
-        description="Todoist プロジェクトを進捗ツリーに紐付けます（班長以上）。")
+        name="setup", description="Todoist プロジェクトを進捗ツリーに紐付けます（班長以上）。"
+    )
     @require(Level.L2)
     async def progress_setup(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -1068,8 +1116,10 @@ class Progress(commands.Cog):
                 embed=info_embed(
                     "Todoist 未設定",
                     "このサーバーでは Todoist が未設定です。\n"
-                    "管理者が `/todoist-setup` で登録してください。"),
-                ephemeral=True)
+                    "管理者が `/todoist-setup` で登録してください。",
+                ),
+                ephemeral=True,
+            )
             return
 
         try:
@@ -1078,15 +1128,17 @@ class Progress(commands.Cog):
             tree = await self.load_tree(guild_id)
         except TodoistError:
             await interaction.followup.send(
-                embed=error_embed("Todoist プロジェクトの取得に失敗しました。",
-                                  code="TODOIST_API_FAILED"),
-                ephemeral=True)
+                embed=error_embed(
+                    "Todoist プロジェクトの取得に失敗しました。", code="TODOIST_API_FAILED"
+                ),
+                ephemeral=True,
+            )
             return
         except Exception as e:  # noqa: BLE001
             log.warning("setup ウィザード準備失敗 (guild=%s): %s", guild_id, e)
             await interaction.followup.send(
-                embed=error_embed("進捗データの読み込みに失敗しました。"),
-                ephemeral=True)
+                embed=error_embed("進捗データの読み込みに失敗しました。"), ephemeral=True
+            )
             return
 
         candidates = unmapped_projects(projects, links)
@@ -1097,28 +1149,30 @@ class Progress(commands.Cog):
                     "すべての Todoist プロジェクトが登録済みか、"
                     "プロジェクトが存在しません。\n"
                     "別ワークスペースのプロジェクトを使う場合は、"
-                    "bot 用 Todoist アカウントへの共有を依頼してください。"),
-                ephemeral=True)
+                    "bot 用 Todoist アカウントへの共有を依頼してください。",
+                ),
+                ephemeral=True,
+            )
             return
         if not tree.roots:
             await interaction.followup.send(
-                embed=info_embed("機体が未登録です", _EMPTY_TREE_DESC),
-                ephemeral=True)
+                embed=info_embed("機体が未登録です", _EMPTY_TREE_DESC), ephemeral=True
+            )
             return
 
-        view = ProjectSetupWizard(self, guild_id, interaction.user.id,
-                                  candidates, tree)
+        view = ProjectSetupWizard(self, guild_id, interaction.user.id, candidates, tree)
         await interaction.followup.send(
             embed=info_embed(
                 "プロジェクト登録ウィザード",
                 "紐付ける Todoist プロジェクトを選択してください。\n"
-                "（登録済みのプロジェクトは表示されません）"),
-            view=view, ephemeral=True)
+                "（登録済みのプロジェクトは表示されません）",
+            ),
+            view=view,
+            ephemeral=True,
+        )
 
     # ---------- /progress view ----------
-    @group.command(
-        name="view",
-        description="機体製作の進捗をドリルダウン表示します。")
+    @group.command(name="view", description="機体製作の進捗をドリルダウン表示します。")
     @require(Level.L1)
     async def progress_view(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -1130,14 +1184,14 @@ class Progress(commands.Cog):
         except Exception as e:  # noqa: BLE001
             log.warning("進捗ツリー読込失敗 (guild=%s): %s", guild_id, e)
             await interaction.followup.send(
-                embed=error_embed("進捗データの読み込みに失敗しました。"),
-                ephemeral=True)
+                embed=error_embed("進捗データの読み込みに失敗しました。"), ephemeral=True
+            )
             return
 
         if not tree.roots:
             await interaction.followup.send(
-                embed=info_embed("進捗データがありません", _EMPTY_TREE_DESC),
-                ephemeral=True)
+                embed=info_embed("進捗データがありません", _EMPTY_TREE_DESC), ephemeral=True
+            )
             return
 
         embed = build_level_embed(tree, None)
@@ -1145,25 +1199,28 @@ class Progress(commands.Cog):
         await interaction.followup.send(embed=embed, view=view)
 
     # ---------- /weight ----------
-    weight_group = app_commands.Group(
-        name="weight", description="機体重量の記録と集計")
+    weight_group = app_commands.Group(name="weight", description="機体重量の記録と集計")
 
-    @weight_group.command(
-        name="set",
-        description="ノードの重量（g）を記録します。")
-    @app_commands.describe(node="対象ノード", actual="実測重量（g）",
-                           target="目標重量（g。省略時は変更しない）")
+    @weight_group.command(name="set", description="ノードの重量（g）を記録します。")
+    @app_commands.describe(
+        node="対象ノード", actual="実測重量（g）", target="目標重量（g。省略時は変更しない）"
+    )
     @require(Level.L2)
-    async def weight_set(self, interaction: discord.Interaction, node: str,
-                         actual: float, target: float | None = None):
+    async def weight_set(
+        self,
+        interaction: discord.Interaction,
+        node: str,
+        actual: float,
+        target: float | None = None,
+    ):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
             return
         if actual < 0 or (target is not None and target < 0):
             await interaction.followup.send(
-                embed=error_embed("重量に負の値は指定できません。"),
-                ephemeral=True)
+                embed=error_embed("重量に負の値は指定できません。"), ephemeral=True
+            )
             return
         if not await self._resolve_node(interaction, guild_id, node):
             return
@@ -1171,30 +1228,33 @@ class Progress(commands.Cog):
         fields: dict[str, float] = {"actual_weight_g": actual}
         if target is not None:
             fields["target_weight_g"] = target
-        await self.repo.update_node(guild_id, node,
-                                    now_text=now().strftime("%Y-%m-%d %H:%M"),
-                                    **fields)
-        await self._audit(guild_id, interaction, "weight.set", node,
-                          f"実測 {format_grams(actual)}"
-                          + (f" / 目標 {format_grams(target)}"
-                             if target is not None else ""))
+        await self.repo.update_node(
+            guild_id, node, now_text=now().strftime("%Y-%m-%d %H:%M"), **fields
+        )
+        await self._audit(
+            guild_id,
+            interaction,
+            "weight.set",
+            node,
+            f"実測 {format_grams(actual)}"
+            + (f" / 目標 {format_grams(target)}" if target is not None else ""),
+        )
 
         tree = await self.load_tree(guild_id)
         detail = weight_line(tree, node) or "重量: —"
         await interaction.followup.send(
             embed=success_embed(
-                "重量を記録しました",
-                f"`{node}`\n{detail}",
-                executor=interaction.user.display_name),
-            ephemeral=True)
+                "重量を記録しました", f"`{node}`\n{detail}", executor=interaction.user.display_name
+            ),
+            ephemeral=True,
+        )
 
     @weight_group.command(
-        name="view",
-        description="重量の集計・目標との差・実測入力率を表示します。")
+        name="view", description="重量の集計・目標との差・実測入力率を表示します。"
+    )
     @app_commands.describe(node="対象ノード（省略時は機体全体）")
     @require(Level.L1)
-    async def weight_view(self, interaction: discord.Interaction,
-                          node: str | None = None):
+    async def weight_view(self, interaction: discord.Interaction, node: str | None = None):
         await interaction.response.defer()
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -1202,23 +1262,25 @@ class Progress(commands.Cog):
         tree = await self.load_tree(guild_id)
         if not tree.roots:
             await interaction.followup.send(
-                embed=info_embed("進捗データがありません", _EMPTY_TREE_DESC),
-                ephemeral=True)
+                embed=info_embed("進捗データがありません", _EMPTY_TREE_DESC), ephemeral=True
+            )
             return
 
         summary = weight_summary(tree, node)
         if summary.total_nodes == 0:
             await interaction.followup.send(
-                embed=error_embed(f"ノード `{node}` が見つかりません。"),
-                ephemeral=True)
+                embed=error_embed(f"ノード `{node}` が見つかりません。"), ephemeral=True
+            )
             return
 
         target_name = (tree.by_id[node].name or node) if node else "機体全体"
         lines = [
             f"実測合計: **{format_grams(summary.actual_g)}**"
-            if summary.actual_g is not None else "実測合計: **未計測**",
+            if summary.actual_g is not None
+            else "実測合計: **未計測**",
             f"目標合計: **{format_grams(summary.target_g)}**"
-            if summary.target_g is not None else "目標合計: **未設定**",
+            if summary.target_g is not None
+            else "目標合計: **未設定**",
         ]
         diff = summary.diff_g
         if diff is not None:
@@ -1226,16 +1288,18 @@ class Progress(commands.Cog):
             lines.append(f"差分: **{diff:+,.0f}g** {mark}")
         lines.append(
             f"実測入力率: **{summary.fill_rate * 100:.0f}%**"
-            f"（{summary.measured_nodes} / {summary.total_nodes} ノード）")
+            f"（{summary.measured_nodes} / {summary.total_nodes} ノード）"
+        )
         if summary.fill_rate < 1.0:
             lines.append("※ 未計測のノードがあるため、合計は見積もりを含みます。")
 
         await interaction.followup.send(
-            embed=info_embed(f"⚖️ 重量: {target_name}", "\n".join(lines)))
+            embed=info_embed(f"⚖️ 重量: {target_name}", "\n".join(lines))
+        )
 
     @weight_group.command(
-        name="top",
-        description="目標を超過しているノードを超過量の大きい順に表示します。")
+        name="top", description="目標を超過しているノードを超過量の大きい順に表示します。"
+    )
     @require(Level.L1)
     async def weight_top(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -1245,11 +1309,14 @@ class Progress(commands.Cog):
         tree = await self.load_tree(guild_id)
         ranked = nodes_over_target(tree)
         if not ranked:
-            await interaction.followup.send(embed=info_embed(
-                "⚖️ 目標超過のノードはありません",
-                "目標と実測の両方が入っているノードのうち、超過しているものは"
-                "ありませんでした。\n"
-                "重量を登録するには `/weight set` を使います。"))
+            await interaction.followup.send(
+                embed=info_embed(
+                    "⚖️ 目標超過のノードはありません",
+                    "目標と実測の両方が入っているノードのうち、超過しているものは"
+                    "ありませんでした。\n"
+                    "重量を登録するには `/weight set` を使います。",
+                )
+            )
             return
 
         lines = []
@@ -1259,25 +1326,22 @@ class Progress(commands.Cog):
             lines.append(
                 f"{rank}. **{node.name or node.node_id}** "
                 f"+{format_grams(over)}"
-                f"（実測 {format_grams(actual)} / 目標 {format_grams(target)}）")
+                f"（実測 {format_grams(actual)} / 目標 {format_grams(target)}）"
+            )
         if len(ranked) > 20:
             lines.append(f"…ほか {len(ranked) - 20} 件")
 
-        await interaction.followup.send(embed=info_embed(
-            "⚖️ 目標超過ランキング", "\n".join(lines)))
+        await interaction.followup.send(embed=info_embed("⚖️ 目標超過ランキング", "\n".join(lines)))
 
     # ---------- /milestone ----------
     milestone_group = app_commands.Group(
-        name="milestone", description="大会に向けたマイルストーン（期限）の管理")
+        name="milestone", description="大会に向けたマイルストーン（期限）の管理"
+    )
 
-    @milestone_group.command(
-        name="add",
-        description="ノードに期限（マイルストーン）を設定します。")
-    @app_commands.describe(node="対象ノード", name="マイルストーン名",
-                           due="期限（YYYY-MM-DD）")
+    @milestone_group.command(name="add", description="ノードに期限（マイルストーン）を設定します。")
+    @app_commands.describe(node="対象ノード", name="マイルストーン名", due="期限（YYYY-MM-DD）")
     @require(Level.L2)
-    async def milestone_add(self, interaction: discord.Interaction, node: str,
-                            name: str, due: str):
+    async def milestone_add(self, interaction: discord.Interaction, node: str, name: str, due: str):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -1288,42 +1352,46 @@ class Progress(commands.Cog):
         # グローバルハンドラが案内する）
         due_date = parse_deadline(due).strftime("%Y-%m-%d")
 
-        await self.repo.add_milestone(guild_id, node, name, due_date,
-                                      now().strftime("%Y-%m-%d %H:%M"))
-        await self._audit(guild_id, interaction, "milestone.add", node,
-                          f"{name} / {due_date}")
+        await self.repo.add_milestone(
+            guild_id, node, name, due_date, now().strftime("%Y-%m-%d %H:%M")
+        )
+        await self._audit(guild_id, interaction, "milestone.add", node, f"{name} / {due_date}")
         await interaction.followup.send(
             embed=success_embed(
                 "マイルストーンを設定しました",
                 f"`{node}` — **{name}**\n期限: {due_date}",
-                executor=interaction.user.display_name),
-            ephemeral=True)
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
-    @milestone_group.command(
-        name="remove", description="マイルストーンを削除します。")
+    @milestone_group.command(name="remove", description="マイルストーンを削除します。")
     @app_commands.describe(node="対象ノード", name="マイルストーン名")
     @require(Level.L2)
-    async def milestone_remove(self, interaction: discord.Interaction,
-                               node: str, name: str):
+    async def milestone_remove(self, interaction: discord.Interaction, node: str, name: str):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
             return
         if not await self.repo.remove_milestone(guild_id, node, name):
             await interaction.followup.send(
-                embed=error_embed(
-                    f"`{node}` に「{name}」というマイルストーンはありません。"),
-                ephemeral=True)
+                embed=error_embed(f"`{node}` に「{name}」というマイルストーンはありません。"),
+                ephemeral=True,
+            )
             return
         await self._audit(guild_id, interaction, "milestone.remove", node, name)
         await interaction.followup.send(
-            embed=success_embed("マイルストーンを削除しました",
-                                f"`{node}` — {name}",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed(
+                "マイルストーンを削除しました",
+                f"`{node}` — {name}",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     @milestone_group.command(
-        name="list", description="登録済みのマイルストーンを期限順に表示します。")
+        name="list", description="登録済みのマイルストーンを期限順に表示します。"
+    )
     @require(Level.L1)
     async def milestone_list(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -1332,9 +1400,11 @@ class Progress(commands.Cog):
             return
         rows = await self.repo.list_milestones(guild_id)
         if not rows:
-            await interaction.followup.send(embed=info_embed(
-                "マイルストーンがありません",
-                "`/milestone add` で節目の期限を登録できます。"))
+            await interaction.followup.send(
+                embed=info_embed(
+                    "マイルストーンがありません", "`/milestone add` で節目の期限を登録できます。"
+                )
+            )
             return
         tree = await self.load_tree(guild_id)
         lines = []
@@ -1342,8 +1412,9 @@ class Progress(commands.Cog):
             node = tree.by_id.get(row["node_id"])
             label = node.name if node is not None else f"{row['node_id']}（削除済み）"
             lines.append(f"**{row['due_date']}** — {label}: {row['name']}")
-        await interaction.followup.send(embed=info_embed(
-            "🏁 マイルストーン一覧", "\n".join(lines[:50])))
+        await interaction.followup.send(
+            embed=info_embed("🏁 マイルストーン一覧", "\n".join(lines[:50]))
+        )
 
     # ---------- /countdown ----------
     async def pace_overrides(self, guild_id: int) -> dict[str, Pace]:
@@ -1366,8 +1437,8 @@ class Progress(commands.Cog):
         return overrides
 
     @app_commands.command(
-        name="countdown",
-        description="大会までの残り日数と、遅れているマイルストーンを表示します。")
+        name="countdown", description="大会までの残り日数と、遅れているマイルストーンを表示します。"
+    )
     @require(Level.L1)
     async def countdown(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -1377,28 +1448,34 @@ class Progress(commands.Cog):
         gconf = await config.for_guild(guild_id)
         if not gconf.competition_date:
             await interaction.followup.send(
-                embed=info_embed("大会日が未設定です", COMPETITION_DATE_HELP),
-                ephemeral=True)
+                embed=info_embed("大会日が未設定です", COMPETITION_DATE_HELP), ephemeral=True
+            )
             return
 
         today = now().date()
         tree = await self.load_tree(guild_id)
         rows = await self.repo.list_milestones(guild_id)
-        statuses = evaluate_all(tree, rows, today=today,
-                                pace_by_node=await self.pace_overrides(guild_id))
-        await interaction.followup.send(embed=build_countdown_embed(
-            gconf.competition_date, statuses, today))
+        statuses = evaluate_all(
+            tree, rows, today=today, pace_by_node=await self.pace_overrides(guild_id)
+        )
+        await interaction.followup.send(
+            embed=build_countdown_embed(gconf.competition_date, statuses, today)
+        )
 
-    async def _audit(self, guild_id: int, interaction: discord.Interaction,
-                     action: str, target: str, detail: str) -> None:
+    async def _audit(
+        self, guild_id: int, interaction: discord.Interaction, action: str, target: str, detail: str
+    ) -> None:
         """監査ログへ記録する（記録の失敗で操作自体は止めない）。"""
         try:
             await AuditLogRepository(self.db).record(
-                guild_id, actor_id=str(interaction.user.id),
-                action=action, target=target, detail=detail)
+                guild_id,
+                actor_id=str(interaction.user.id),
+                action=action,
+                target=target,
+                detail=detail,
+            )
         except Exception as e:  # noqa: BLE001
-            log.warning("監査ログの記録に失敗 (guild=%s): %s", guild_id,
-                        type(e).__name__)
+            log.warning("監査ログの記録に失敗 (guild=%s): %s", guild_id, type(e).__name__)
 
 
 # ノード指定を受け取るコマンドへオートコンプリートを紐付ける

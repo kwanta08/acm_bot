@@ -18,6 +18,7 @@ scripts/migrate_progress_sheet_to_db.py が読み込むためだけに残して�
 - 設定         : キー・バリュー形式の管理者設定
 - 桁巻き対応表  : 桁巻きファイル内の識別子 → 紐付け先ノード ID
 """
+
 from __future__ import annotations
 
 import os
@@ -39,27 +40,36 @@ SETTINGS_SHEET = "設定"
 SPAR_MAPPING_SHEET = "桁巻き対応表"
 
 # 進捗管理シートの列（0始まりインデックス）
-COL_ID = 0            # A
-COL_PARENT_ID = 1     # B
-COL_ORDER = 2         # C
-COL_DEPTH = 3         # D: シート側の計算結果（DB へは取り込まない）
-COL_NAME = 4          # E
-COL_ASSIGNEE = 5      # F
-COL_STATUS = 6        # G
-COL_MANUAL = 7        # H: 進捗率(手入力)
-COL_AGGREGATED = 8    # I: シート側の計算結果（DB へは取り込まない）
-COL_BAR = 9           # J: SPARKLINE 数式
-COL_SOURCE = 10       # K: manual / todoist / spar_winding
-COL_TODOIST_ID = 11   # L
-COL_UPDATED_AT = 12   # M
+COL_ID = 0  # A
+COL_PARENT_ID = 1  # B
+COL_ORDER = 2  # C
+COL_DEPTH = 3  # D: シート側の計算結果（DB へは取り込まない）
+COL_NAME = 4  # E
+COL_ASSIGNEE = 5  # F
+COL_STATUS = 6  # G
+COL_MANUAL = 7  # H: 進捗率(手入力)
+COL_AGGREGATED = 8  # I: シート側の計算結果（DB へは取り込まない）
+COL_BAR = 9  # J: SPARKLINE 数式
+COL_SOURCE = 10  # K: manual / todoist / spar_winding
+COL_TODOIST_ID = 11  # L
+COL_UPDATED_AT = 12  # M
 
 PROGRESS_HEADER = [
-    "ID", "親ID", "表示順", "深さ", "名前", "担当者", "状態",
-    "進捗率(手入力)", "集計進捗率", "進捗バー", "ソース",
-    "TodoistタスクID", "更新日時",
+    "ID",
+    "親ID",
+    "表示順",
+    "深さ",
+    "名前",
+    "担当者",
+    "状態",
+    "進捗率(手入力)",
+    "集計進捗率",
+    "進捗バー",
+    "ソース",
+    "TodoistタスクID",
+    "更新日時",
 ]
-MAPPING_HEADER = ["Todoistプロジェクト名", "紐付け先ノードID", "通知チャンネルID",
-                  "登録ギルドID"]
+MAPPING_HEADER = ["Todoistプロジェクト名", "紐付け先ノードID", "通知チャンネルID", "登録ギルドID"]
 SETTINGS_HEADER = ["キー", "値", "メモ"]
 SPAR_MAPPING_HEADER = ["桁巻きファイル内の識別子", "紐付け先ノードID"]
 
@@ -102,18 +112,20 @@ def grid_to_nodes(grid: list[list]) -> list[ProgressNode]:
         if not node_id:
             continue
         source = _cell(row, COL_SOURCE) or SOURCE_MANUAL
-        nodes.append(ProgressNode(
-            node_id=node_id,
-            parent_id=_cell(row, COL_PARENT_ID) or None,
-            order=_parse_order(_cell(row, COL_ORDER)),
-            name=_cell(row, COL_NAME),
-            assignee=_cell(row, COL_ASSIGNEE),
-            status=_cell(row, COL_STATUS),
-            manual_progress=parse_progress(_cell(row, COL_MANUAL)),
-            source=source,
-            todoist_task_id=_cell(row, COL_TODOIST_ID),
-            row_index=i,
-        ))
+        nodes.append(
+            ProgressNode(
+                node_id=node_id,
+                parent_id=_cell(row, COL_PARENT_ID) or None,
+                order=_parse_order(_cell(row, COL_ORDER)),
+                name=_cell(row, COL_NAME),
+                assignee=_cell(row, COL_ASSIGNEE),
+                status=_cell(row, COL_STATUS),
+                manual_progress=parse_progress(_cell(row, COL_MANUAL)),
+                source=source,
+                todoist_task_id=_cell(row, COL_TODOIST_ID),
+                row_index=i,
+            )
+        )
     return nodes
 
 
@@ -131,9 +143,14 @@ def parse_mapping_grid(grid: list[list]) -> list[dict[str, str]]:
         project = _cell(row, 0)
         node_id = _cell(row, 1)
         if project and node_id:
-            out.append({"project_name": project, "node_id": node_id,
-                        "notify_channel_id": _cell(row, 2),
-                        "guild_id": _cell(row, 3)})
+            out.append(
+                {
+                    "project_name": project,
+                    "node_id": node_id,
+                    "notify_channel_id": _cell(row, 2),
+                    "guild_id": _cell(row, 3),
+                }
+            )
     return out
 
 
@@ -183,23 +200,27 @@ class ProgressSheetClient:
     def _get_client(self) -> Any:
         if self._client is not None:
             return self._client
-        creds_path = (self._credentials_path
-                      or os.getenv("GOOGLE_CREDENTIALS_PATH", "")).strip()
+        creds_path = (self._credentials_path or os.getenv("GOOGLE_CREDENTIALS_PATH", "")).strip()
         if not creds_path or not os.path.exists(creds_path):
             raise ProgressSheetUnavailable(
-                "GOOGLE_CREDENTIALS_PATH（サービスアカウント JSON）が未設定です。")
+                "GOOGLE_CREDENTIALS_PATH（サービスアカウント JSON）が未設定です。"
+            )
         try:
             import gspread
             from google.oauth2.service_account import Credentials
         except ImportError as e:
             raise ProgressSheetUnavailable(
                 "gspread / google-auth が見つかりません。"
-                "移行時のみ `pip install gspread google-auth` が必要です。") from e
+                "移行時のみ `pip install gspread google-auth` が必要です。"
+            ) from e
         # 読み取りのみのため readonly スコープで十分
-        scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly",
-                  "https://www.googleapis.com/auth/drive.readonly"]
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets.readonly",
+            "https://www.googleapis.com/auth/drive.readonly",
+        ]
         self._client = gspread.authorize(
-            Credentials.from_service_account_file(creds_path, scopes=scopes))
+            Credentials.from_service_account_file(creds_path, scopes=scopes)
+        )
         return self._client
 
     def _open(self, spreadsheet_id: str) -> Any:
@@ -210,25 +231,20 @@ class ProgressSheetClient:
 
     # ---------- 読み込み ----------
     def read_progress_grid(self, spreadsheet_id: str) -> list[list]:
-        return self._worksheet(self._open(spreadsheet_id),
-                               PROGRESS_SHEET).get_all_values()
+        return self._worksheet(self._open(spreadsheet_id), PROGRESS_SHEET).get_all_values()
 
     def read_mapping_grid(self, spreadsheet_id: str) -> list[list]:
-        return self._worksheet(self._open(spreadsheet_id),
-                               MAPPING_SHEET).get_all_values()
+        return self._worksheet(self._open(spreadsheet_id), MAPPING_SHEET).get_all_values()
 
     def read_settings_grid(self, spreadsheet_id: str) -> list[list]:
-        return self._worksheet(self._open(spreadsheet_id),
-                               SETTINGS_SHEET).get_all_values()
+        return self._worksheet(self._open(spreadsheet_id), SETTINGS_SHEET).get_all_values()
 
     def read_spar_mapping_grid(self, spreadsheet_id: str) -> list[list]:
-        return self._worksheet(self._open(spreadsheet_id),
-                               SPAR_MAPPING_SHEET).get_all_values()
+        return self._worksheet(self._open(spreadsheet_id), SPAR_MAPPING_SHEET).get_all_values()
 
     def read_grid(self, spreadsheet_id: str, sheet_title: str) -> list[list]:
         """任意ブック・任意シートのグリッドを読む（桁巻きブック用）。"""
-        return self._worksheet(self._open(spreadsheet_id),
-                               sheet_title).get_all_values()
+        return self._worksheet(self._open(spreadsheet_id), sheet_title).get_all_values()
 
     def list_sheet_titles(self, spreadsheet_id: str) -> list[str]:
         """ブック内のシート名一覧（桁巻きブックの桁別シート探索用）。"""

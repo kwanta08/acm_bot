@@ -8,6 +8,7 @@ L4 は L3,L2,L1 を内包する階層判定。
 また、コマンドがサーバー内で実行されたことを確認する ensure_guild() を提供する
 （DM 実行時はギルド ID を解決できないため拒否する）。
 """
+
 from __future__ import annotations
 
 from enum import IntEnum
@@ -79,8 +80,7 @@ def has_level(member: discord.Member, gconf: GuildConfig, required: Level) -> bo
     return get_level(member, gconf) >= required
 
 
-def has_manage_guild_or_level(member: discord.Member, gconf: GuildConfig,
-                              required: Level) -> bool:
+def has_manage_guild_or_level(member: discord.Member, gconf: GuildConfig, required: Level) -> bool:
     """Discord 標準の「サーバー管理（Manage Server）」権限、
     またはロール階層で required 以上なら True。
 
@@ -99,8 +99,7 @@ class PermissionDenied(app_commands.CheckFailure):
 
     def __init__(self, required: Level, message: str | None = None):
         self.required = required
-        super().__init__(
-            message or f"この操作には L{int(required)} 以上の権限が必要です。")
+        super().__init__(message or f"この操作には L{int(required)} 以上の権限が必要です。")
 
 
 async def _guild_config_for(interaction: discord.Interaction) -> GuildConfig:
@@ -141,7 +140,8 @@ def require_manage_guild_or(level: Level):
             raise PermissionDenied(
                 level,
                 "この操作には「サーバー管理（Manage Server）」権限、"
-                f"または L{int(level)} 以上の権限が必要です。")
+                f"または L{int(level)} 以上の権限が必要です。",
+            )
         return True
 
     return app_commands.check(_mark_required_level(predicate, level))
@@ -178,7 +178,8 @@ async def ensure_guild(interaction: discord.Interaction) -> int | None:
     if interaction.guild is not None:
         return interaction.guild.id
     embed = error_embed(
-        "このコマンドはサーバー内でのみ使用できます（DM ではギルドを特定できません）。")
+        "このコマンドはサーバー内でのみ使用できます（DM ではギルドを特定できません）。"
+    )
     try:
         if interaction.response.is_done():
             await interaction.followup.send(embed=embed, ephemeral=True)

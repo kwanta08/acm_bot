@@ -16,6 +16,7 @@ tests/test_db_postgres.py のライブテスト（CLUB_TEST_PG_DSN）が失敗�
     venv/bin/python scripts/cleanup_test_pg.py \
         --dsn postgresql://user:pass@host:5432/clubdb_test
 """
+
 from __future__ import annotations
 
 import argparse
@@ -60,8 +61,9 @@ async def main(args: argparse.Namespace) -> None:
             print(f"  DROP VIEW {view}")
         for table in TABLES:
             row = await db.fetchone(
-                "SELECT EXISTS (SELECT 1 FROM information_schema.tables"
-                " WHERE table_name = ?) AS e", (table,))
+                "SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = ?) AS e",
+                (table,),
+            )
             if not row["e"]:
                 continue
             cnt = await db.fetchone(f"SELECT COUNT(*) AS c FROM {table}")
@@ -74,6 +76,7 @@ async def main(args: argparse.Namespace) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dsn", default=None,
-                        help="テスト用 PostgreSQL の接続 URL（既定: CLUB_TEST_PG_DSN）")
+    parser.add_argument(
+        "--dsn", default=None, help="テスト用 PostgreSQL の接続 URL（既定: CLUB_TEST_PG_DSN）"
+    )
     asyncio.run(main(parser.parse_args()))

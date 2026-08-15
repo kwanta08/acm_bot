@@ -9,6 +9,7 @@
 - 監査ログに data.delete.requested / data.delete.cancelled が残ること
 - 権限（L4 または Manage Server）が要ること
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -77,6 +78,7 @@ def test_confirmation_rejects_mismatch():
 # ---------------------------------------------------------------------
 def test_request_purge_sets_purge_after_without_left_at():
     """自己申告の削除では left_at を立てない（まだ参加中のため）。"""
+
     async def _main():
         db = await _connected_db()
         try:
@@ -96,6 +98,7 @@ def test_request_purge_sets_purge_after_without_left_at():
 
 def test_request_purge_does_not_delete_anything():
     """予約した時点ではデータが1行も減らない（実削除は F2-4）。"""
+
     async def _main():
         db = await _connected_db()
         try:
@@ -153,8 +156,9 @@ def test_purge_request_is_guild_scoped():
             await repo.request_purge(GA)
 
             assert (await repo.get(GA))["purge_after"] is not None
-            assert (await repo.get(GB))["purge_after"] is None, \
+            assert (await repo.get(GB))["purge_after"] is None, (
                 "他サーバーを巻き込んで削除予約しない"
+            )
         finally:
             await db.close()
 
@@ -187,6 +191,7 @@ def test_cancel_does_not_revive_a_left_guild_schedule():
     「参加中に自分で予約した削除」と「退出による削除予定」は別物なので、
     取り消しで退出の事実まで消さない。
     """
+
     async def _main():
         db = await _connected_db()
         try:
@@ -213,10 +218,16 @@ def test_audit_actions_are_recorded():
         db = await _connected_db()
         try:
             repo = AuditLogRepository(db)
-            await repo.record(GA, actor_id="1", action="data.delete.requested",
-                              target="all", detail="purge_after=...")
-            await repo.record(GA, actor_id="1", action="data.delete.cancelled",
-                              target="all", detail="取り消した")
+            await repo.record(
+                GA,
+                actor_id="1",
+                action="data.delete.requested",
+                target="all",
+                detail="purge_after=...",
+            )
+            await repo.record(
+                GA, actor_id="1", action="data.delete.cancelled", target="all", detail="取り消した"
+            )
 
             actions = [r["action"] for r in await repo.list_recent(GA)]
             assert "data.delete.requested" in actions
@@ -237,8 +248,7 @@ def _member(*, role_ids=(), manage_guild: bool = False):
         id=1,
         guild=SimpleNamespace(id=GA, owner_id=42),
         roles=[SimpleNamespace(id=r) for r in role_ids],
-        guild_permissions=SimpleNamespace(administrator=False,
-                                          manage_guild=manage_guild),
+        guild_permissions=SimpleNamespace(administrator=False, manage_guild=manage_guild),
     )
 
 
@@ -257,12 +267,9 @@ def test_delete_commands_require_admin_level():
 
 def test_leaders_cannot_delete():
     gconf = GuildConfig(guild_id=GA, leader_role_ids=[500], exec_role_id=600)
-    assert not has_manage_guild_or_level(
-        _member(role_ids=(500,)), gconf, Level.L4)
-    assert not has_manage_guild_or_level(
-        _member(role_ids=(600,)), gconf, Level.L4)
+    assert not has_manage_guild_or_level(_member(role_ids=(500,)), gconf, Level.L4)
+    assert not has_manage_guild_or_level(_member(role_ids=(600,)), gconf, Level.L4)
 
 
 def test_manage_guild_can_delete():
-    assert has_manage_guild_or_level(
-        _member(manage_guild=True), GuildConfig(guild_id=GA), Level.L4)
+    assert has_manage_guild_or_level(_member(manage_guild=True), GuildConfig(guild_id=GA), Level.L4)

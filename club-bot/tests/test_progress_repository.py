@@ -6,6 +6,7 @@
 - **すべての操作が guild_id で分離されること**（他ギルドのデータを
   読まない・壊さない）
 """
+
 import asyncio
 import os
 import sys
@@ -43,10 +44,18 @@ async def _repo() -> tuple[Database, ProgressRepository]:
 async def _seed_tree(repo: ProgressRepository, guild_id: int) -> None:
     """機体 → パーツ → 部品 の3階層を作る。"""
     await repo.upsert_node(guild_id, "airframe", name="1号機", now_text=NOW)
-    await repo.upsert_node(guild_id, "wing", parent_id="airframe",
-                           name="主翼", sort_order=1, now_text=NOW)
-    await repo.upsert_node(guild_id, "spar", parent_id="wing", name="主桁",
-                           manual_progress=0.5, sort_order=1, now_text=NOW)
+    await repo.upsert_node(
+        guild_id, "wing", parent_id="airframe", name="主翼", sort_order=1, now_text=NOW
+    )
+    await repo.upsert_node(
+        guild_id,
+        "spar",
+        parent_id="wing",
+        name="主桁",
+        manual_progress=0.5,
+        sort_order=1,
+        now_text=NOW,
+    )
 
 
 # ---------------------------------------------------------------------
@@ -75,9 +84,14 @@ def test_upsert_replaces_existing_row():
         db, repo = await _repo()
         try:
             await repo.upsert_node(G1, "wing", name="主翼", now_text=NOW)
-            await repo.upsert_node(G1, "wing", name="主翼（改）",
-                                   parent_id="airframe",
-                                   manual_progress=0.25, now_text="2026-08-12")
+            await repo.upsert_node(
+                G1,
+                "wing",
+                name="主翼（改）",
+                parent_id="airframe",
+                manual_progress=0.25,
+                now_text="2026-08-12",
+            )
             assert await repo.count_nodes(G1) == 1
             node = await repo.get_node(G1, "wing")
             assert node["name"] == "主翼（改）"
@@ -97,8 +111,9 @@ def test_update_node_partial():
         db, repo = await _repo()
         try:
             await _seed_tree(repo, G1)
-            assert await repo.update_node(G1, "spar", "2026-08-12",
-                                          assignee="山田", status="製作中")
+            assert await repo.update_node(
+                G1, "spar", "2026-08-12", assignee="山田", status="製作中"
+            )
             node = await repo.get_node(G1, "spar")
             assert node["assignee"] == "山田"
             assert node["status"] == "製作中"
@@ -145,8 +160,7 @@ def test_set_progress():
         db, repo = await _repo()
         try:
             await _seed_tree(repo, G1)
-            await repo.set_progress(G1, "spar", 1.0, NOW,
-                                    status="完了", source="spar_winding")
+            await repo.set_progress(G1, "spar", 1.0, NOW, status="完了", source="spar_winding")
             node = await repo.get_node(G1, "spar")
             assert node["manual_progress"] == 1.0
             assert node["status"] == "完了"
@@ -164,8 +178,7 @@ def test_list_children():
             await _seed_tree(repo, G1)
             roots = await repo.list_children(G1, None)
             assert [n["node_id"] for n in roots] == ["airframe"]
-            assert [n["node_id"] for n in await repo.list_children(
-                G1, "airframe")] == ["wing"]
+            assert [n["node_id"] for n in await repo.list_children(G1, "airframe")] == ["wing"]
             assert await repo.list_children(G1, "spar") == []
         finally:
             await db.close()
@@ -178,12 +191,10 @@ def test_delete_subtree():
         db, repo = await _repo()
         try:
             await _seed_tree(repo, G1)
-            await repo.upsert_node(G1, "rib", parent_id="wing", name="リブ",
-                                   now_text=NOW)
+            await repo.upsert_node(G1, "rib", parent_id="wing", name="リブ", now_text=NOW)
             deleted = await repo.delete_subtree(G1, "wing")
             assert deleted == 3  # wing + spar + rib
-            assert {n["node_id"] for n in await repo.list_nodes(G1)} == {
-                "airframe"}
+            assert {n["node_id"] for n in await repo.list_nodes(G1)} == {"airframe"}
         finally:
             await db.close()
 
@@ -192,6 +203,7 @@ def test_delete_subtree():
 
 def test_delete_subtree_survives_cycle():
     """循環参照があっても停止すること（不正データへの耐性）。"""
+
     async def _main():
         db, repo = await _repo()
         try:
@@ -212,9 +224,9 @@ def test_todoist_link_upsert_and_delete():
     async def _main():
         db, repo = await _repo()
         try:
-            await repo.upsert_todoist_link(G1, "主翼班", "wing", NOW,
-                                           notify_channel_id="123",
-                                           created_by="42")
+            await repo.upsert_todoist_link(
+                G1, "主翼班", "wing", NOW, notify_channel_id="123", created_by="42"
+            )
             links = await repo.list_todoist_links(G1)
             assert len(links) == 1
             assert links[0]["node_id"] == "wing"
@@ -257,15 +269,15 @@ def test_count_completed_layers_from_layer_records():
     async def _main():
         db, repo = await _repo()
         try:
-            for keta, layer in (("主桁1", "1"), ("主桁1", "2"),
-                                ("主桁1", "2"), ("主桁2", "1")):
+            for keta, layer in (("主桁1", "1"), ("主桁1", "2"), ("主桁1", "2"), ("主桁2", "1")):
                 await db.execute(
                     "INSERT INTO layer_records"
                     " (guild_id, user_id, keta, layer_num, started_at,"
                     "  ended_at, minutes)"
                     " VALUES (?, '1', ?, ?, '2026-08-01 10:00',"
                     "  '2026-08-01 11:00', 60)",
-                    (G1, keta, layer))
+                    (G1, keta, layer),
+                )
             counts = await repo.count_completed_layers(G1)
             # 同じ層の巻き直しは1層として数える
             assert counts == {"主桁1": 2, "主桁2": 1}
@@ -283,8 +295,7 @@ def test_nodes_are_isolated_per_guild():
         db, repo = await _repo()
         try:
             await _seed_tree(repo, G1)
-            await repo.upsert_node(G2, "airframe", name="別大学の機体",
-                                   now_text=NOW)
+            await repo.upsert_node(G2, "airframe", name="別大学の機体", now_text=NOW)
 
             assert await repo.count_nodes(G1) == 3
             assert await repo.count_nodes(G2) == 1
@@ -303,8 +314,7 @@ def test_updates_do_not_leak_across_guilds():
         db, repo = await _repo()
         try:
             await repo.upsert_node(G1, "airframe", name="1号機", now_text=NOW)
-            await repo.upsert_node(G2, "airframe", name="別大学の機体",
-                                   now_text=NOW)
+            await repo.upsert_node(G2, "airframe", name="別大学の機体", now_text=NOW)
 
             await repo.update_node(G1, "airframe", NOW, name="1号機（改）")
             assert (await repo.get_node(G2, "airframe"))["name"] == "別大学の機体"
@@ -344,7 +354,8 @@ def test_links_and_layer_counts_are_isolated():
                 "  ended_at, minutes)"
                 " VALUES (?, '1', '主桁1', '1', '2026-08-01 10:00',"
                 "  '2026-08-01 11:00', 60)",
-                (G1,))
+                (G1,),
+            )
 
             assert await repo.list_todoist_links(G2) == []
             assert await repo.list_spar_links(G2) == []

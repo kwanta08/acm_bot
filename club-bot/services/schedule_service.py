@@ -5,6 +5,7 @@
 リアクション絵文字と投票状態の対応:
   ok = 参加 / ng = 不参加 / maybe = 未定
 """
+
 from __future__ import annotations
 
 import uuid
@@ -64,7 +65,10 @@ def get_schedule_emojis(gconf, guild: discord.Guild | None = None) -> dict[str, 
                     "設定された絵文字が見つかりません"
                     " (status=%s, emoji_id=%s, guild=%s)。"
                     "既定絵文字へフォールバックします",
-                    status, emoji_id, getattr(guild, "id", "?"))
+                    status,
+                    emoji_id,
+                    getattr(guild, "id", "?"),
+                )
         resolved[status] = emoji or DEFAULT_STATUS_TO_EMOJI[status]
     return resolved
 
@@ -91,9 +95,13 @@ def build_emoji_maps(gconf, guild: discord.Guild | None = None) -> dict:
     }
 
 
-async def build_option_embed(repo: ScheduleRepository, bot: discord.Client,
-                             schedule: dict[str, Any], option: dict[str, Any],
-                             guild: discord.Guild | None) -> discord.Embed:
+async def build_option_embed(
+    repo: ScheduleRepository,
+    bot: discord.Client,
+    schedule: dict[str, Any],
+    option: dict[str, Any],
+    guild: discord.Guild | None,
+) -> discord.Embed:
     """候補日程1件分の投票状況 Embed を生成する（仕様 11.2.4）。"""
     votes = await repo.list_votes(option["option_id"])
     ok_users, ng_users, maybe_users = [], [], []
@@ -122,12 +130,11 @@ async def build_option_embed(repo: ScheduleRepository, bot: discord.Client,
         embed.add_field(name="場所", value=schedule["place"], inline=True)
     embed.add_field(name="締切", value=fmt_jp(from_iso(schedule["deadline"])), inline=True)
     embed.add_field(name="対象", value=target_role_name, inline=True)
-    embed.add_field(name=f"参加 ({len(ok_users)})",
-                    value="\n".join(ok_users) or "—", inline=True)
-    embed.add_field(name=f"不参加 ({len(ng_users)})",
-                    value="\n".join(ng_users) or "—", inline=True)
-    embed.add_field(name=f"未定 ({len(maybe_users)})",
-                    value="\n".join(maybe_users) or "—", inline=True)
+    embed.add_field(name=f"参加 ({len(ok_users)})", value="\n".join(ok_users) or "—", inline=True)
+    embed.add_field(name=f"不参加 ({len(ng_users)})", value="\n".join(ng_users) or "—", inline=True)
+    embed.add_field(
+        name=f"未定 ({len(maybe_users)})", value="\n".join(maybe_users) or "—", inline=True
+    )
     embed.add_field(name="未回答者数", value=unanswered_count, inline=True)
     if schedule.get("description"):
         embed.add_field(name="説明", value=schedule["description"], inline=False)
@@ -145,9 +152,12 @@ async def _resolve_name(bot: discord.Client, guild: discord.Guild | None, user_i
     return f"<@{user_id}>"
 
 
-async def build_summary_embed(repo: ScheduleRepository, bot: discord.Client,
-                              schedule: dict[str, Any],
-                              guild: discord.Guild | None) -> discord.Embed:
+async def build_summary_embed(
+    repo: ScheduleRepository,
+    bot: discord.Client,
+    schedule: dict[str, Any],
+    guild: discord.Guild | None,
+) -> discord.Embed:
     """締切後の結果要約 Embed（仕様 11.2.5）。"""
     options = await repo.list_options(schedule["schedule_id"])
     embed = schedule_embed(f"【締切】{schedule['title']} 集計結果")
@@ -170,9 +180,7 @@ async def build_summary_embed(repo: ScheduleRepository, bot: discord.Client,
             elif v["status"] == "maybe":
                 maybe_users.append(name)
 
-        summary_line = (
-            f"参加 {len(ok_users)}　不参加 {len(ng_users)}　未定 {len(maybe_users)}"
-        )
+        summary_line = f"参加 {len(ok_users)}　不参加 {len(ng_users)}　未定 {len(maybe_users)}"
         detail_lines = []
         if ok_users:
             detail_lines.append(f"参加: {', '.join(ok_users)}")

@@ -19,6 +19,7 @@
 迂回するコードを書く必要がある。迂回していないことは
 tests/test_dashboard_scope.py が検査する。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -60,13 +61,10 @@ class GuildScope:
     def require(self, level: Level) -> None:
         """権限レベルが足りなければ 403 を投げる。"""
         if self.level < level:
-            raise HTTPException(
-                status_code=403,
-                detail="この操作を行う権限がありません。")
+            raise HTTPException(status_code=403, detail="この操作を行う権限がありません。")
 
 
-async def resolve_level(db: Database, guild_id: int, user_id: str,
-                        manage_guild: bool) -> Level:
+async def resolve_level(db: Database, guild_id: int, user_id: str, manage_guild: bool) -> Level:
     """ダッシュボード上の権限レベルを決める。
 
     bot 側の utils/permissions.py のレベル体系に合わせる:
@@ -87,8 +85,7 @@ async def resolve_level(db: Database, guild_id: int, user_id: str,
 
 async def require_guild_scope(
     request: Request,
-    guild_id: Annotated[int, Path(ge=1,
-                                  description="対象サーバー（Discord ギルド）ID")],
+    guild_id: Annotated[int, Path(ge=1, description="対象サーバー（Discord ギルド）ID")],
 ) -> GuildScope:
     """URL の guild_id をセッションと照合し、検証済みスコープを返す。
 
@@ -104,12 +101,9 @@ async def require_guild_scope(
 
     session_guild = auth.find_session_guild(request.session, guild_id)
     if session_guild is None:
-        raise HTTPException(
-            status_code=403,
-            detail="このサーバーのデータにはアクセスできません。")
+        raise HTTPException(status_code=403, detail="このサーバーのデータにはアクセスできません。")
 
-    level = await resolve_level(get_database(), guild_id, user.id,
-                                session_guild.manage_guild)
+    level = await resolve_level(get_database(), guild_id, user.id, session_guild.manage_guild)
     return GuildScope(
         guild_id=guild_id,
         guild_name=session_guild.name,

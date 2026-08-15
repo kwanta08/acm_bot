@@ -7,6 +7,7 @@
 
 実行: venv/bin/python -m pytest tests/  （pytest 未導入なら直接実行も可）
 """
+
 import asyncio
 import os
 import sys
@@ -47,17 +48,19 @@ def test_schema_is_latest():
             assert row[0] == SCHEMA_VERSION
             for view in ("v_attendance", "v_team_summary", "v_todoist_status"):
                 rows = await db.fetchall(
-                    "SELECT name FROM sqlite_master WHERE type='view' AND name = ?",
-                    (view,))
+                    "SELECT name FROM sqlite_master WHERE type='view' AND name = ?", (view,)
+                )
                 assert rows, f"{view} がありません"
         finally:
             await db.close()
+
     run(_main())
 
 
 def test_migrate_v6_noop_on_sqlite():
     """v6（PostgreSQL guild_id BIGINT 化）は SQLite では何もせず、
     v5 相当の DB が最新バージョンへ更新されること。"""
+
     async def _main():
         db = await _connected_db()
         try:
@@ -68,11 +71,11 @@ def test_migrate_v6_noop_on_sqlite():
             row = await db.fetchone("PRAGMA user_version")
             assert row[0] == SCHEMA_VERSION
             # ビューが壊れていないこと
-            rows = await db.fetchall(
-                "SELECT name FROM sqlite_master WHERE type='view'")
+            rows = await db.fetchall("SELECT name FROM sqlite_master WHERE type='view'")
             assert len(rows) >= 3
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -83,26 +86,37 @@ def test_attendance_view_guild_isolation():
             repo = ScheduleRepository(db)
             for gid, sid in ((G1, "sch1"), (G2, "sch2")):
                 await repo.create_schedule(
-                    gid, schedule_id=sid, title=f"title-{sid}", description=None,
-                    place=None, target_role_id=None,
+                    gid,
+                    schedule_id=sid,
+                    title=f"title-{sid}",
+                    description=None,
+                    place=None,
+                    target_role_id=None,
                     deadline_iso="2099-01-01T00:00:00",
-                    created_by="u1", channel_id="ch")
-                await repo.add_option(gid, f"opt-{sid}", sid, "候補A",
-                                      "2099-01-01", None, "msg")
+                    created_by="u1",
+                    channel_id="ch",
+                )
+                await repo.add_option(gid, f"opt-{sid}", sid, "候補A", "2099-01-01", None, "msg")
             await repo.set_vote(G1, "opt-sch1", "u1", "ok")
             await repo.set_vote(G1, "opt-sch1", "u2", "ng")
             await repo.set_vote(G2, "opt-sch2", "u1", "maybe")
 
-            rows1 = await db.fetchall(
-                "SELECT * FROM v_attendance WHERE guild_id = ?", (G1,))
-            rows2 = await db.fetchall(
-                "SELECT * FROM v_attendance WHERE guild_id = ?", (G2,))
+            rows1 = await db.fetchall("SELECT * FROM v_attendance WHERE guild_id = ?", (G1,))
+            rows2 = await db.fetchall("SELECT * FROM v_attendance WHERE guild_id = ?", (G2,))
             assert len(rows1) == 2
             assert len(rows2) == 1
             # attendance シート相当の列構成
             r = dict(rows1[0])
-            assert {"guild_id", "schedule_id", "event_title", "option_label",
-                    "user_id", "status", "updated_at", "deadline"} <= set(r)
+            assert {
+                "guild_id",
+                "schedule_id",
+                "event_title",
+                "option_label",
+                "user_id",
+                "status",
+                "updated_at",
+                "deadline",
+            } <= set(r)
             assert r["event_title"] == "title-sch1"
             assert r["option_label"] == "候補A"
             # 他ギルドの投票が混入しない
@@ -110,6 +124,7 @@ def test_attendance_view_guild_isolation():
             assert dict(rows2[0])["status"] == "maybe"
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -128,8 +143,8 @@ def test_team_summary_view_guild_isolation():
             await repo.upsert_member(G2, "u1", "Taro", "design")
 
             rows = await db.fetchall(
-                "SELECT * FROM v_team_summary WHERE guild_id = ?"
-                " ORDER BY team_key", (G1,))
+                "SELECT * FROM v_team_summary WHERE guild_id = ? ORDER BY team_key", (G1,)
+            )
             assert len(rows) == 2
             design = dict(rows[0])
             assert design["team_key"] == "design"
@@ -138,12 +153,12 @@ def test_team_summary_view_guild_isolation():
             wing = dict(rows[1])
             assert wing["member_count"] == 1
 
-            rows2 = await db.fetchall(
-                "SELECT * FROM v_team_summary WHERE guild_id = ?", (G2,))
+            rows2 = await db.fetchall("SELECT * FROM v_team_summary WHERE guild_id = ?", (G2,))
             assert len(rows2) == 1
             assert dict(rows2[0])["member_count"] == 1
         finally:
             await db.close()
+
     run(_main())
 
 

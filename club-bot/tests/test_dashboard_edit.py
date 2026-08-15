@@ -5,6 +5,7 @@
 - **他サーバーの行 ID を指定しても更新されないこと**
 - 変更が audit_log に必ず記録されること（変更前後の値つき）
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -46,9 +47,13 @@ def _tmp_db_path() -> str:
 
 def _config(db_path: str) -> DashboardConfig:
     return DashboardConfig(
-        client_id="cid", client_secret="secret",
+        client_id="cid",
+        client_secret="secret",
         redirect_uri="https://example.com/auth/callback",
-        secret_key="unit-test-secret", db_path=db_path, secure_cookie=False)
+        secret_key="unit-test-secret",
+        db_path=db_path,
+        secure_cookie=False,
+    )
 
 
 async def _seed(db_path: str) -> dict[str, int]:
@@ -61,16 +66,16 @@ async def _seed(db_path: str) -> dict[str, int]:
         progress = ProgressRepository(db)
         for guild_id, mark in ((GUILD_A, "A大学"), (GUILD_B, "B大学")):
             await members.upsert_member(guild_id, USER_ID, f"{mark}の部員")
-            await progress.upsert_node(guild_id, "m1", name=f"{mark}の機体",
-                                       manual_progress=0.1, now_text=NOW)
-        rows = await db.fetchall(
-            "SELECT guild_id, member_id FROM members ORDER BY member_id")
+            await progress.upsert_node(
+                guild_id, "m1", name=f"{mark}の機体", manual_progress=0.1, now_text=NOW
+            )
+        rows = await db.fetchall("SELECT guild_id, member_id FROM members ORDER BY member_id")
         ids = {int(r["guild_id"]): int(r["member_id"]) for r in rows}
-        node_rows = await db.fetchall(
-            "SELECT guild_id, progress_node_id FROM progress_nodes")
-        return {"member": ids,
-                "node": {int(r["guild_id"]): int(r["progress_node_id"])
-                         for r in node_rows}}
+        node_rows = await db.fetchall("SELECT guild_id, progress_node_id FROM progress_nodes")
+        return {
+            "member": ids,
+            "node": {int(r["guild_id"]): int(r["progress_node_id"]) for r in node_rows},
+        }
     finally:
         await db.close()
 
@@ -90,8 +95,9 @@ def _transport(guilds: list[dict]):
 
 def _client(db_path: str, *, permissions: str = "32") -> TestClient:
     app = create_app(_config(db_path))
-    app.state.http_client = httpx.AsyncClient(transport=_transport(
-        [{"id": str(GUILD_A), "name": "A大学", "permissions": permissions}]))
+    app.state.http_client = httpx.AsyncClient(
+        transport=_transport([{"id": str(GUILD_A), "name": "A大学", "permissions": permissions}])
+    )
     client = TestClient(app, follow_redirects=False)
     client.__enter__()
     res = client.get("/auth/login")
@@ -115,11 +121,12 @@ async def _audit_entries(db_path: str, guild_id: int) -> list[dict]:
 def test_plain_member_cannot_edit():
     db_path = _tmp_db_path()
     ids = asyncio.run(_seed(db_path))
-    client = _client(db_path, permissions="0")   # サーバー管理権限なし・班長でもない
+    client = _client(db_path, permissions="0")  # サーバー管理権限なし・班長でもない
     try:
         res = client.patch(
             f"/api/guilds/{GUILD_A}/tables/members/{ids['member'][GUILD_A]}",
-            json={"display_name": "書き換え"})
+            json={"display_name": "書き換え"},
+        )
         assert res.status_code == 403
     finally:
         client.__exit__(None, None, None)
@@ -155,7 +162,8 @@ def test_leader_can_edit():
     try:
         res = client.patch(
             f"/api/guilds/{GUILD_A}/tables/members/{ids['member'][GUILD_A]}",
-            json={"display_name": "班長が更新"})
+            json={"display_name": "班長が更新"},
+        )
         assert res.status_code == 200
         assert res.json()["row"]["display_name"] == "班長が更新"
     finally:
@@ -169,7 +177,8 @@ def test_unauthenticated_cannot_edit():
     with TestClient(app) as client:
         res = client.patch(
             f"/api/guilds/{GUILD_A}/tables/members/{ids['member'][GUILD_A]}",
-            json={"display_name": "x"})
+            json={"display_name": "x"},
+        )
         assert res.status_code == 401
 
 
@@ -185,13 +194,17 @@ def test_cannot_edit_other_guild_row():
     try:
         # 自分のサーバーの URL に他サーバーの行 ID を混ぜる
         res = client.patch(
-            f"/api/guilds/{GUILD_A}/tables/members/{other_id}",
-            json={"display_name": "乗っ取り"})
+            f"/api/guilds/{GUILD_A}/tables/members/{other_id}", json={"display_name": "乗っ取り"}
+        )
         assert res.status_code == 404
         # 他サーバーの URL は 403
-        assert client.patch(
-            f"/api/guilds/{GUILD_B}/tables/members/{other_id}",
-            json={"display_name": "乗っ取り"}).status_code == 403
+        assert (
+            client.patch(
+                f"/api/guilds/{GUILD_B}/tables/members/{other_id}",
+                json={"display_name": "乗っ取り"},
+            ).status_code
+            == 403
+        )
     finally:
         client.__exit__(None, None, None)
 
@@ -215,13 +228,15 @@ def test_non_editable_column_is_rejected():
     ids = asyncio.run(_seed(db_path))
     client = _client(db_path)
     try:
-        for payload in ({"user_id": "999"},        # 編集不可
-                        {"guild_id": GUILD_B},     # スコープ列
-                        {"member_id": 1},          # 主キー
-                        {"unknown": "x"}):         # 存在しない列
+        for payload in (
+            {"user_id": "999"},  # 編集不可
+            {"guild_id": GUILD_B},  # スコープ列
+            {"member_id": 1},  # 主キー
+            {"unknown": "x"},
+        ):  # 存在しない列
             res = client.patch(
-                f"/api/guilds/{GUILD_A}/tables/members/"
-                f"{ids['member'][GUILD_A]}", json=payload)
+                f"/api/guilds/{GUILD_A}/tables/members/{ids['member'][GUILD_A]}", json=payload
+            )
             assert res.status_code == 400, payload
     finally:
         client.__exit__(None, None, None)
@@ -232,15 +247,22 @@ def test_empty_body_and_unknown_table():
     ids = asyncio.run(_seed(db_path))
     client = _client(db_path)
     try:
-        assert client.patch(
-            f"/api/guilds/{GUILD_A}/tables/members/"
-            f"{ids['member'][GUILD_A]}", json={}).status_code == 400
-        assert client.patch(
-            f"/api/guilds/{GUILD_A}/tables/settings/1",
-            json={"x": 1}).status_code == 404
-        assert client.patch(
-            f"/api/guilds/{GUILD_A}/tables/members/999999",
-            json={"display_name": "x"}).status_code == 404
+        assert (
+            client.patch(
+                f"/api/guilds/{GUILD_A}/tables/members/{ids['member'][GUILD_A]}", json={}
+            ).status_code
+            == 400
+        )
+        assert (
+            client.patch(f"/api/guilds/{GUILD_A}/tables/settings/1", json={"x": 1}).status_code
+            == 404
+        )
+        assert (
+            client.patch(
+                f"/api/guilds/{GUILD_A}/tables/members/999999", json={"display_name": "x"}
+            ).status_code
+            == 404
+        )
     finally:
         client.__exit__(None, None, None)
 
@@ -252,7 +274,8 @@ def test_progress_value_round_trip():
     try:
         res = client.patch(
             f"/api/guilds/{GUILD_A}/tables/progress/{ids['node'][GUILD_A]}",
-            json={"manual_progress": 0.75, "status": "製作中"})
+            json={"manual_progress": 0.75, "status": "製作中"},
+        )
         assert res.status_code == 200
         row = res.json()["row"]
         assert row["manual_progress"] == 0.75
@@ -271,7 +294,8 @@ def test_edit_is_recorded_in_audit_log():
     try:
         client.patch(
             f"/api/guilds/{GUILD_A}/tables/members/{ids['member'][GUILD_A]}",
-            json={"display_name": "新しい名前"})
+            json={"display_name": "新しい名前"},
+        )
     finally:
         client.__exit__(None, None, None)
 
@@ -296,7 +320,8 @@ def test_rejected_edit_is_also_recorded():
     try:
         client.patch(
             f"/api/guilds/{GUILD_A}/tables/members/{ids['member'][GUILD_A]}",
-            json={"user_id": "999"})
+            json={"user_id": "999"},
+        )
     finally:
         client.__exit__(None, None, None)
 
@@ -316,8 +341,8 @@ def test_repository_update_is_guild_scoped():
             repo = TableRepository(db)
             # GUILD_A のスコープで GUILD_B の行 ID を指定しても更新されない
             changed = await repo.update_row(
-                GUILD_A, "members", ids["member"][GUILD_B],
-                {"display_name": "乗っ取り"})
+                GUILD_A, "members", ids["member"][GUILD_B], {"display_name": "乗っ取り"}
+            )
             assert changed is False
             row = await MemberRepository(db).get_member(GUILD_B, USER_ID)
             assert row["display_name"] == "B大学の部員"

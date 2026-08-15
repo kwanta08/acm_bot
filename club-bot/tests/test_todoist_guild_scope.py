@@ -9,6 +9,7 @@
 
 実行: venv/bin/python -m pytest tests/
 """
+
 import asyncio
 import os
 import sys

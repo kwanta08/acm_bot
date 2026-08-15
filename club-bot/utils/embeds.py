@@ -4,6 +4,7 @@ Embed 生成ユーティリティ（仕様 13）。
 - 機能ごとに色を固定（13.2）
 - フッターに更新時刻を表示（13.1）
 """
+
 from __future__ import annotations
 
 import discord
@@ -29,23 +30,33 @@ def _base(title: str, description: str | None, color: int, executor: str | None)
     return embed
 
 
-def schedule_embed(title: str, description: str | None = None, executor: str | None = None) -> discord.Embed:
+def schedule_embed(
+    title: str, description: str | None = None, executor: str | None = None
+) -> discord.Embed:
     return _base(title, description, COLOR_SCHEDULE, executor)
 
 
-def task_embed(title: str, description: str | None = None, executor: str | None = None) -> discord.Embed:
+def task_embed(
+    title: str, description: str | None = None, executor: str | None = None
+) -> discord.Embed:
     return _base(title, description, COLOR_TASKS, executor)
 
 
-def member_embed(title: str, description: str | None = None, executor: str | None = None) -> discord.Embed:
+def member_embed(
+    title: str, description: str | None = None, executor: str | None = None
+) -> discord.Embed:
     return _base(title, description, COLOR_MEMBERS, executor)
 
 
-def info_embed(title: str, description: str | None = None, executor: str | None = None) -> discord.Embed:
+def info_embed(
+    title: str, description: str | None = None, executor: str | None = None
+) -> discord.Embed:
     return _base(title, description, COLOR_INFO, executor)
 
 
-def success_embed(title: str, description: str | None = None, executor: str | None = None) -> discord.Embed:
+def success_embed(
+    title: str, description: str | None = None, executor: str | None = None
+) -> discord.Embed:
     return _base(title, description, COLOR_SUCCESS, executor)
 
 

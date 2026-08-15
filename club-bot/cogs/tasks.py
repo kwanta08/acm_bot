@@ -8,6 +8,7 @@ local_task_id ↔ todoist_task_id を対応付ける。/today で「今日やる
 マルチテナント版: 全ローカル DB データを interaction.guild.id でスコープする。
 （Todoist 連携設定自体はグローバルのまま）
 """
+
 from __future__ import annotations
 
 import discord
@@ -28,9 +29,9 @@ log = get_logger("tasks")
 
 PRIORITY_LABELS = {1: "低", 2: "中", 3: "高", 4: "最優先"}
 
+
 class SectionSelectView(discord.ui.View):
-    def __init__(self, cog: Tasks, candidates: list[dict],
-                 owner_id: int, **task_kwargs):
+    def __init__(self, cog: Tasks, candidates: list[dict], owner_id: int, **task_kwargs):
         super().__init__(timeout=120)
         self.cog = cog
         self.owner_id = owner_id
@@ -55,19 +56,18 @@ class SectionSelectView(discord.ui.View):
         # タスク作成が確定しないようにする）
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message(
-                "このメニューはコマンドを実行した本人のみ操作できます。",
-                ephemeral=True)
+                "このメニューはコマンドを実行した本人のみ操作できます。", ephemeral=True
+            )
             return
         section_id = interaction.data["values"][0]
         await interaction.response.defer(ephemeral=True)
-        await self.cog._finalize_add_task(
-            interaction, section_id=section_id, **self.task_kwargs
-        )
+        await self.cog._finalize_add_task(interaction, section_id=section_id, **self.task_kwargs)
         self.stop()
 
     async def on_timeout(self) -> None:
         for item in self.children:
             item.disabled = True
+
 
 class Tasks(commands.Cog):
     def __init__(self, bot: commands.Bot):
@@ -79,22 +79,26 @@ class Tasks(commands.Cog):
     group = app_commands.Group(name="task", description="タスク管理（Todoist 連携）")
 
     # ---------- autocomplete / 班検証 ----------
-    async def _team_ac(self, interaction: discord.Interaction,
-                       current: str) -> list[app_commands.Choice[str]]:
+    async def _team_ac(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
         if interaction.guild is None:
             return []
         return await team_service.team_choices(self.bot.db, interaction.guild.id, current)
 
-    async def _resolve_team(self, interaction: discord.Interaction,
-                            guild_id: int, team_key: str) -> dict | None:
+    async def _resolve_team(
+        self, interaction: discord.Interaction, guild_id: int, team_key: str
+    ) -> dict | None:
         """有効な班を返す。無効ならエラーを返信して None。"""
         t = await self.member_repo.get_team(guild_id, team_key)
         if not t or not t["active_flag"]:
             await interaction.followup.send(
                 embed=error_embed(
                     f"班 `{team_key}` は登録されていません。"
-                    "管理者に `/team-add` での登録を依頼してください。"),
-                ephemeral=True)
+                    "管理者に `/team-add` での登録を依頼してください。"
+                ),
+                ephemeral=True,
+            )
             return None
         return t
 
@@ -104,22 +108,36 @@ class Tasks(commands.Cog):
 
     @staticmethod
     def _todoist_unconfigured_embed() -> discord.Embed:
-        return info_embed("Todoist 未設定",
-                          "このサーバーでは Todoist が未設定です。\n"
-                          "管理者が `/todoist-setup` で登録してください。")
+        return info_embed(
+            "Todoist 未設定",
+            "このサーバーでは Todoist が未設定です。\n"
+            "管理者が `/todoist-setup` で登録してください。",
+        )
 
     # ---------- add ----------
     @group.command(name="add", description="新規タスクを作成します。")
     @app_commands.describe(
-        title="タスク名", due="期限（例: 2026-07-05 18:00）", assignee="担当者",
-        team="関連班", priority="優先度 1〜4", location="作業拠点", note="補足")
+        title="タスク名",
+        due="期限（例: 2026-07-05 18:00）",
+        assignee="担当者",
+        team="関連班",
+        priority="優先度 1〜4",
+        location="作業拠点",
+        note="補足",
+    )
     @app_commands.autocomplete(team=_team_ac)
     @require(Level.L1)
-    async def add(self, interaction: discord.Interaction, title: str,
-                  due: str | None = None, assignee: discord.Member | None = None,
-                  team: str | None = None,
-                  priority: app_commands.Range[int, 1, 4] | None = None,
-                  location: str | None = None, note: str | None = None):
+    async def add(
+        self,
+        interaction: discord.Interaction,
+        title: str,
+        due: str | None = None,
+        assignee: discord.Member | None = None,
+        team: str | None = None,
+        priority: app_commands.Range[int, 1, 4] | None = None,
+        location: str | None = None,
+        note: str | None = None,
+    ):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -149,9 +167,16 @@ class Tasks(commands.Cog):
 
         task_kwargs = {
             "guild_id": guild_id,
-            "title": title, "due_iso": due_iso, "due_string": due_string, "due": due,
-            "assignee": assignee, "team_key": team_key, "team_name": team_name,
-            "priority": priority, "location": location, "note": note,
+            "title": title,
+            "due_iso": due_iso,
+            "due_string": due_string,
+            "due": due,
+            "assignee": assignee,
+            "team_key": team_key,
+            "team_name": team_name,
+            "priority": priority,
+            "location": location,
+            "note": note,
         }
 
         if len(candidates) <= 1:
@@ -164,16 +189,29 @@ class Tasks(commands.Cog):
         await interaction.followup.send(
             embed=info_embed(
                 "配置先セクションを選択してください",
-                f"{team_name}班には複数のセクションが紐付いています。"),
-            view=view, ephemeral=True)
+                f"{team_name}班には複数のセクションが紐付いています。",
+            ),
+            view=view,
+            ephemeral=True,
+        )
 
-    async def _finalize_add_task(self, interaction: discord.Interaction, *,
-                                  guild_id: int, section_id: str | None, title: str,
-                                  due_iso: str | None, due_string: str | None,
-                                  due: str | None, assignee: discord.Member | None,
-                                  team_key: str | None, team_name: str | None,
-                                  priority: int | None, location: str | None,
-                                  note: str | None):
+    async def _finalize_add_task(
+        self,
+        interaction: discord.Interaction,
+        *,
+        guild_id: int,
+        section_id: str | None,
+        title: str,
+        due_iso: str | None,
+        due_string: str | None,
+        due: str | None,
+        assignee: discord.Member | None,
+        team_key: str | None,
+        team_name: str | None,
+        priority: int | None,
+        location: str | None,
+        note: str | None,
+    ):
         # Todoist 反映（仕様 11.3.3）。未登録ギルドではローカル登録のみ行う
         todoist_id = None
         svc = await self._todoist_svc(guild_id)
@@ -183,20 +221,33 @@ class Tasks(commands.Cog):
                 if team_name:
                     content = f"[{team_name}] {title}"
                 todoist_id = await svc.add_task(
-                    content=content, due_string=due_string, priority=priority,
-                    description=note, section_id=section_id)
+                    content=content,
+                    due_string=due_string,
+                    priority=priority,
+                    description=note,
+                    section_id=section_id,
+                )
             except TodoistError:
                 await interaction.followup.send(
-                    embed=error_embed("Todoist への登録に失敗しました。時間をおいて再試行してください。",
-                                      code="TODOIST_API_FAILED"),
-                    ephemeral=True)
+                    embed=error_embed(
+                        "Todoist への登録に失敗しました。時間をおいて再試行してください。",
+                        code="TODOIST_API_FAILED",
+                    ),
+                    ephemeral=True,
+                )
                 return
 
         local_id = await self.repo.create_task(
             guild_id,
-            title=title, created_by=str(interaction.user.id), todoist_task_id=todoist_id,
-            assignee_id=str(assignee.id) if assignee else None, team_key=team_key,
-            due_date=due_iso, priority=priority, location_key=location)
+            title=title,
+            created_by=str(interaction.user.id),
+            todoist_task_id=todoist_id,
+            assignee_id=str(assignee.id) if assignee else None,
+            team_key=team_key,
+            due_date=due_iso,
+            priority=priority,
+            location_key=location,
+        )
 
         desc = f"ローカル ID: `{local_id}`"
         if todoist_id:
@@ -205,11 +256,10 @@ class Tasks(commands.Cog):
             desc += f"\n担当: {assignee.display_name}"
         if due_iso:
             desc += f"\n期限: {fmt_jp(from_iso(due_iso))}"
-        embed = success_embed(f"タスクを作成しました: {title}", desc,
-                              executor=interaction.user.display_name)
+        embed = success_embed(
+            f"タスクを作成しました: {title}", desc, executor=interaction.user.display_name
+        )
         await interaction.followup.send(embed=embed, ephemeral=True)
-
-
 
     # ---------- list ----------
     @group.command(name="list", description="タスク一覧を表示します。")
@@ -237,7 +287,8 @@ class Tasks(commands.Cog):
         task = await self.repo.get_task(guild_id, task_id)
         if not task or task["status"] != "open":
             await interaction.followup.send(
-                embed=error_embed("対象の未完了タスクが見つかりません。"), ephemeral=True)
+                embed=error_embed("対象の未完了タスクが見つかりません。"), ephemeral=True
+            )
             return
         svc = await self._todoist_svc(guild_id)
         if task.get("todoist_task_id") and svc.enabled:
@@ -247,10 +298,13 @@ class Tasks(commands.Cog):
                 pass  # ローカルは完了扱いにする
         await self.repo.complete_task(guild_id, task_id)
         await interaction.followup.send(
-            embed=success_embed("完了にしました", f"`{task_id}` {task['title']}",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
-
+            embed=success_embed(
+                "完了にしました",
+                f"`{task_id}` {task['title']}",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     # ---------- delete ----------
     @group.command(name="delete", description="タスクを削除します。")
@@ -264,7 +318,8 @@ class Tasks(commands.Cog):
         task = await self.repo.get_task(guild_id, task_id)
         if not task:
             await interaction.followup.send(
-                embed=error_embed("対象タスクが見つかりません。"), ephemeral=True)
+                embed=error_embed("対象タスクが見つかりません。"), ephemeral=True
+            )
             return
         svc = await self._todoist_svc(guild_id)
         if task.get("todoist_task_id") and svc.enabled:
@@ -274,17 +329,21 @@ class Tasks(commands.Cog):
                 pass
         await self.repo.delete_task(guild_id, task_id)
         await interaction.followup.send(
-            embed=success_embed("削除しました", f"`{task_id}` {task['title']}",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
-
+            embed=success_embed(
+                "削除しました",
+                f"`{task_id}` {task['title']}",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     # ---------- assign ----------
     @group.command(name="assign", description="担当者を変更します。")
     @app_commands.describe(task_id="ローカルタスク ID", assignee="担当者")
     @require(Level.L2)
-    async def assign(self, interaction: discord.Interaction, task_id: int,
-                     assignee: discord.Member):
+    async def assign(
+        self, interaction: discord.Interaction, task_id: int, assignee: discord.Member
+    ):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -292,22 +351,29 @@ class Tasks(commands.Cog):
         task = await self.repo.get_task(guild_id, task_id)
         if not task:
             await interaction.followup.send(
-                embed=error_embed("対象タスクが見つかりません。"), ephemeral=True)
+                embed=error_embed("対象タスクが見つかりません。"), ephemeral=True
+            )
             return
         await self.repo.set_assignee(guild_id, task_id, str(assignee.id))
         await interaction.followup.send(
-            embed=success_embed("担当者を変更しました",
-                                f"`{task_id}` → {assignee.display_name}",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
-
+            embed=success_embed(
+                "担当者を変更しました",
+                f"`{task_id}` → {assignee.display_name}",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     # ---------- priority ----------
     @group.command(name="priority", description="優先度を変更します。")
     @app_commands.describe(task_id="ローカルタスク ID", priority="優先度 1〜4")
     @require(Level.L1)
-    async def priority(self, interaction: discord.Interaction, task_id: int,
-                       priority: app_commands.Range[int, 1, 4]):
+    async def priority(
+        self,
+        interaction: discord.Interaction,
+        task_id: int,
+        priority: app_commands.Range[int, 1, 4],
+    ):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -315,15 +381,18 @@ class Tasks(commands.Cog):
         task = await self.repo.get_task(guild_id, task_id)
         if not task:
             await interaction.followup.send(
-                embed=error_embed("対象タスクが見つかりません。"), ephemeral=True)
+                embed=error_embed("対象タスクが見つかりません。"), ephemeral=True
+            )
             return
         await self.repo.set_priority(guild_id, task_id, priority)
         await interaction.followup.send(
-            embed=success_embed("優先度を変更しました",
-                                f"`{task_id}` → {PRIORITY_LABELS.get(priority, priority)}",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
-
+            embed=success_embed(
+                "優先度を変更しました",
+                f"`{task_id}` → {PRIORITY_LABELS.get(priority, priority)}",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     # ---------- overdue ----------
     @group.command(name="overdue", description="期限超過タスク一覧を表示します。")
@@ -334,6 +403,7 @@ class Tasks(commands.Cog):
         if guild_id is None:
             return
         from utils.parser import now
+
         today = now().date().isoformat()
         tasks = await self.repo.list_overdue(guild_id, today)
         embed = self._build_task_list_embed("期限超過タスク", tasks, interaction.guild)
@@ -364,8 +434,10 @@ class Tasks(commands.Cog):
                 await interaction.followup.send(
                     embed=info_embed(
                         f"{team_name}班のセクション未紐付け",
-                        "`/task link-section` でセクションを紐付けてください。"
-                    ), ephemeral=True)
+                        "`/task link-section` でセクションを紐付けてください。",
+                    ),
+                    ephemeral=True,
+                )
                 return
 
             try:
@@ -376,7 +448,8 @@ class Tasks(commands.Cog):
             except TodoistError:
                 await interaction.followup.send(
                     embed=error_embed("Todoist の取得に失敗しました。", code="TODOIST_API_FAILED"),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
 
             embed = self._build_todoist_task_list_embed(
@@ -385,7 +458,9 @@ class Tasks(commands.Cog):
         else:
             # フォールバック: ローカルDB
             tasks = await self.repo.list_tasks(guild_id, status="open", team_key=team)
-            embed = self._build_task_list_embed(f"班別タスク: {team_name}", tasks, interaction.guild)
+            embed = self._build_task_list_embed(
+                f"班別タスク: {team_name}", tasks, interaction.guild
+            )
 
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -400,24 +475,27 @@ class Tasks(commands.Cog):
         svc = await self._todoist_svc(guild_id)
         if not svc.enabled:
             await interaction.followup.send(
-                embed=self._todoist_unconfigured_embed(), ephemeral=True)
+                embed=self._todoist_unconfigured_embed(), ephemeral=True
+            )
             return
         try:
             await svc.ensure_label()
         except TodoistError:
             await interaction.followup.send(
-                embed=error_embed("同期に失敗しました。", code="TODOIST_API_FAILED"),
-                ephemeral=True)
+                embed=error_embed("同期に失敗しました。", code="TODOIST_API_FAILED"), ephemeral=True
+            )
             return
         await interaction.followup.send(
             embed=success_embed("同期を実行しました", executor=interaction.user.display_name),
-            ephemeral=True)
+            ephemeral=True,
+        )
 
     # ====================================================================
     # Todoist セクション ↔ 班 の連携
     # ====================================================================
-    @group.command(name="sections",
-                   description="Todoist のセクション一覧と、班との紐付け状況を表示します。")
+    @group.command(
+        name="sections", description="Todoist のセクション一覧と、班との紐付け状況を表示します。"
+    )
     @require(Level.L2)
     async def sections(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -427,42 +505,47 @@ class Tasks(commands.Cog):
         svc = await self._todoist_svc(guild_id)
         if not svc.enabled:
             await interaction.followup.send(
-                embed=self._todoist_unconfigured_embed(), ephemeral=True)
+                embed=self._todoist_unconfigured_embed(), ephemeral=True
+            )
             return
         try:
             sections = await svc.get_sections()
         except TodoistError:
             await interaction.followup.send(
                 embed=error_embed("セクション取得に失敗しました。", code="TODOIST_API_FAILED"),
-                ephemeral=True)
+                ephemeral=True,
+            )
             return
 
         links = await self.section_repo.list_links(guild_id)
         link_map = {l["section_id"]: l["team_key"] for l in links}
         team_names = await team_service.team_name_map(self.bot.db, guild_id)
 
-        embed = task_embed("Todoist セクション一覧",
-                           "`/task link-section` で班と紐付けてください。")
+        embed = task_embed(
+            "Todoist セクション一覧", "`/task link-section` で班と紐付けてください。"
+        )
         if not sections:
-            embed.add_field(name="（セクションなし）",
-                            value="Todoist プロジェクトにセクションがありません。", inline=False)
+            embed.add_field(
+                name="（セクションなし）",
+                value="Todoist プロジェクトにセクションがありません。",
+                inline=False,
+            )
         for s in sections[:25]:
             sid = str(s.id)
             team_key = link_map.get(sid)
             team_disp = team_names.get(team_key, team_key) if team_key else "未紐付け"
             embed.add_field(
-                name=f"{s.name}",
-                value=f"section_id: `{sid}`\n紐付け: {team_disp}",
-                inline=False)
+                name=f"{s.name}", value=f"section_id: `{sid}`\n紐付け: {team_disp}", inline=False
+            )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @group.command(name="link-section",
-                   description="Todoist のセクションIDと班を紐付けます。")
-    @app_commands.describe(team="対象の班", section_id="Todoist の section_id（/task sections で確認）")
+    @group.command(name="link-section", description="Todoist のセクションIDと班を紐付けます。")
+    @app_commands.describe(
+        team="対象の班", section_id="Todoist の section_id（/task sections で確認）"
+    )
     @app_commands.autocomplete(team=_team_ac)
     @require(Level.L3)
-    async def link_section(self, interaction: discord.Interaction,
-                           team: str, section_id: str):
+    async def link_section(self, interaction: discord.Interaction, team: str, section_id: str):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -480,8 +563,10 @@ class Tasks(commands.Cog):
                     await interaction.followup.send(
                         embed=error_embed(
                             f"section_id `{section_id}` が Todoist に見つかりません。"
-                            "`/task sections` で正しいIDを確認してください。"),
-                        ephemeral=True)
+                            "`/task sections` で正しいIDを確認してください。"
+                        ),
+                        ephemeral=True,
+                    )
                     return
                 section_name = match.name
             except TodoistError:
@@ -493,11 +578,12 @@ class Tasks(commands.Cog):
                 f"{t['team_name']}班 ↔ セクション「{section_name or section_id}」\n"
                 f"今後この班のタスク作成時は自動でこのセクションに配置され、"
                 f"通知もこの班のチャンネルに届きます。",
-                executor=interaction.user.display_name),
-            ephemeral=True)
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
-    @group.command(name="unlink-section",
-                   description="セクションと班の紐付けを解除します。")
+    @group.command(name="unlink-section", description="セクションと班の紐付けを解除します。")
     @app_commands.describe(section_id="解除する section_id")
     @require(Level.L3)
     async def unlink_section(self, interaction: discord.Interaction, section_id: str):
@@ -509,22 +595,26 @@ class Tasks(commands.Cog):
         if not link:
             await interaction.followup.send(
                 embed=error_embed(f"section_id `{section_id}` の紐付けが見つかりません。"),
-                ephemeral=True)
+                ephemeral=True,
+            )
             return
         await self.section_repo.unlink(guild_id, str(section_id))
         await interaction.followup.send(
-            embed=success_embed("紐付けを解除しました",
-                                f"section_id `{section_id}`",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed(
+                "紐付けを解除しました",
+                f"section_id `{section_id}`",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
-    @group.command(name="unlink-team-sections",
-                   description="指定した班のセクション紐付けをすべて解除します。")
+    @group.command(
+        name="unlink-team-sections", description="指定した班のセクション紐付けをすべて解除します。"
+    )
     @app_commands.describe(team="対象の班")
     @app_commands.autocomplete(team=_team_ac)
     @require(Level.L3)
-    async def unlink_team_sections(self, interaction: discord.Interaction,
-                                   team: str):
+    async def unlink_team_sections(self, interaction: discord.Interaction, team: str):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -536,7 +626,8 @@ class Tasks(commands.Cog):
         if not targets:
             await interaction.followup.send(
                 embed=error_embed(f"{team_disp}班に紐付けられたセクションはありません。"),
-                ephemeral=True)
+                ephemeral=True,
+            )
             return
         for l in targets:
             await self.section_repo.unlink(guild_id, l["section_id"])
@@ -544,11 +635,15 @@ class Tasks(commands.Cog):
             embed=success_embed(
                 "紐付けを一括解除しました",
                 f"{team_disp}班: {len(targets)} 件のセクション紐付けを解除",
-                executor=interaction.user.display_name),
-            ephemeral=True)
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
-    @group.command(name="push",
-                   description="各セクションの期限が近い/超過タスクを、対応する班チャンネルへ通知します。")
+    @group.command(
+        name="push",
+        description="各セクションの期限が近い/超過タスクを、対応する班チャンネルへ通知します。",
+    )
     @require(Level.L2)
     async def push(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
@@ -558,25 +653,31 @@ class Tasks(commands.Cog):
         reminders_cog = self.bot.get_cog("Reminders")
         if reminders_cog is None:
             await interaction.followup.send(
-                embed=error_embed("通知モジュールが読み込まれていません。"), ephemeral=True)
+                embed=error_embed("通知モジュールが読み込まれていません。"), ephemeral=True
+            )
             return
         svc = await self._todoist_svc(guild_id)
         if not svc.enabled:
             await interaction.followup.send(
-                embed=self._todoist_unconfigured_embed(), ephemeral=True)
+                embed=self._todoist_unconfigured_embed(), ephemeral=True
+            )
             return
         try:
             sent = await reminders_cog.push_section_tasks(guild_id)
         except Exception as e:  # noqa: BLE001
             log.warning("セクション通知失敗: %s", e)
             await interaction.followup.send(
-                embed=error_embed("通知の送信中にエラーが発生しました。"), ephemeral=True)
+                embed=error_embed("通知の送信中にエラーが発生しました。"), ephemeral=True
+            )
             return
         await interaction.followup.send(
-            embed=success_embed("セクション別通知を送信しました",
-                                f"{sent} 件のセクションに通知しました。",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed(
+                "セクション別通知を送信しました",
+                f"{sent} 件のセクションに通知しました。",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     # ====================================================================
     # /today コマンド群（仕様 11.3.1, 11.3.3）
@@ -594,19 +695,22 @@ class Tasks(commands.Cog):
         svc = await self._todoist_svc(guild_id)
         if not svc.enabled:
             await interaction.followup.send(
-                embed=self._todoist_unconfigured_embed(), ephemeral=True)
+                embed=self._todoist_unconfigured_embed(), ephemeral=True
+            )
             return
         try:
             matches = await svc.find_open_tasks_by_name(name)
         except TodoistError:
             await interaction.followup.send(
                 embed=error_embed("Todoist 検索に失敗しました。", code="TODOIST_API_FAILED"),
-                ephemeral=True)
+                ephemeral=True,
+            )
             return
 
         if not matches:
             await interaction.followup.send(
-                embed=error_embed(f"未完了タスク「{name}」が見つかりません。"), ephemeral=True)
+                embed=error_embed(f"未完了タスク「{name}」が見つかりません。"), ephemeral=True
+            )
             return
 
         if len(matches) == 1:
@@ -615,31 +719,38 @@ class Tasks(commands.Cog):
             except TodoistError:
                 await interaction.followup.send(
                     embed=error_embed("ラベル付与に失敗しました。", code="TODOIST_API_FAILED"),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
             if not ok:
                 await interaction.followup.send(
                     embed=error_embed(f"タスク「{name}」へのラベル付与に失敗しました。"),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
                 return
             await interaction.followup.send(
-                embed=success_embed("ラベルを付与しました",
-                                    f"「{name}」に「{svc.label_name}」を付与",
-                                    executor=interaction.user.display_name),
-                ephemeral=True)
+                embed=success_embed(
+                    "ラベルを付与しました",
+                    f"「{name}」に「{svc.label_name}」を付与",
+                    executor=interaction.user.display_name,
+                ),
+                ephemeral=True,
+            )
             return
 
         # 複数候補 → 候補一覧を実行者にのみ表示（仕様 11.3.3）
-        embed = task_embed(f"同名タスクが {len(matches)} 件あります",
-                           "`/today id:<ID>` で対象を確定してください。")
+        embed = task_embed(
+            f"同名タスクが {len(matches)} 件あります", "`/today id:<ID>` で対象を確定してください。"
+        )
         for t in matches:
             section = getattr(t, "section_id", None) or "—"
             due = getattr(getattr(t, "due", None), "string", None) or "期限なし"
             embed.add_field(
                 name=f"ID: {t.id}",
                 value=f"プロジェクト: {getattr(t, 'project_id', '—')}\n"
-                      f"セクション: {section}\n期限: {due}",
-                inline=False)
+                f"セクション: {section}\n期限: {due}",
+                inline=False,
+            )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @today_group.command(name="id", description="重複候補からID指定でラベルを付与します。")
@@ -653,30 +764,37 @@ class Tasks(commands.Cog):
         svc = await self._todoist_svc(guild_id)
         if not svc.enabled:
             await interaction.followup.send(
-                embed=self._todoist_unconfigured_embed(), ephemeral=True)
+                embed=self._todoist_unconfigured_embed(), ephemeral=True
+            )
             return
         try:
             ok = await svc.add_today_label(task_id)
         except TodoistError:
             await interaction.followup.send(
                 embed=error_embed("ラベル付与に失敗しました。", code="TODOIST_API_FAILED"),
-                ephemeral=True)
+                ephemeral=True,
+            )
             return
         if not ok:
             await interaction.followup.send(
-                embed=error_embed(f"タスク ID `{task_id}` が見つかりません。"), ephemeral=True)
+                embed=error_embed(f"タスク ID `{task_id}` が見つかりません。"), ephemeral=True
+            )
             return
         await interaction.followup.send(
-            embed=success_embed("ラベルを付与しました",
-                                f"ID `{task_id}` に「{svc.label_name}」を付与",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed(
+                "ラベルを付与しました",
+                f"ID `{task_id}` に「{svc.label_name}」を付与",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     # ====================================================================
     # 内部ヘルパー
     # ====================================================================
-    def _build_task_list_embed(self, title: str, tasks: list[dict],
-                               guild: discord.Guild | None) -> discord.Embed:
+    def _build_task_list_embed(
+        self, title: str, tasks: list[dict], guild: discord.Guild | None
+    ) -> discord.Embed:
         if not tasks:
             return info_embed(title, "該当するタスクはありません。")
         embed = task_embed(title)
@@ -690,7 +808,8 @@ class Tasks(commands.Cog):
             embed.add_field(
                 name=f"`{t['local_task_id']}` {t['title']}",
                 value=f"担当: {assignee} / 期限: {due} / 優先: {pr}",
-                inline=False)
+                inline=False,
+            )
         if len(tasks) > 25:
             embed.set_footer(text=f"他 {len(tasks) - 25} 件")
         return embed

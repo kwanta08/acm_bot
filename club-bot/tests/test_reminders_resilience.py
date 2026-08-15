@@ -5,6 +5,7 @@ discord.ext.tasks は未処理例外でループ自体を停止する。1サー�
 ループが止まると、**全サーバー**の自動通知が bot 再起動まで復旧しない。
 ギルド単位・ジョブ単位で例外を握り、他へ波及しないことを検証する。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -101,6 +102,7 @@ def test_daily_morning_isolates_each_job_and_guild():
             calls.append((label, guild_id))
             if guild_id == fail_on:
                 raise ValueError("壊れたデータ")
+
         return _run
 
     cog._notify_due_within_7days = job("due7", fail_on=G1)
@@ -112,8 +114,7 @@ def test_daily_morning_isolates_each_job_and_guild():
     # 同じギルドの後続ジョブも、他ギルドも止まらない
     assert ("today", G1) in calls
     assert ("section", G1) in calls
-    assert [c for c in calls if c[1] == G2] == [
-        ("due7", G2), ("today", G2), ("section", G2)]
+    assert [c for c in calls if c[1] == G2] == [("due7", G2), ("today", G2), ("section", G2)]
 
 
 def test_daily_night_survives_dispatch_failure():
@@ -158,14 +159,22 @@ def test_dispatch_skips_unparsable_due_date():
     cog._log_reminder = log_reminder
 
     from datetime import date
+
     today = date(2026, 8, 11)
-    run(cog._dispatch_by_team(
-        G1,
-        [{"title": "壊れた行", "due_date": "not-a-date", "team_key": None},
-         {"title": "正常な行", "due_date": "2026-08-12", "team_key": None}],
-        title="テスト", reminder_type="task_due_7days",
-        period_desc="今日から7日以内",
-        period_start=today, period_end=today))
+    run(
+        cog._dispatch_by_team(
+            G1,
+            [
+                {"title": "壊れた行", "due_date": "not-a-date", "team_key": None},
+                {"title": "正常な行", "due_date": "2026-08-12", "team_key": None},
+            ],
+            title="テスト",
+            reminder_type="task_due_7days",
+            period_desc="今日から7日以内",
+            period_start=today,
+            period_end=today,
+        )
+    )
 
     assert len(channel.sent) == 1
     description = channel.sent[0]["embed"].description
@@ -192,11 +201,18 @@ def test_dispatch_sends_nothing_when_all_rows_are_broken():
     cog._log_reminder = log_reminder
 
     from datetime import date
+
     today = date(2026, 8, 11)
-    run(cog._dispatch_by_team(
-        G1, [{"title": "壊れた行", "due_date": None, "team_key": None}],
-        title="テスト", reminder_type="task_due_7days",
-        period_desc="今日から7日以内",
-        period_start=today, period_end=today))
+    run(
+        cog._dispatch_by_team(
+            G1,
+            [{"title": "壊れた行", "due_date": None, "team_key": None}],
+            title="テスト",
+            reminder_type="task_due_7days",
+            period_desc="今日から7日以内",
+            period_start=today,
+            period_end=today,
+        )
+    )
 
     assert channel.sent == []

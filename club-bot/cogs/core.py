@@ -4,6 +4,7 @@ Core モジュール（仕様 11.1）。
 /ping と /health を提供する。共通ユーティリティ（DB・サービス参照）は
 bot インスタンス経由で各 Cog から利用する。
 """
+
 from __future__ import annotations
 
 import time

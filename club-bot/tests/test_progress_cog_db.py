@@ -8,6 +8,7 @@ Discord へは接続せず、実際の SQLite DB とフェイクの bot で検�
 - 同期（sync_guild_db）が Todoist タスクをノードとして取り込むこと
 - **ギルドをまたいでツリーが混ざらないこと**
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -53,8 +54,7 @@ class DisabledTodoistManager:
 async def _make_cog() -> tuple[Progress, Database, ProgressRepository]:
     db = Database(_tmp_db_path())
     await db.connect()
-    bot = SimpleNamespace(db=db, guilds=[],
-                          todoist_manager=DisabledTodoistManager())
+    bot = SimpleNamespace(db=db, guilds=[], todoist_manager=DisabledTodoistManager())
     cog = Progress(bot)
     return cog, db, ProgressRepository(db)
 
@@ -67,8 +67,9 @@ def test_load_tree_reads_from_db():
         cog, db, repo = await _make_cog()
         try:
             await repo.upsert_node(G1, "m1", name="本機", now_text=NOW)
-            await repo.upsert_node(G1, "wing", parent_id="m1", name="主翼",
-                                   manual_progress=0.5, now_text=NOW)
+            await repo.upsert_node(
+                G1, "wing", parent_id="m1", name="主翼", manual_progress=0.5, now_text=NOW
+            )
             tree = await cog.load_tree(G1)
             assert [n.node_id for n in tree.roots] == ["m1"]
             assert tree.by_id["m1"].aggregated == 0.5
@@ -80,6 +81,7 @@ def test_load_tree_reads_from_db():
 
 def test_load_tree_always_returns_fresh_data():
     """キャッシュを持たないため、直前の更新がそのまま見える。"""
+
     async def _main():
         cog, db, repo = await _make_cog()
         try:
@@ -87,8 +89,7 @@ def test_load_tree_always_returns_fresh_data():
             first = await cog.load_tree(G1)
             assert "wing" not in first.by_id
 
-            await repo.upsert_node(G1, "wing", parent_id="m1", name="主翼",
-                                   now_text=NOW)
+            await repo.upsert_node(G1, "wing", parent_id="m1", name="主翼", now_text=NOW)
             second = await cog.load_tree(G1)
             assert "wing" in second.by_id
             assert first is not second
@@ -151,8 +152,7 @@ def test_setup_wizard_writes_link_to_db():
             await repo.upsert_node(G1, "m1", name="本機", now_text=NOW)
             tree = await cog.load_tree(G1)
 
-            wizard = ProjectSetupWizard(cog, G1, 42,
-                                        [FakeProject("P1", "主翼班")], tree)
+            wizard = ProjectSetupWizard(cog, G1, 42, [FakeProject("P1", "主翼班")], tree)
             wizard.project_id = "P1"
             wizard.project_name = "主翼班"
             wizard.anchor_id = "m1"
@@ -175,14 +175,14 @@ def test_setup_wizard_writes_link_to_db():
 
 def test_setup_wizard_creates_new_part_node():
     """「新規パーツとして追加」で機体の下にノードが作られる。"""
+
     async def _main():
         cog, db, repo = await _make_cog()
         try:
             await repo.upsert_node(G1, "m1", name="本機", now_text=NOW)
             tree = await cog.load_tree(G1)
 
-            wizard = ProjectSetupWizard(cog, G1, 42,
-                                        [FakeProject("P1", "電装班")], tree)
+            wizard = ProjectSetupWizard(cog, G1, 42, [FakeProject("P1", "電装班")], tree)
             wizard.project_id = "P1"
             wizard.project_name = "電装班"
             wizard.anchor_id = new_part_node_id("P1")

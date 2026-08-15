@@ -19,6 +19,7 @@
     - 事前に data/club.db のバックアップを推奨
     - 冪等: 2回実行しても同じ状態になる（settings キーが無ければ何もしない）
 """
+
 from __future__ import annotations
 
 import argparse
@@ -51,7 +52,8 @@ async def main(apply: bool) -> None:
         rows = await db.fetchall(
             "SELECT guild_id, setting_key, setting_value FROM settings"
             " WHERE setting_key IN ('TODOIST_API_TOKEN', 'TODOIST_PROJECT_ID')"
-            " AND guild_id > 0")
+            " AND guild_id > 0"
+        )
         by_guild: dict[int, dict[str, str]] = {}
         for r in rows:
             by_guild.setdefault(int(r["guild_id"]), {})[r["setting_key"]] = r["setting_value"]
@@ -66,8 +68,10 @@ async def main(apply: bool) -> None:
             if env_project:
                 by_guild[legacy_gid].setdefault("TODOIST_PROJECT_ID", env_project)
         elif env_token:
-            print("警告: TODOIST_API_TOKEN が環境変数にありますが GUILD_ID 未設定の"
-                  " ため紐付け先を決定できません。GUILD_ID を設定して再実行してください。")
+            print(
+                "警告: TODOIST_API_TOKEN が環境変数にありますが GUILD_ID 未設定の"
+                " ため紐付け先を決定できません。GUILD_ID を設定して再実行してください。"
+            )
 
         if not by_guild:
             print("移行対象のトークンは見つかりませんでした（settings ・環境変数ともに無し）。")
@@ -77,21 +81,26 @@ async def main(apply: bool) -> None:
         for gid, values in sorted(by_guild.items()):
             has_token = bool(values.get("TODOIST_API_TOKEN"))
             existing = await repo.get(gid)
-            print(f"  guild_id={gid}: トークン={'あり' if has_token else 'なし'}"
-                  f" / 既存の暗号化設定={'あり' if existing else 'なし'}")
+            print(
+                f"  guild_id={gid}: トークン={'あり' if has_token else 'なし'}"
+                f" / 既存の暗号化設定={'あり' if existing else 'なし'}"
+            )
             if not has_token:
                 continue
             if apply:
                 encrypted = crypto.encrypt_token(values["TODOIST_API_TOKEN"])
                 await repo.upsert(
-                    gid, encrypted,
+                    gid,
+                    encrypted,
                     values.get("TODOIST_PROJECT_ID") or None,
-                    DEFAULT_LABEL, actor_id="migrate_todoist_token.py")
+                    DEFAULT_LABEL,
+                    actor_id="migrate_todoist_token.py",
+                )
                 # 平文の settings キーを削除
                 for key in LEGACY_KEYS:
                     await db.execute(
-                        "DELETE FROM settings WHERE guild_id = ? AND setting_key = ?",
-                        (gid, key))
+                        "DELETE FROM settings WHERE guild_id = ? AND setting_key = ?", (gid, key)
+                    )
 
         if apply:
             # 平文を物理的にも除去する（SQLite は DELETE 後も free page に
@@ -99,12 +108,17 @@ async def main(apply: bool) -> None:
             await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             await db.execute("VACUUM")
             await db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            print("移行が完了しました。settings の平文トークンは削除し、"
-                  "VACUUM で物理除去しました。")
-            print("環境変数 TODOIST_API_TOKEN / TODOIST_PROJECT_ID は .env から"
-                  " 手動で削除してください。")
-            print("移行前の DB バックアップ（.db.bak 等）には平文が残るため、"
-                  "不要になったバックアップは削除してください。")
+            print(
+                "移行が完了しました。settings の平文トークンは削除し、VACUUM で物理除去しました。"
+            )
+            print(
+                "環境変数 TODOIST_API_TOKEN / TODOIST_PROJECT_ID は .env から"
+                " 手動で削除してください。"
+            )
+            print(
+                "移行前の DB バックアップ（.db.bak 等）には平文が残るため、"
+                "不要になったバックアップは削除してください。"
+            )
         else:
             print("dry-run のため変更していません。実行するには --apply を付けてください。")
     finally:
@@ -113,7 +127,8 @@ async def main(apply: bool) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--apply", action="store_true",
-                        help="実際に移行を実行する（既定は dry-run）")
+    parser.add_argument(
+        "--apply", action="store_true", help="実際に移行を実行する（既定は dry-run）"
+    )
     args = parser.parse_args()
     asyncio.run(main(args.apply))

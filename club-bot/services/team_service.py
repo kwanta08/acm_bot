@@ -7,6 +7,7 @@ Discord の autocomplete は最大25件までしか返せないため、
 入力文字列で絞り込んだうえで上位25件を返す（タグ数が多くても
 エラーにならない）。
 """
+
 from __future__ import annotations
 
 from discord import app_commands
@@ -29,8 +30,9 @@ def _matches(current: str, *values: str) -> bool:
     return any(c in v.lower() for v in values)
 
 
-async def team_choices(db: Database, guild_id: int, current: str,
-                       active_only: bool = True) -> list[app_commands.Choice[str]]:
+async def team_choices(
+    db: Database, guild_id: int, current: str, active_only: bool = True
+) -> list[app_commands.Choice[str]]:
     """班の autocomplete 候補。value は班キー、name は「表示名 (キー)」。"""
     teams = await MemberRepository(db).list_teams(guild_id, active_only=active_only)
     return [
@@ -40,8 +42,9 @@ async def team_choices(db: Database, guild_id: int, current: str,
     ][:MAX_AUTOCOMPLETE]
 
 
-async def skill_choices(db: Database, guild_id: int, current: str,
-                        active_only: bool = True) -> list[app_commands.Choice[str]]:
+async def skill_choices(
+    db: Database, guild_id: int, current: str, active_only: bool = True
+) -> list[app_commands.Choice[str]]:
     """技能タグの autocomplete 候補。value/name はタグ名。"""
     rows = await SkillTagRepository(db).list_all(guild_id)
     return [

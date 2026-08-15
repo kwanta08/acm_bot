@@ -4,6 +4,7 @@
 進行中セッションと完了記録は SQLite（正本）に永続化する。
 Google Sheets 連携は廃止され、記録の参照は DB（NocoDB）から行う。
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -41,8 +42,13 @@ class LayerTrackingService:
 
         # 記録をDBへ保存し、進行中セッションを削除（仕様 11.8.5）
         record_id = await self.session_repo.add_record(
-            user_id, session["keta"], session["layer_num"],
-            session["started_at"], to_iso(ended), minutes)
+            user_id,
+            session["keta"],
+            session["layer_num"],
+            session["started_at"],
+            to_iso(ended),
+            minutes,
+        )
         await self.session_repo.end(user_id)
         # 外部同期先（Sheets）は廃止されたため、保存時点で同期済み扱いにする
         await self.session_repo.mark_synced(record_id)
@@ -62,11 +68,13 @@ class LayerTrackingService:
         for s in sessions:
             started = from_iso(s["started_at"])
             elapsed = int((current - started).total_seconds() // 60)
-            out.append({
-                "user_id": s["user_id"],
-                "keta": s["keta"],
-                "layer_num": s["layer_num"],
-                "started": started,
-                "elapsed_min": elapsed,
-            })
+            out.append(
+                {
+                    "user_id": s["user_id"],
+                    "keta": s["keta"],
+                    "layer_num": s["layer_num"],
+                    "started": started,
+                    "elapsed_min": elapsed,
+                }
+            )
         return out

@@ -5,6 +5,7 @@ PostgreSQL が無い環境でも動くよう、asyncpg のプール／接続を�
 コールバックが config キャッシュを無効化するか」を検証する。
 SQLite 構成では通知を出さない（＝単一プロセス前提）ことも確認する。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -112,6 +113,7 @@ def test_notify_sends_channel_and_guild_id():
 
 def test_notify_failure_does_not_raise():
     """通知に失敗しても設定更新自体は壊さない。"""
+
     class _BrokenPool(_FakePool):
         def acquire(self):
             raise RuntimeError("pool exhausted")
@@ -119,7 +121,7 @@ def test_notify_failure_does_not_raise():
     async def _main():
         db = Database("./ignored.db", database_url="postgresql://x/y")
         db._pool = _BrokenPool([])
-        await db.notify_settings_changed(G1)   # 例外を投げない
+        await db.notify_settings_changed(G1)  # 例外を投げない
 
     run(_main())
 
@@ -192,7 +194,7 @@ def test_listener_start_is_idempotent(monkeypatch):
         db = Database("./ignored.db", database_url="postgresql://x/y")
         assert await db.start_settings_listener(lambda _g: None) is True
         assert await db.start_settings_listener(lambda _g: None) is True
-        assert len(conns) == 1   # 接続は1つだけ
+        assert len(conns) == 1  # 接続は1つだけ
 
     run(_main())
 
@@ -207,12 +209,13 @@ def test_config_invalidate_guild_clears_cache():
     config._guild_cache[G2] = GuildConfig(guild_id=G2)
     config.invalidate_guild(G1)
     assert G1 not in config._guild_cache
-    assert G2 in config._guild_cache      # 他ギルドのキャッシュは残る
+    assert G2 in config._guild_cache  # 他ギルドのキャッシュは残る
     config.clear_guild_cache()
 
 
 def test_settings_repository_triggers_notify():
     """リポジトリ経由の更新・削除でも通知が飛ぶ（PostgreSQL 構成）。"""
+
     async def _main():
         sink: list = []
         db = _pg_database(sink)

@@ -8,6 +8,7 @@
 **卒業者は削除しない。** 過去の作業記録に残る担当者名が引けなくなるため、
 status を alumni に動かして既定の一覧・検索から外すだけにする。
 """
+
 from __future__ import annotations
 
 import io
@@ -39,8 +40,7 @@ def snapshot_filename(guild_id: int) -> str:
     return f"club-bot-season-snapshot-{guild_id}.zip"
 
 
-def rollover_result_embed(result: RolloverResult,
-                          executor: str | None = None) -> discord.Embed:
+def rollover_result_embed(result: RolloverResult, executor: str | None = None) -> discord.Embed:
     """年度替わりの結果 Embed。"""
     lines = []
     if result.ended_season:
@@ -49,17 +49,17 @@ def rollover_result_embed(result: RolloverResult,
     lines.append(f"卒業に切り替えた人数: **{len(result.alumni)} 名**")
     lines.append(f"班長フラグのリセット: **{result.leaders_reset} 件**")
     lines.append("")
-    lines.append("卒業者のデータは削除していません（過去の記録の担当者名を"
-                 "残すため）。既定の一覧・検索からは外れます。")
-    return success_embed("年度を切り替えました", "\n".join(lines),
-                         executor=executor)
+    lines.append(
+        "卒業者のデータは削除していません（過去の記録の担当者名を"
+        "残すため）。既定の一覧・検索からは外れます。"
+    )
+    return success_embed("年度を切り替えました", "\n".join(lines), executor=executor)
 
 
 class RolloverView(discord.ui.View):
     """卒業者を選んでから確定するウィザード。"""
 
-    def __init__(self, cog: Season, guild_id: int, new_season_name: str,
-                 owner_id: int):
+    def __init__(self, cog: Season, guild_id: int, new_season_name: str, owner_id: int):
         super().__init__(timeout=_VIEW_TIMEOUT)
         self._cog = cog
         self._guild_id = guild_id
@@ -69,15 +69,17 @@ class RolloverView(discord.ui.View):
 
         self.picker = discord.ui.UserSelect(
             placeholder="卒業する人を選ぶ（選ばなければ全員が継続）",
-            min_values=0, max_values=MAX_SELECTABLE)
+            min_values=0,
+            max_values=MAX_SELECTABLE,
+        )
         self.picker.callback = self._on_pick
         self.add_item(self.picker)
 
     async def _guard(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self._owner_id:
             await interaction.response.send_message(
-                embed=error_embed("この操作は実行者のみ行えます。"),
-                ephemeral=True)
+                embed=error_embed("この操作は実行者のみ行えます。"), ephemeral=True
+            )
             return False
         return True
 
@@ -86,21 +88,21 @@ class RolloverView(discord.ui.View):
             return
         self._selected = [str(u.id) for u in self.picker.values]
         try:
-            await interaction.response.edit_message(
-                embed=self._preview_embed(), view=self)
+            await interaction.response.edit_message(embed=self._preview_embed(), view=self)
         except discord.HTTPException as e:
             log.warning("/season rollover の選択反映に失敗: %s", e)
 
     def _preview_embed(self) -> discord.Embed:
-        body = (f"新しい年度: **{self._name}**\n"
-                f"卒業として仕分ける人数: **{len(self._selected)} 名**\n\n"
-                "「確定する」を押すと、現在の年度を終了して新しい年度を開始し、"
-                "選んだ人を卒業に切り替え、**班長フラグを全員リセット**します。")
+        body = (
+            f"新しい年度: **{self._name}**\n"
+            f"卒業として仕分ける人数: **{len(self._selected)} 名**\n\n"
+            "「確定する」を押すと、現在の年度を終了して新しい年度を開始し、"
+            "選んだ人を卒業に切り替え、**班長フラグを全員リセット**します。"
+        )
         return info_embed("年度替わりの確認", body)
 
     @discord.ui.button(label="確定する", style=discord.ButtonStyle.danger)
-    async def confirm(self, interaction: discord.Interaction,
-                      button: discord.ui.Button) -> None:
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not await self._guard(interaction):
             return
         try:
@@ -108,19 +110,17 @@ class RolloverView(discord.ui.View):
         except discord.HTTPException as e:
             log.warning("/season rollover の defer に失敗: %s", e)
             return
-        await self._cog.finish_rollover(interaction, self._guild_id,
-                                        self._name, self._selected)
+        await self._cog.finish_rollover(interaction, self._guild_id, self._name, self._selected)
         self.stop()
 
     @discord.ui.button(label="やめる", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction: discord.Interaction,
-                     button: discord.ui.Button) -> None:
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
         if not await self._guard(interaction):
             return
         try:
             await interaction.response.edit_message(
-                embed=info_embed("中止しました", "年度は切り替えていません。"),
-                view=None)
+                embed=info_embed("中止しました", "年度は切り替えていません。"), view=None
+            )
         except discord.HTTPException as e:
             log.warning("/season rollover の中止表示に失敗: %s", e)
         self.stop()
@@ -145,10 +145,13 @@ class Season(commands.Cog):
             return
         rows = await SeasonRepository(self.db).list_all(guild_id)
         if not rows:
-            await interaction.followup.send(embed=info_embed(
-                "年度が登録されていません",
-                "`/season new` で最初の年度を作成できます。\n"
-                "年度名は自由です（例: `2026年度`、`第30代`）。"))
+            await interaction.followup.send(
+                embed=info_embed(
+                    "年度が登録されていません",
+                    "`/season new` で最初の年度を作成できます。\n"
+                    "年度名は自由です（例: `2026年度`、`第30代`）。",
+                )
+            )
             return
         lines = []
         for row in rows:
@@ -158,10 +161,8 @@ class Season(commands.Cog):
                 period += f" 〜 {str(row['ended_at'])[:10]}"
             lines.append(f"{mark}　**{row['name']}**（{period}）")
         counts = await MemberRepository(self.db).count_by_status(guild_id)
-        footer = (f"\n\n現役 {counts.get('active', 0)} 名 / "
-                  f"卒業 {counts.get('alumni', 0)} 名")
-        await interaction.followup.send(embed=info_embed(
-            "📅 年度一覧", "\n".join(lines) + footer))
+        footer = f"\n\n現役 {counts.get('active', 0)} 名 / 卒業 {counts.get('alumni', 0)} 名"
+        await interaction.followup.send(embed=info_embed("📅 年度一覧", "\n".join(lines) + footer))
 
     @group.command(name="new", description="新しい年度を開始します（現在の年度は終了します）。")
     @app_commands.describe(name="新しい年度の名前（例: 2027年度 / 第31代）")
@@ -174,34 +175,33 @@ class Season(commands.Cog):
         name = name.strip()
         if not name:
             await interaction.followup.send(
-                embed=error_embed("年度名を入力してください。"), ephemeral=True)
+                embed=error_embed("年度名を入力してください。"), ephemeral=True
+            )
             return
         repo = SeasonRepository(self.db)
         try:
             ended, _ = await repo.start_new(guild_id, name)
         except ValueError:
             await interaction.followup.send(
-                embed=error_embed(f"「{name}」はすでに登録されています。"),
-                ephemeral=True)
+                embed=error_embed(f"「{name}」はすでに登録されています。"), ephemeral=True
+            )
             return
 
-        await self._audit(guild_id, interaction, "season.new", name,
-                          f"前年度: {ended or 'なし'}")
+        await self._audit(guild_id, interaction, "season.new", name, f"前年度: {ended or 'なし'}")
         desc = f"新しい年度: **{name}**"
         if ended:
             desc = f"**{ended}** を終了しました。\n" + desc
         await interaction.followup.send(
-            embed=success_embed("年度を開始しました", desc,
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed("年度を開始しました", desc, executor=interaction.user.display_name),
+            ephemeral=True,
+        )
 
     @group.command(
-        name="rollover",
-        description="年度を切り替え、卒業者の仕分けと班長リセットを行います。")
+        name="rollover", description="年度を切り替え、卒業者の仕分けと班長リセットを行います。"
+    )
     @app_commands.describe(name="新しい年度の名前（例: 2027年度 / 第31代）")
     @app_commands.check(is_admin)
-    async def season_rollover(self, interaction: discord.Interaction,
-                              name: str):
+    async def season_rollover(self, interaction: discord.Interaction, name: str):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -209,57 +209,53 @@ class Season(commands.Cog):
         name = name.strip()
         if not name:
             await interaction.followup.send(
-                embed=error_embed("年度名を入力してください。"), ephemeral=True)
+                embed=error_embed("年度名を入力してください。"), ephemeral=True
+            )
             return
         if await SeasonRepository(self.db).get_by_name(guild_id, name):
             await interaction.followup.send(
-                embed=error_embed(f"「{name}」はすでに登録されています。"),
-                ephemeral=True)
+                embed=error_embed(f"「{name}」はすでに登録されています。"), ephemeral=True
+            )
             return
 
         members = await MemberRepository(self.db).list_members(guild_id)
-        body = (f"新しい年度: **{name}**\n"
-                f"現役メンバー: **{len(members)} 名**\n\n"
-                "下のメニューで卒業する人を選んでください"
-                f"（一度に選べるのは {MAX_SELECTABLE} 名までです）。\n"
-                "選ばなければ全員が継続として扱われます。")
+        body = (
+            f"新しい年度: **{name}**\n"
+            f"現役メンバー: **{len(members)} 名**\n\n"
+            "下のメニューで卒業する人を選んでください"
+            f"（一度に選べるのは {MAX_SELECTABLE} 名までです）。\n"
+            "選ばなければ全員が継続として扱われます。"
+        )
         view = RolloverView(self, guild_id, name, interaction.user.id)
         try:
             await interaction.followup.send(
-                embed=info_embed("年度替わり", body), view=view, ephemeral=True)
+                embed=info_embed("年度替わり", body), view=view, ephemeral=True
+            )
         except discord.HTTPException as e:
-            log.warning("/season rollover の表示に失敗 (guild=%s): %s",
-                        guild_id, e)
+            log.warning("/season rollover の表示に失敗 (guild=%s): %s", guild_id, e)
 
-    async def finish_rollover(self, interaction: discord.Interaction,
-                              guild_id: int, name: str,
-                              alumni_user_ids: list[str]) -> None:
+    async def finish_rollover(
+        self, interaction: discord.Interaction, guild_id: int, name: str, alumni_user_ids: list[str]
+    ) -> None:
         """ウィザードの確定処理。"""
         try:
-            result = await perform_rollover(self.db, guild_id, name,
-                                            alumni_user_ids)
+            result = await perform_rollover(self.db, guild_id, name, alumni_user_ids)
         except ValueError:
-            await self._send(interaction, error_embed(
-                f"「{name}」はすでに登録されています。"))
+            await self._send(interaction, error_embed(f"「{name}」はすでに登録されています。"))
             return
 
-        await self._audit(guild_id, interaction, "season.rollover", name,
-                          result.summary())
+        await self._audit(guild_id, interaction, "season.rollover", name, result.summary())
         log.info("年度を切り替えました (guild=%s): %s", guild_id, result.summary())
         try:
-            await self.bot.log_to_channel(
-                f"[Season] {result.summary()}", guild_id=guild_id)
+            await self.bot.log_to_channel(f"[Season] {result.summary()}", guild_id=guild_id)
         except Exception as e:  # noqa: BLE001  (通知失敗で処理は止めない)
-            log.warning("bot-log への投稿に失敗 (guild=%s): %s",
-                        guild_id, type(e).__name__)
+            log.warning("bot-log への投稿に失敗 (guild=%s): %s", guild_id, type(e).__name__)
 
-        embed = rollover_result_embed(
-            result, executor=interaction.user.display_name)
+        embed = rollover_result_embed(result, executor=interaction.user.display_name)
         file = await self._snapshot_file(guild_id, embed)
         await self._send(interaction, embed, file=file)
 
-    async def _snapshot_file(self, guild_id: int,
-                             embed: discord.Embed) -> discord.File | None:
+    async def _snapshot_file(self, guild_id: int, embed: discord.Embed) -> discord.File | None:
         """年度スナップショット（/data export と同じ ZIP）を作る。
 
         引き継ぎのために、切り替えた時点のデータを丸ごと渡す。
@@ -268,36 +264,45 @@ class Season(commands.Cog):
         try:
             payload, _ = await build_export_zip(self.db, guild_id)
         except Exception as e:  # noqa: BLE001  (年度切り替え自体は成功させる)
-            log.warning("年度スナップショットの作成に失敗 (guild=%s): %s",
-                        guild_id, type(e).__name__)
+            log.warning(
+                "年度スナップショットの作成に失敗 (guild=%s): %s", guild_id, type(e).__name__
+            )
             return None
         if len(payload) > MAX_ATTACHMENT_BYTES:
             embed.add_field(
                 name="年度スナップショット",
                 value="データが 8MB を超えるため添付できませんでした。"
-                      "`/data export` または Web ダッシュボードから取得してください。",
-                inline=False)
+                "`/data export` または Web ダッシュボードから取得してください。",
+                inline=False,
+            )
             return None
         embed.add_field(
             name="年度スナップショット",
             value="添付の ZIP が切り替え時点のデータです。引き継ぎ用に保存してください。",
-            inline=False)
-        return discord.File(io.BytesIO(payload),
-                            filename=snapshot_filename(guild_id))
+            inline=False,
+        )
+        return discord.File(io.BytesIO(payload), filename=snapshot_filename(guild_id))
 
-    async def _audit(self, guild_id: int, interaction: discord.Interaction,
-                     action: str, target: str, detail: str) -> None:
+    async def _audit(
+        self, guild_id: int, interaction: discord.Interaction, action: str, target: str, detail: str
+    ) -> None:
         try:
             await AuditLogRepository(self.db).record(
-                guild_id, actor_id=str(interaction.user.id),
-                action=action, target=target, detail=detail)
+                guild_id,
+                actor_id=str(interaction.user.id),
+                action=action,
+                target=target,
+                detail=detail,
+            )
         except Exception as e:  # noqa: BLE001
-            log.warning("監査ログの記録に失敗 (guild=%s): %s", guild_id,
-                        type(e).__name__)
+            log.warning("監査ログの記録に失敗 (guild=%s): %s", guild_id, type(e).__name__)
 
-    async def _send(self, interaction: discord.Interaction,
-                    embed: discord.Embed,
-                    file: discord.File | None = None) -> None:
+    async def _send(
+        self,
+        interaction: discord.Interaction,
+        embed: discord.Embed,
+        file: discord.File | None = None,
+    ) -> None:
         kwargs = {"embed": embed, "ephemeral": True}
         if file is not None:
             kwargs["file"] = file

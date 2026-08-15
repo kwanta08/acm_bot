@@ -3,6 +3,7 @@
 すべてのハンドラは `GuildScope`（＝セッション照合済み）だけを受け取り、
 生の guild_id を扱わない。データ取得は `scope.bind(repo)` 経由のみ。
 """
+
 from __future__ import annotations
 
 from fastapi import APIRouter
@@ -38,7 +39,6 @@ async def guild_summary(scope: ScopedGuild):
             "members": len(member_rows),
             "teams": len(team_rows),
             "progress_nodes": await progress.count_nodes(),
-            "open_tasks": len(await scope.bind(
-                TaskRepository(db)).list_tasks(status="open")),
+            "open_tasks": len(await scope.bind(TaskRepository(db)).list_tasks(status="open")),
         },
     }

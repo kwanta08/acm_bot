@@ -9,6 +9,7 @@
 
 実行: venv/bin/python -m pytest tests/  （pytest 未導入なら直接実行も可）
 """
+
 import asyncio
 import logging
 import os
@@ -116,8 +117,16 @@ def test_schema_v4_has_todoist_configs():
         db = await _connected_db()
         try:
             cols = {r["name"] for r in await db.fetchall("PRAGMA table_info(todoist_configs)")}
-            assert {"guild_id", "api_token_encrypted", "project_id", "today_label_name",
-                    "enabled_flag", "created_by", "created_at", "updated_at"} <= cols
+            assert {
+                "guild_id",
+                "api_token_encrypted",
+                "project_id",
+                "today_label_name",
+                "enabled_flag",
+                "created_by",
+                "created_at",
+                "updated_at",
+            } <= cols
             row = await db.fetchone("PRAGMA user_version")
             assert row[0] == SCHEMA_VERSION
             # 安全ビューに暗号文列が含まれない
@@ -126,6 +135,7 @@ def test_schema_v4_has_todoist_configs():
             assert "guild_id" in cols
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -140,10 +150,12 @@ def test_repository_isolation_and_no_plaintext_in_db():
         await db.connect()
         try:
             repo = TodoistConfigRepository(db)
-            await repo.upsert(G1, crypto.encrypt_token(PLAIN_TOKEN),
-                              "proj1", "今日やること", "admin1")
-            await repo.upsert(G2, crypto.encrypt_token("g2-token-xyz"),
-                              None, "今日やること", "admin2")
+            await repo.upsert(
+                G1, crypto.encrypt_token(PLAIN_TOKEN), "proj1", "今日やること", "admin1"
+            )
+            await repo.upsert(
+                G2, crypto.encrypt_token("g2-token-xyz"), None, "今日やること", "admin2"
+            )
 
             c1 = await repo.get(G1)
             c2 = await repo.get(G2)
@@ -168,6 +180,7 @@ def test_repository_isolation_and_no_plaintext_in_db():
         with open(path, "rb") as f:  # noqa: ASYNC230
             content = f.read()
         assert PLAIN_TOKEN.encode() not in content
+
     run(_main())
 
 
@@ -188,8 +201,9 @@ def test_manager_for_guild_resolution():
             assert await mgr.is_configured(G1) is False
 
             # 登録 → 有効サービス（SDK 有無に依存するため API インスタンスの有無は問わない）
-            await repo.upsert(G1, crypto.encrypt_token(PLAIN_TOKEN),
-                              "proj1", "マイラベル", "admin1")
+            await repo.upsert(
+                G1, crypto.encrypt_token(PLAIN_TOKEN), "proj1", "マイラベル", "admin1"
+            )
             svc = await mgr.for_guild(G1)
             assert svc.project_id == "proj1"
             assert svc.label_name == "マイラベル"
@@ -200,6 +214,7 @@ def test_manager_for_guild_resolution():
             assert svc2.enabled is False
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -223,6 +238,7 @@ def test_manager_decrypt_failure_disables_without_leak(caplog=None):
                 assert TEST_KEY not in rec and OTHER_KEY not in rec
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -291,8 +307,9 @@ def test_permission_levels_for_admin_commands():
 # 移行スクリプト
 # ---------------------------------------------------------------------
 def test_migration_script_encrypts_and_deletes_plaintext():
-    scripts_dir = os.path.join(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__))), "scripts")
+    scripts_dir = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"
+    )
     sys.path.insert(0, scripts_dir)
     try:
         import migrate_todoist_token as mig
@@ -307,10 +324,14 @@ def test_migration_script_encrypts_and_deletes_plaintext():
         await db.connect()
         await db.execute(
             "INSERT INTO settings (guild_id, setting_key, setting_value)"
-            " VALUES (?, 'TODOIST_API_TOKEN', ?)", (G1, PLAIN_TOKEN))
+            " VALUES (?, 'TODOIST_API_TOKEN', ?)",
+            (G1, PLAIN_TOKEN),
+        )
         await db.execute(
             "INSERT INTO settings (guild_id, setting_key, setting_value)"
-            " VALUES (?, 'TODOIST_PROJECT_ID', 'proj-legacy')", (G1,))
+            " VALUES (?, 'TODOIST_PROJECT_ID', 'proj-legacy')",
+            (G1,),
+        )
         await db.close()
 
     run(_prepare())
@@ -335,7 +356,9 @@ def test_migration_script_encrypts_and_deletes_plaintext():
             # 平文の settings キーは削除されている
             row = await db.fetchone(
                 "SELECT COUNT(*) AS c FROM settings"
-                " WHERE guild_id = ? AND setting_key LIKE 'TODOIST_%'", (G1,))
+                " WHERE guild_id = ? AND setting_key LIKE 'TODOIST_%'",
+                (G1,),
+            )
             assert row["c"] == 0
         finally:
             await db.close()

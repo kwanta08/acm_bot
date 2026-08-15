@@ -10,6 +10,7 @@ autocomplete で選択する。進行中セッションと完了記録は SQLite
 スコープする。services/layer_tracking_service.py には
 guild 固定プロキシ repo.for_guild(guild_id) を渡して利用する。
 """
+
 from __future__ import annotations
 
 import discord
@@ -40,14 +41,14 @@ class LayerTracking(commands.Cog):
     group = app_commands.Group(name="layer", description="桁巻き積層作業の記録")
 
     # ---------- 桁名 autocomplete ----------
-    async def _keta_autocomplete(self, interaction: discord.Interaction,
-                                 current: str) -> list[app_commands.Choice[str]]:
+    async def _keta_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
         if interaction.guild is None:
             return []
         names = await self.keta_repo.list_active(interaction.guild.id)
         return [
-            app_commands.Choice(name=n, value=n)
-            for n in names if current.lower() in n.lower()
+            app_commands.Choice(name=n, value=n) for n in names if current.lower() in n.lower()
         ][:25]
 
     # ---------- keta-add ----------
@@ -60,9 +61,11 @@ class LayerTracking(commands.Cog):
             return
         await self.keta_repo.add(guild_id, name, str(interaction.user.id), to_iso(now()))
         await interaction.response.send_message(
-            embed=success_embed("桁名を登録しました", f"桁名: **{name}**",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed(
+                "桁名を登録しました", f"桁名: **{name}**", executor=interaction.user.display_name
+            ),
+            ephemeral=True,
+        )
 
     # ---------- keta-remove ----------
     @group.command(name="keta-remove", description="桁名を無効化します。")
@@ -76,12 +79,15 @@ class LayerTracking(commands.Cog):
         ok = await self.keta_repo.deactivate(guild_id, name)
         if not ok:
             await interaction.response.send_message(
-                embed=error_embed(f"桁名「{name}」は登録されていません。"), ephemeral=True)
+                embed=error_embed(f"桁名「{name}」は登録されていません。"), ephemeral=True
+            )
             return
         await interaction.response.send_message(
-            embed=success_embed("桁名を無効化しました", f"桁名: **{name}**",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed(
+                "桁名を無効化しました", f"桁名: **{name}**", executor=interaction.user.display_name
+            ),
+            ephemeral=True,
+        )
 
     # ---------- keta-list ----------
     @group.command(name="keta-list", description="登録済みの桁名一覧を表示します。")
@@ -94,16 +100,20 @@ class LayerTracking(commands.Cog):
         rows = await self.keta_repo.list_all(guild_id)
         if not rows:
             await interaction.followup.send(
-                embed=info_embed("桁名一覧", "登録済みの桁名はありません。"), ephemeral=True)
+                embed=info_embed("桁名一覧", "登録済みの桁名はありません。"), ephemeral=True
+            )
             return
         lines = [f"{'✅' if r['active_flag'] else '⛔'} {r['keta_name']}" for r in rows]
         await interaction.followup.send(
-            embed=info_embed("桁名一覧", "\n".join(lines)), ephemeral=True)
+            embed=info_embed("桁名一覧", "\n".join(lines)), ephemeral=True
+        )
 
     # ---------- start ----------
     @group.command(name="start", description="桁名と層番号を指定して積層開始を記録します。")
-    @app_commands.describe(keta="桁名（登録済みから選択）",
-                           layer_num="層番号（数字または「シュリンク」などのテキスト）")
+    @app_commands.describe(
+        keta="桁名（登録済みから選択）",
+        layer_num="層番号（数字または「シュリンク」などのテキスト）",
+    )
     @app_commands.autocomplete(keta=_keta_autocomplete)
     @require(Level.L1)
     async def start(self, interaction: discord.Interaction, keta: str, layer_num: str):
@@ -113,8 +123,10 @@ class LayerTracking(commands.Cog):
         if not await self.keta_repo.exists_active(guild_id, keta):
             await interaction.response.send_message(
                 embed=error_embed(
-                    f"桁名「{keta}」は登録されていません。`/layer keta-add` で登録してください。"),
-                ephemeral=True)
+                    f"桁名「{keta}」は登録されていません。`/layer keta-add` で登録してください。"
+                ),
+                ephemeral=True,
+            )
             return
 
         svc = self._svc_for(guild_id)
@@ -125,15 +137,18 @@ class LayerTracking(commands.Cog):
             await interaction.response.send_message(
                 embed=error_embed(
                     f"既に進行中のセッションがあります（{active['keta']} {active['layer_num']}）。\n"
-                    "先に `/layer end` で終了してください。"),
-                ephemeral=True)
+                    "先に `/layer end` で終了してください。"
+                ),
+                ephemeral=True,
+            )
             return
 
         started = await svc.start(user_id, keta, layer_num)
         embed = success_embed(
             "積層開始を記録しました",
             f"桁名: **{keta}**\n層番号: **{layer_num}**\n開始: {fmt_jp(started)}",
-            executor=interaction.user.display_name)
+            executor=interaction.user.display_name,
+        )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     # ---------- end ----------
@@ -147,8 +162,11 @@ class LayerTracking(commands.Cog):
         user_id = str(interaction.user.id)
         if not await svc.has_active(user_id):
             await interaction.response.send_message(
-                embed=error_embed("進行中のセッションがありません。先に `/layer start` を実行してください。"),
-                ephemeral=True)
+                embed=error_embed(
+                    "進行中のセッションがありません。先に `/layer start` を実行してください。"
+                ),
+                ephemeral=True,
+            )
             return
 
         await interaction.response.defer(ephemeral=True)
@@ -158,7 +176,8 @@ class LayerTracking(commands.Cog):
             "積層を記録しました",
             f"桁名: **{result['keta']}**\n層番号: **{result['layer_num']}**\n"
             f"作業時間: **{result['minutes']} 分**",
-            executor=interaction.user.display_name)
+            executor=interaction.user.display_name,
+        )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ---------- status ----------
@@ -174,7 +193,8 @@ class LayerTracking(commands.Cog):
         if not sessions:
             await interaction.followup.send(
                 embed=info_embed("進行中の積層作業", "現在、進行中の作業はありません。"),
-                ephemeral=True)
+                ephemeral=True,
+            )
             return
         embed = info_embed("進行中の積層作業")
         guild = interaction.guild
@@ -187,7 +207,8 @@ class LayerTracking(commands.Cog):
             embed.add_field(
                 name=f"{name}",
                 value=f"桁: {s['keta']} / {s['layer_num']} / 経過 {s['elapsed_min']} 分",
-                inline=False)
+                inline=False,
+            )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 

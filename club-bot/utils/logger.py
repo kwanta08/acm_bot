@@ -1,4 +1,5 @@
 """ログ初期化ユーティリティ（仕様 15.2）。"""
+
 from __future__ import annotations
 
 import logging

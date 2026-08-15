@@ -8,6 +8,7 @@ Select / ChannelSelect / RoleSelect で対話的に設定・保存する。
 - 設定はギルド別 settings テーブルに (guild_id, setting_key) で保存され、
   config.for_guild(guild_id) 経由で解決される（他ギルドへは影響しない）
 """
+
 from __future__ import annotations
 
 import re
@@ -70,8 +71,7 @@ def parse_team_names(text: str) -> list[str]:
         if not name or name in seen:
             continue
         if len(name) > MAX_TEAM_NAME_LENGTH:
-            raise ValueError(
-                f"班名は{MAX_TEAM_NAME_LENGTH}文字以内にしてください: {name[:20]}…")
+            raise ValueError(f"班名は{MAX_TEAM_NAME_LENGTH}文字以内にしてください: {name[:20]}…")
         names.append(name)
         seen.add(name)
     return names
@@ -116,8 +116,7 @@ class ClubNameModal(discord.ui.Modal, title="サークル名の設定"):
         max_length=50,
     )
 
-    def __init__(self, cog: SetupWizard, guild_id: int, owner_id: int,
-                 current: str | None):
+    def __init__(self, cog: SetupWizard, guild_id: int, owner_id: int, current: str | None):
         super().__init__()
         self.cog = cog
         self.guild_id = guild_id
@@ -129,14 +128,14 @@ class ClubNameModal(discord.ui.Modal, title="サークル名の設定"):
         # コマンド実行者と同一であることを検証
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message(
-                embed=error_embed("この操作はコマンドの実行者のみ可能です。"),
-                ephemeral=True)
+                embed=error_embed("この操作はコマンドの実行者のみ可能です。"), ephemeral=True
+            )
             return
         name = (self.name_input.value or "").strip()
         if not name:
             await interaction.response.send_message(
-                embed=error_embed("サークル名を入力してください。"),
-                ephemeral=True)
+                embed=error_embed("サークル名を入力してください。"), ephemeral=True
+            )
             return
 
         await self.cog.save_setting(self.guild_id, "CLUB_NAME", name)
@@ -145,22 +144,26 @@ class ClubNameModal(discord.ui.Modal, title="サークル名の設定"):
             embed=success_embed(
                 "サークル名を設定しました",
                 f"**{name}**\n週次レポート等のタイトルに表示されます。",
-                executor=interaction.user.display_name),
-            ephemeral=True)
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
-    async def on_error(self, interaction: discord.Interaction,
-                       error: Exception) -> None:
-        log.warning("サークル名設定 Modal でエラー (guild=%s): %s",
-                    self.guild_id, type(error).__name__)
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        log.warning(
+            "サークル名設定 Modal でエラー (guild=%s): %s", self.guild_id, type(error).__name__
+        )
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(
                     embed=error_embed("保存に失敗しました。時間をおいて再試行してください。"),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
             else:
                 await interaction.response.send_message(
                     embed=error_embed("保存に失敗しました。時間をおいて再試行してください。"),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
         # エラー通知の送信自体に失敗した場合はこれ以上できることがないため握りつぶす
         except Exception:  # noqa: BLE001, S110
             pass
@@ -187,26 +190,26 @@ class TeamBulkCreateModal(discord.ui.Modal, title="班の一括作成"):
         # コマンド実行者と同一であることを検証
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message(
-                embed=error_embed("この操作はコマンドの実行者のみ可能です。"),
-                ephemeral=True)
+                embed=error_embed("この操作はコマンドの実行者のみ可能です。"), ephemeral=True
+            )
             return
 
         try:
             names = parse_team_names(self.names_input.value or "")
         except ValueError as e:
-            await interaction.response.send_message(
-                embed=error_embed(str(e)), ephemeral=True)
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
             return
         if not names:
             await interaction.response.send_message(
-                embed=error_embed("班名を1つ以上入力してください。"),
-                ephemeral=True)
+                embed=error_embed("班名を1つ以上入力してください。"), ephemeral=True
+            )
             return
 
         await interaction.response.defer(ephemeral=True)
 
         teams = await self.cog.register_teams(
-            self.guild_id, names, actor_id=str(interaction.user.id))
+            self.guild_id, names, actor_id=str(interaction.user.id)
+        )
 
         # 各班に対応する Discord ロールを作成して紐付ける
         # （権限不足等で失敗しても班の登録は維持し、失敗分だけ案内する）
@@ -219,42 +222,44 @@ class TeamBulkCreateModal(discord.ui.Modal, title="班の一括作成"):
                 continue
             try:
                 role = await guild.create_role(
-                    name=t["name"], mentionable=True,
-                    reason="/setup による班の一括作成")
-                await repo.set_team_roles(
-                    self.guild_id, t["slug"], member_role_id=str(role.id))
+                    name=t["name"], mentionable=True, reason="/setup による班の一括作成"
+                )
+                await repo.set_team_roles(self.guild_id, t["slug"], member_role_id=str(role.id))
             except (discord.Forbidden, discord.HTTPException) as e:
-                log.warning("班ロール作成失敗 (guild=%s, team=%s): %s",
-                            self.guild_id, t["slug"], e)
+                log.warning("班ロール作成失敗 (guild=%s, team=%s): %s", self.guild_id, t["slug"], e)
                 role_failed.append(t["name"])
 
         lines = [f"班 **{t['name']}**（`{t['slug']}`）" for t in teams]
         desc = "\n".join(lines)
         if role_failed:
-            desc += (f"\n\n⚠️ ロールの自動作成に失敗: {', '.join(role_failed)}\n"
-                     "Bot に「ロールの管理」権限があるか確認し、"
-                     "`/team-role` で既存ロールを紐付けてください。")
+            desc += (
+                f"\n\n⚠️ ロールの自動作成に失敗: {', '.join(role_failed)}\n"
+                "Bot に「ロールの管理」権限があるか確認し、"
+                "`/team-role` で既存ロールを紐付けてください。"
+            )
         else:
             desc += "\n\n各班のロールも作成し、主所属ロールとして紐付けました。"
         desc += "\n追加・変更は `/team-add` `/team-remove` `/team-role` でも行えます。"
         await interaction.followup.send(
-            embed=success_embed(f"班を {len(teams)} 件登録しました", desc,
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed(
+                f"班を {len(teams)} 件登録しました", desc, executor=interaction.user.display_name
+            ),
+            ephemeral=True,
+        )
 
-    async def on_error(self, interaction: discord.Interaction,
-                       error: Exception) -> None:
-        log.warning("班一括作成 Modal でエラー (guild=%s): %s",
-                    self.guild_id, type(error).__name__)
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        log.warning("班一括作成 Modal でエラー (guild=%s): %s", self.guild_id, type(error).__name__)
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(
                     embed=error_embed("班の作成に失敗しました。時間をおいて再試行してください。"),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
             else:
                 await interaction.response.send_message(
                     embed=error_embed("班の作成に失敗しました。時間をおいて再試行してください。"),
-                    ephemeral=True)
+                    ephemeral=True,
+                )
         # エラー通知の送信自体に失敗した場合はこれ以上できることがないため握りつぶす
         except Exception:  # noqa: BLE001, S110
             pass
@@ -274,31 +279,30 @@ class SetupWizardView(discord.ui.View):
         # コマンド実行者以外は操作不可
         if interaction.user.id != self.owner_id:
             await interaction.response.send_message(
-                embed=error_embed("この操作はコマンドの実行者のみ可能です。"),
-                ephemeral=True)
+                embed=error_embed("この操作はコマンドの実行者のみ可能です。"), ephemeral=True
+            )
             return False
         return True
 
-    @discord.ui.button(label="サークル名を設定", style=discord.ButtonStyle.secondary,
-                       row=3)
-    async def open_club_name_modal(self, interaction: discord.Interaction,
-                                   button: discord.ui.Button):
+    @discord.ui.button(label="サークル名を設定", style=discord.ButtonStyle.secondary, row=3)
+    async def open_club_name_modal(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         gconf = await config.for_guild(self.guild_id, db=self.cog.db)
         await interaction.response.send_modal(
-            ClubNameModal(self.cog, self.guild_id, self.owner_id, gconf.club_name))
+            ClubNameModal(self.cog, self.guild_id, self.owner_id, gconf.club_name)
+        )
 
-    @discord.ui.button(label="班を一括作成", style=discord.ButtonStyle.primary,
-                       row=3)
-    async def open_team_modal(self, interaction: discord.Interaction,
-                              button: discord.ui.Button):
+    @discord.ui.button(label="班を一括作成", style=discord.ButtonStyle.primary, row=3)
+    async def open_team_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(
-            TeamBulkCreateModal(self.cog, self.guild_id, self.owner_id))
+            TeamBulkCreateModal(self.cog, self.guild_id, self.owner_id)
+        )
 
     async def _refresh(self, interaction: discord.Interaction) -> None:
         """保存後に元メッセージの Embed を最新状態へ更新する。"""
         gconf = await config.for_guild(self.guild_id, db=self.cog.db, force_reload=True)
-        await interaction.response.edit_message(
-            embed=build_setup_embed(gconf), view=self)
+        await interaction.response.edit_message(embed=build_setup_embed(gconf), view=self)
 
     @discord.ui.select(
         placeholder="設定したい項目を選択…",
@@ -307,52 +311,51 @@ class SetupWizardView(discord.ui.View):
             for key, label in CHANNEL_SETTINGS + ROLE_SETTINGS
         ],
     )
-    async def select_item(self, interaction: discord.Interaction,
-                          select: discord.ui.Select):
+    async def select_item(self, interaction: discord.Interaction, select: discord.ui.Select):
         self.selected_key = select.values[0]
         label = dict(CHANNEL_SETTINGS + ROLE_SETTINGS)[self.selected_key]
         kind = "チャンネル" if self.selected_key in _CHANNEL_KEYS else "ロール"
         await interaction.response.send_message(
             embed=info_embed(
                 "項目を選択しました",
-                f"**{label}** を設定します。\n下の{kind}セレクトで対象を選んでください。"),
-            ephemeral=True)
+                f"**{label}** を設定します。\n下の{kind}セレクトで対象を選んでください。",
+            ),
+            ephemeral=True,
+        )
 
     @discord.ui.select(
         cls=discord.ui.ChannelSelect,
         placeholder="チャンネルを選択（先に項目を選択）",
         channel_types=[discord.ChannelType.text],
     )
-    async def select_channel(self, interaction: discord.Interaction,
-                             select: discord.ui.ChannelSelect):
+    async def select_channel(
+        self, interaction: discord.Interaction, select: discord.ui.ChannelSelect
+    ):
         if self.selected_key not in _CHANNEL_KEYS:
             await interaction.response.send_message(
-                embed=error_embed(
-                    "先に「設定したい項目」でチャンネル系の項目を選択してください。"),
-                ephemeral=True)
+                embed=error_embed("先に「設定したい項目」でチャンネル系の項目を選択してください。"),
+                ephemeral=True,
+            )
             return
         channel = select.values[0]
         await self.cog.save_setting(self.guild_id, self.selected_key, str(channel.id))
-        log.info("/setup で保存 (guild=%s): %s=%s",
-                 self.guild_id, self.selected_key, channel.id)
+        log.info("/setup で保存 (guild=%s): %s=%s", self.guild_id, self.selected_key, channel.id)
         await self._refresh(interaction)
 
     @discord.ui.select(
         cls=discord.ui.RoleSelect,
         placeholder="ロールを選択（先に項目を選択）",
     )
-    async def select_role(self, interaction: discord.Interaction,
-                          select: discord.ui.RoleSelect):
+    async def select_role(self, interaction: discord.Interaction, select: discord.ui.RoleSelect):
         if self.selected_key not in _ROLE_KEYS:
             await interaction.response.send_message(
-                embed=error_embed(
-                    "先に「設定したい項目」でロール系の項目を選択してください。"),
-                ephemeral=True)
+                embed=error_embed("先に「設定したい項目」でロール系の項目を選択してください。"),
+                ephemeral=True,
+            )
             return
         role = select.values[0]
         await self.cog.save_setting(self.guild_id, self.selected_key, str(role.id))
-        log.info("/setup で保存 (guild=%s): %s=%s",
-                 self.guild_id, self.selected_key, role.id)
+        log.info("/setup で保存 (guild=%s): %s=%s", self.guild_id, self.selected_key, role.id)
         await self._refresh(interaction)
 
     async def on_timeout(self) -> None:
@@ -370,15 +373,17 @@ class SetupWizard(commands.Cog):
         self.member_repo = MemberRepository(self.db)
         self.audit_repo = AuditLogRepository(self.db)
 
-    async def register_teams(self, guild_id: int, names: list[str],
-                             actor_id: str = "") -> list[dict[str, str]]:
+    async def register_teams(
+        self, guild_id: int, names: list[str], actor_id: str = ""
+    ) -> list[dict[str, str]]:
         """
         班名リストから班を一括登録する。
         識別子（slug）は `team1` `team2` … を既存キーと重ならないよう自動採番する。
         戻り値は登録した班の {"slug", "name"} のリスト（入力順）。
         """
-        existing = {t["team_key"]
-                    for t in await self.member_repo.list_teams(guild_id, active_only=False)}
+        existing = {
+            t["team_key"] for t in await self.member_repo.list_teams(guild_id, active_only=False)
+        }
         created: list[dict[str, str]] = []
         n = 1
         for name in names:
@@ -390,8 +395,11 @@ class SetupWizard(commands.Cog):
             created.append({"slug": slug, "name": name})
         if created:
             await self.audit_repo.record(
-                guild_id, actor_id, "team.bulk_add",
-                detail=f"{len(created)} 件: " + ", ".join(t['name'] for t in created))
+                guild_id,
+                actor_id,
+                "team.bulk_add",
+                detail=f"{len(created)} 件: " + ", ".join(t["name"] for t in created),
+            )
         return created
 
     async def save_setting(self, guild_id: int, key: str, value: str) -> None:
@@ -407,8 +415,8 @@ class SetupWizard(commands.Cog):
         await config.load_from_db(self.db)
 
     @app_commands.command(
-        name="setup",
-        description="このサーバーの初期設定を対話的に行います（管理者）。")
+        name="setup", description="このサーバーの初期設定を対話的に行います（管理者）。"
+    )
     @app_commands.check(is_admin)
     async def setup(self, interaction: discord.Interaction):
         guild_id = await ensure_guild(interaction)
@@ -419,8 +427,7 @@ class SetupWizard(commands.Cog):
             gconf = await config.for_guild(guild_id, db=self.db, force_reload=True)
             embed = build_setup_embed(gconf)
             view = SetupWizardView(self, guild_id, interaction.user.id)
-            await interaction.response.send_message(
-                embed=embed, view=view, ephemeral=True)
+            await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
         except Exception:
             log.exception("/setup 表示エラー")
             embed = error_embed("セットアップ画面の表示に失敗しました")

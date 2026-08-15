@@ -6,6 +6,7 @@
 
 実行: venv/bin/python -m pytest tests/  （pytest 未導入なら直接実行も可）
 """
+
 import asyncio
 import os
 import sys
@@ -26,9 +27,11 @@ G2 = 200000000000000002  # ギルド2
 
 # v1 相当（guilds / audit_log / skill_tags / todoist_configs / guild_directus_access
 # 導入前）のテーブル群
-V1_TABLES = [t for t in TABLE_DDL
-             if t not in ("guilds", "audit_log", "skill_tags", "todoist_configs",
-                          "guild_directus_access")]
+V1_TABLES = [
+    t
+    for t in TABLE_DDL
+    if t not in ("guilds", "audit_log", "skill_tags", "todoist_configs", "guild_directus_access")
+]
 
 
 def _tmp_db_path() -> str:
@@ -59,8 +62,15 @@ def test_fresh_schema_is_v2():
             cols = {r["name"] for r in await db.fetchall("PRAGMA table_info(guilds)")}
             assert {"guild_id", "guild_name", "joined_at", "setup_version"} <= cols
             cols = {r["name"] for r in await db.fetchall("PRAGMA table_info(audit_log)")}
-            assert {"audit_id", "guild_id", "actor_id", "action",
-                    "target", "detail", "created_at"} <= cols
+            assert {
+                "audit_id",
+                "guild_id",
+                "actor_id",
+                "action",
+                "target",
+                "detail",
+                "created_at",
+            } <= cols
             # スキーマバージョンが最新
             row = await db.fetchone("PRAGMA user_version")
             assert row[0] == SCHEMA_VERSION
@@ -69,6 +79,7 @@ def test_fresh_schema_is_v2():
             assert row[0] == 5000
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -95,6 +106,7 @@ def test_guild_registry_ensure():
             assert raised, "guild_id=0 の登録が拒否されませんでした"
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -110,14 +122,19 @@ def test_v1_to_v2_migration_backfills_guilds():
             await conn.executescript(TABLE_DDL[table])
         await conn.execute(
             "INSERT INTO settings (guild_id, setting_key, setting_value)"
-            " VALUES (?, 'GUILD_NAME', '移行ギルド')", (G1,))
+            " VALUES (?, 'GUILD_NAME', '移行ギルド')",
+            (G1,),
+        )
         await conn.execute(
             "INSERT INTO settings (guild_id, setting_key, setting_value)"
-            " VALUES (?, 'TZ', 'Asia/Tokyo')", (G2,))
+            " VALUES (?, 'TZ', 'Asia/Tokyo')",
+            (G2,),
+        )
         # guild_id=0（レガシー sentinel）は台帳に登録されないことを確認するための行
         await conn.execute(
             "INSERT INTO settings (guild_id, setting_key, setting_value)"
-            " VALUES (0, 'TZ', 'Asia/Tokyo')")
+            " VALUES (0, 'TZ', 'Asia/Tokyo')"
+        )
         await conn.commit()
         await conn.close()
 
@@ -147,6 +164,7 @@ def test_v1_to_v2_migration_backfills_guilds():
             assert len(await GuildRepository(db2).list_all()) == 2
         finally:
             await db2.close()
+
     run(_main())
 
 
@@ -158,8 +176,7 @@ def test_audit_log_isolation():
         db = await _connected_db()
         try:
             repo = AuditLogRepository(db)
-            id1 = await repo.record(G1, "u1", "team.add", target="design",
-                                    detail="班を追加")
+            id1 = await repo.record(G1, "u1", "team.add", target="design", detail="班を追加")
             await repo.record(G2, "u2", "todoist.setup")
             assert id1 >= 1
             logs1 = await repo.list_recent(G1)
@@ -172,6 +189,7 @@ def test_audit_log_isolation():
             assert all(l["guild_id"] == G2 for l in logs2)
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -195,6 +213,7 @@ def test_reminders_log_repository_isolation():
             assert logs2[0]["error_message"] == "err"
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -205,9 +224,16 @@ def test_schedule_list_all_isolation():
             repo = ScheduleRepository(db)
             for gid, sid in ((G1, "sch1"), (G2, "sch2")):
                 await repo.create_schedule(
-                    gid, schedule_id=sid, title=f"title-{sid}", description=None,
-                    place=None, target_role_id=None, deadline_iso="2099-01-01T00:00:00",
-                    created_by="u1", channel_id="ch")
+                    gid,
+                    schedule_id=sid,
+                    title=f"title-{sid}",
+                    description=None,
+                    place=None,
+                    target_role_id=None,
+                    deadline_iso="2099-01-01T00:00:00",
+                    created_by="u1",
+                    channel_id="ch",
+                )
             await repo.close_schedule(G1, "sch1")
             # list_all はクローズ済みも含む
             assert [s["schedule_id"] for s in await repo.list_all(G1)] == ["sch1"]
@@ -216,6 +242,7 @@ def test_schedule_list_all_isolation():
             assert all(s["guild_id"] == G1 for s in await repo.list_all(G1))
         finally:
             await db.close()
+
     run(_main())
 
 

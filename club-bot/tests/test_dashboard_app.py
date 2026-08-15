@@ -3,6 +3,7 @@
 dashboard/requirements.txt を入れていない環境ではスキップする
 （bot 本体のテストは依存を増やさずに動き続ける）。
 """
+
 from __future__ import annotations
 
 import os
@@ -13,8 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
-fastapi = pytest.importorskip("fastapi",
-                              reason="dashboard/requirements.txt が未インストール")
+fastapi = pytest.importorskip("fastapi", reason="dashboard/requirements.txt が未インストール")
 from fastapi.testclient import TestClient
 
 from dashboard import db as dashboard_db
@@ -46,14 +46,16 @@ def _config(**overrides) -> DashboardConfig:
 # 設定
 # ---------------------------------------------------------------------
 def test_load_config_reads_env():
-    config = load_config({
-        "DISCORD_CLIENT_ID": " 123 ",
-        "DISCORD_CLIENT_SECRET": '"sec"',
-        "DASHBOARD_REDIRECT_URI": "https://example.com/auth/callback",
-        "DASHBOARD_SECRET_KEY": "key",
-        "DB_PATH": "./data/club.db",
-        "DASHBOARD_SESSION_MAX_AGE": "3600",
-    })
+    config = load_config(
+        {
+            "DISCORD_CLIENT_ID": " 123 ",
+            "DISCORD_CLIENT_SECRET": '"sec"',
+            "DASHBOARD_REDIRECT_URI": "https://example.com/auth/callback",
+            "DASHBOARD_SECRET_KEY": "key",
+            "DB_PATH": "./data/club.db",
+            "DASHBOARD_SESSION_MAX_AGE": "3600",
+        }
+    )
     # 前後の空白と囲い引用符は除去される
     assert config.client_id == "123"
     assert config.client_secret == "sec"

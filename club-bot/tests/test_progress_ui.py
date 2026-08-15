@@ -3,6 +3,7 @@
 Discord への接続は行わず、Embed 組み立て・パンくず・テキスト進捗バーのみ検証する。
 （matplotlib による PNG 生成は撤去され、詳細なグラフはブラウザ側で描画する）
 """
+
 from __future__ import annotations
 
 import os
@@ -25,24 +26,41 @@ from services.progress_tree import ProgressNode, build_and_aggregate
 from utils import progress_bar
 
 
-def _node(node_id, parent=None, *, name=None, progress=None, order=0.0,
-          assignee="", status="", source="manual", td_id=""):
-    return ProgressNode(node_id=node_id, parent_id=parent,
-                        name=name or node_id, manual_progress=progress,
-                        order=order, assignee=assignee, status=status,
-                        source=source, todoist_task_id=td_id)
+def _node(
+    node_id,
+    parent=None,
+    *,
+    name=None,
+    progress=None,
+    order=0.0,
+    assignee="",
+    status="",
+    source="manual",
+    td_id="",
+):
+    return ProgressNode(
+        node_id=node_id,
+        parent_id=parent,
+        name=name or node_id,
+        manual_progress=progress,
+        order=order,
+        assignee=assignee,
+        status=status,
+        source=source,
+        todoist_task_id=td_id,
+    )
 
 
 def _tree():
-    return build_and_aggregate([
-        _node("m1", name="本機", order=1),
-        _node("wing", "m1", name="主翼", order=1),
-        _node("rib", "wing", name="リブ", progress=0.5,
-              assignee="山田", status="製作中"),
-        _node("spar", "wing", name="桁", progress=1.0,
-              source="todoist", td_id="42"),
-        _node("tail", "m1", name="尾翼", order=2, progress=0.0),
-    ])
+    return build_and_aggregate(
+        [
+            _node("m1", name="本機", order=1),
+            _node("wing", "m1", name="主翼", order=1),
+            _node("rib", "wing", name="リブ", progress=0.5, assignee="山田", status="製作中"),
+            _node("spar", "wing", name="桁", progress=1.0, source="todoist", td_id="42"),
+            _node("tail", "m1", name="尾翼", order=2, progress=0.0),
+        ]
+    )
 
 
 # ---------------------------------------------------------------------
@@ -59,8 +77,8 @@ def test_child_nodes_root_and_nested():
     tree = _tree()
     assert [n.node_id for n in child_nodes(tree, None)] == ["m1"]
     assert [n.node_id for n in child_nodes(tree, "wing")] == ["rib", "spar"]
-    assert child_nodes(tree, "rib") == []          # 葉
-    assert child_nodes(tree, "ghost") == []        # 不在 ID
+    assert child_nodes(tree, "rib") == []  # 葉
+    assert child_nodes(tree, "ghost") == []  # 不在 ID
 
 
 # ---------------------------------------------------------------------
@@ -110,8 +128,7 @@ class _Proj:
 
 def test_unmapped_projects_excludes_registered():
     projects = [_Proj("1", "主翼班"), _Proj("2", "尾翼班"), _Proj("3", "電装班")]
-    links = [{"project_name": "主翼班", "node_id": "wing",
-              "notify_channel_id": ""}]
+    links = [{"project_name": "主翼班", "node_id": "wing", "notify_channel_id": ""}]
     result = unmapped_projects(projects, links)
     assert [p.name for p in result] == ["尾翼班", "電装班"]
 
@@ -173,8 +190,8 @@ def test_due_items_filters_and_formats():
     tasks = [
         Task("1", "超過タスク", Due(date(2026, 8, 1)), priority=4),
         Task("2", "今週タスク", Due(date(2026, 8, 10))),
-        Task("3", "来月タスク", Due(date(2026, 9, 1))),   # 期間外
-        Task("4", "期限なし"),                              # 除外
+        Task("3", "来月タスク", Due(date(2026, 9, 1))),  # 期間外
+        Task("4", "期限なし"),  # 除外
     ]
     items = due_items(tasks, until, "主翼班")
     assert [i["title"] for i in items] == ["超過タスク", "今週タスク"]
@@ -201,18 +218,17 @@ def test_render_block_is_empty_for_no_items():
 def test_bar_clamps_and_keeps_width():
     assert progress_bar.bar(0.0, 10) == progress_bar.EMPTY * 10
     assert progress_bar.bar(1.0, 10) == progress_bar.FILLED * 10
-    assert progress_bar.bar(1.5, 10) == progress_bar.FILLED * 10   # クランプ
+    assert progress_bar.bar(1.5, 10) == progress_bar.FILLED * 10  # クランプ
     assert progress_bar.bar(-0.5, 10) == progress_bar.EMPTY * 10
     assert len(progress_bar.bar(0.37, 12)) == 12
-    assert len(progress_bar.bar(0.37, 0)) == 1                     # 最低1文字
+    assert len(progress_bar.bar(0.37, 0)) == 1  # 最低1文字
 
 
 def test_render_lines_align_bars():
     lines = progress_bar.render_lines([("主翼", 0.5), ("胴体フレーム", 0.25)])
     # 名前の長さが違ってもバーの開始位置が揃う
     assert len(lines) == 2
-    assert (lines[0].index(progress_bar.FILLED)
-            == lines[1].index(progress_bar.FILLED))
+    assert lines[0].index(progress_bar.FILLED) == lines[1].index(progress_bar.FILLED)
 
 
 def test_render_block_truncates_long_lists():

@@ -8,6 +8,7 @@
 - 権限不足（L1〜L3・Manage Server なし）では実行できないこと
 - CSV が BOM 付き UTF-8 で、数式インジェクションが無害化されること
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -39,8 +40,8 @@ from utils.permissions import (
     has_manage_guild_or_level,
 )
 
-GA = 100000000000000001   # A 大学
-GB = 200000000000000002   # B 大学
+GA = 100000000000000001  # A 大学
+GB = 200000000000000002  # B 大学
 SECRET = "tok_SHOULD_NEVER_APPEAR"
 
 
@@ -61,20 +62,23 @@ async def _connected_db() -> Database:
     return db
 
 
-async def _seed(db: Database, guild_id: int, *, tasks: int, members: int,
-                title_prefix: str) -> None:
+async def _seed(
+    db: Database, guild_id: int, *, tasks: int, members: int, title_prefix: str
+) -> None:
     for i in range(tasks):
         await db.execute(
             "INSERT INTO tasks (guild_id, title, status, created_by, created_at)"
             " VALUES (?, ?, 'open', 'tester', '2026-01-01')",
-            (guild_id, f"{title_prefix}タスク{i}"))
+            (guild_id, f"{title_prefix}タスク{i}"),
+        )
     for i in range(members):
         # user_id は Discord のユーザー ID。guild_id とは無関係の値にする
         # （guild_id を含めると「サーバー ID が出ていない」検査が偽陽性になる）
         await db.execute(
             "INSERT INTO members (guild_id, user_id, display_name, joined_at,"
             " active_flag) VALUES (?, ?, ?, '2026-01-01', 1)",
-            (guild_id, f"9{i:018d}", f"{title_prefix}メンバー{i}"))
+            (guild_id, f"9{i:018d}", f"{title_prefix}メンバー{i}"),
+        )
 
 
 def _zip_texts(payload: bytes) -> dict[str, str]:
@@ -138,7 +142,8 @@ def test_export_omits_guild_id_and_secrets():
                 "INSERT INTO todoist_configs (guild_id, api_token_encrypted,"
                 " created_by, created_at, updated_at)"
                 " VALUES (?, ?, 'tester', '2026-01-01', '2026-01-01')",
-                (GA, SECRET))
+                (GA, SECRET),
+            )
 
             texts = _zip_texts((await build_export_zip(db, GA))[0])
             joined = "\n".join(texts.values())
@@ -178,7 +183,7 @@ def test_csv_has_bom_and_labels():
             texts = _zip_texts((await build_export_zip(db, GA))[0])
             body = texts["tasks.csv"]
             assert body.startswith(CSV_BOM), "BOM が無いと Excel で文字化けする"
-            header = body[len(CSV_BOM):].splitlines()[0]
+            header = body[len(CSV_BOM) :].splitlines()[0]
             assert "タイトル" in header
         finally:
             await db.close()
@@ -203,7 +208,8 @@ def test_injected_task_title_is_escaped_in_export():
             await db.execute(
                 "INSERT INTO tasks (guild_id, title, status, created_by,"
                 " created_at) VALUES (?, ?, 'open', 'tester', '2026-01-01')",
-                (GA, "=HYPERLINK(\"http://evil\")"))
+                (GA, '=HYPERLINK("http://evil")'),
+            )
             body = _zip_texts((await build_export_zip(db, GA))[0])["tasks.csv"]
             assert "'=HYPERLINK" in body
             assert "\n=HYPERLINK" not in body
@@ -215,8 +221,7 @@ def test_injected_task_title_is_escaped_in_export():
 
 def test_rows_to_csv_uses_whitelisted_columns_only():
     spec = TABLES["members"]
-    csv_text = rows_to_csv(spec, [{"display_name": "山田", "guild_id": GA,
-                                   "secret": SECRET}])
+    csv_text = rows_to_csv(spec, [{"display_name": "山田", "guild_id": GA, "secret": SECRET}])
     assert "山田" in csv_text
     assert str(GA) not in csv_text
     assert SECRET not in csv_text
@@ -241,14 +246,14 @@ def test_list_all_rows_reads_beyond_display_limit():
 # ---------------------------------------------------------------------
 # 権限
 # ---------------------------------------------------------------------
-def _member(*, role_ids=(), manage_guild: bool = False,
-            administrator: bool = False) -> SimpleNamespace:
+def _member(
+    *, role_ids=(), manage_guild: bool = False, administrator: bool = False
+) -> SimpleNamespace:
     return SimpleNamespace(
         id=1,
         guild=SimpleNamespace(id=GA, owner_id=42),
         roles=[SimpleNamespace(id=r) for r in role_ids],
-        guild_permissions=SimpleNamespace(administrator=administrator,
-                                          manage_guild=manage_guild),
+        guild_permissions=SimpleNamespace(administrator=administrator, manage_guild=manage_guild),
     )
 
 
@@ -269,22 +274,18 @@ def test_plain_member_and_leaders_cannot_export():
     """一般メンバー・班長・幹部では書き出せない。"""
     gconf = GuildConfig(guild_id=GA, leader_role_ids=[500], exec_role_id=600)
     assert not has_manage_guild_or_level(_member(), gconf, Level.L4)
-    assert not has_manage_guild_or_level(
-        _member(role_ids=(500,)), gconf, Level.L4)   # 班長 L2
-    assert not has_manage_guild_or_level(
-        _member(role_ids=(600,)), gconf, Level.L4)   # 幹部 L3
+    assert not has_manage_guild_or_level(_member(role_ids=(500,)), gconf, Level.L4)  # 班長 L2
+    assert not has_manage_guild_or_level(_member(role_ids=(600,)), gconf, Level.L4)  # 幹部 L3
 
 
 def test_manage_guild_can_export_without_any_role_config():
     """ロール未設定の新規サーバーでも Manage Server 保持者は書き出せる。"""
-    assert has_manage_guild_or_level(
-        _member(manage_guild=True), GuildConfig(guild_id=GA), Level.L4)
+    assert has_manage_guild_or_level(_member(manage_guild=True), GuildConfig(guild_id=GA), Level.L4)
 
 
 def test_admin_role_can_export():
     gconf = GuildConfig(guild_id=GA, admin_role_id=700)
-    assert has_manage_guild_or_level(
-        _member(role_ids=(700,)), gconf, Level.L4)
+    assert has_manage_guild_or_level(_member(role_ids=(700,)), gconf, Level.L4)
 
 
 # ---------------------------------------------------------------------

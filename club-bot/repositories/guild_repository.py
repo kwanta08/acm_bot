@@ -3,6 +3,7 @@
 参加中ギルドの登録簿。新規ギルド参加時・起動時の自動セットアップで
 冪等に登録・名称更新される。guild_id がそのまま PK。
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -26,8 +27,7 @@ def purge_target_tables() -> tuple[str, ...]:
     最終的には消えるが、親を先に消すと子が連鎖削除されて DELETE の
     rowcount に現れず、削除件数のログが実際より少なくなる。
     """
-    others = tuple(name for name in reversed(list(TABLE_DDL))
-                   if name != "guilds")
+    others = tuple(name for name in reversed(list(TABLE_DDL)) if name != "guilds")
     return (*others, "guilds")
 
 
@@ -48,8 +48,7 @@ class GuildRepository(BaseRepository):
         )
 
     async def get(self, guild_id: int) -> dict[str, Any] | None:
-        row = await self.db.fetchone(
-            "SELECT * FROM guilds WHERE guild_id = ?", (guild_id,))
+        row = await self.db.fetchone("SELECT * FROM guilds WHERE guild_id = ?", (guild_id,))
         return dict(row) if row else None
 
     async def list_all(self) -> list[dict[str, Any]]:
@@ -59,8 +58,9 @@ class GuildRepository(BaseRepository):
     # ------------------------------------------------------------------
     # ライフサイクル（退出 → 猶予 → 自動削除）
     # ------------------------------------------------------------------
-    async def mark_left(self, guild_id: int, retention_days: int,
-                        left_at: datetime | None = None) -> tuple[str, str]:
+    async def mark_left(
+        self, guild_id: int, retention_days: int, left_at: datetime | None = None
+    ) -> tuple[str, str]:
         """退出を記録し、(left_at, purge_after) を ISO 文字列で返す。
 
         **この時点ではデータを消さない。** 誤ってキックされた場合や
@@ -79,13 +79,11 @@ class GuildRepository(BaseRepository):
     async def clear_left(self, guild_id: int) -> None:
         """再参加したギルドの削除予定を取り消す（データはそのまま復活する）。"""
         await self.db.execute(
-            "UPDATE guilds SET left_at = NULL, purge_after = NULL"
-            " WHERE guild_id = ?",
+            "UPDATE guilds SET left_at = NULL, purge_after = NULL WHERE guild_id = ?",
             (guild_id,),
         )
 
-    async def request_purge(self, guild_id: int,
-                            at: datetime | None = None) -> str:
+    async def request_purge(self, guild_id: int, at: datetime | None = None) -> str:
         """サーバー管理者の申告による削除を予約し、purge_after を返す。
 
         退出（mark_left）と違い left_at は立てない。参加したまま
@@ -103,14 +101,12 @@ class GuildRepository(BaseRepository):
     async def cancel_purge(self, guild_id: int) -> bool:
         """削除予約を取り消す。取り消す対象があれば True。"""
         cur = await self.db.execute(
-            "UPDATE guilds SET purge_after = NULL"
-            " WHERE guild_id = ? AND purge_after IS NOT NULL",
+            "UPDATE guilds SET purge_after = NULL WHERE guild_id = ? AND purge_after IS NOT NULL",
             (guild_id,),
         )
         return cur.rowcount > 0
 
-    async def list_purge_due(self,
-                             now_dt: datetime | None = None) -> list[dict[str, Any]]:
+    async def list_purge_due(self, now_dt: datetime | None = None) -> list[dict[str, Any]]:
         """削除予定日時を過ぎたギルドを返す。
 
         ISO 文字列の辞書順比較はタイムゾーン表記が混ざると誤るため、
@@ -118,8 +114,7 @@ class GuildRepository(BaseRepository):
         解釈できない値は対象から外す（消さない側に倒す）。
         """
         current = now_dt or now()
-        rows = await self.db.fetchall(
-            "SELECT * FROM guilds WHERE purge_after IS NOT NULL")
+        rows = await self.db.fetchall("SELECT * FROM guilds WHERE purge_after IS NOT NULL")
         due: list[dict[str, Any]] = []
         for row in rows:
             try:
@@ -138,8 +133,7 @@ class GuildRepository(BaseRepository):
         """
         deleted: dict[str, int] = {}
         for table in purge_target_tables():
-            cur = await self.db.execute(
-                f"DELETE FROM {table} WHERE guild_id = ?", (guild_id,))
+            cur = await self.db.execute(f"DELETE FROM {table} WHERE guild_id = ?", (guild_id,))
             if cur.rowcount:
                 deleted[table] = cur.rowcount
         return deleted

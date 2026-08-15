@@ -7,14 +7,16 @@ gspread を使わず、インポータ関数にシート行（list[list]）を�
 
 実行: venv/bin/python -m pytest tests/  （pytest 未導入なら直接実行も可）
 """
+
 import asyncio
 import os
 import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__))), "scripts"))
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
+)
 
 import migrate_sheets_to_db as mig
 
@@ -48,10 +50,17 @@ async def _seed_base(db: Database) -> None:
     await repo.upsert_team(G1, "wing", "翼")
     await repo.upsert_member(G1, "111", "Taro", "wing")
     srepo = ScheduleRepository(db)
-    await srepo.create_schedule(G1, schedule_id="sch1", title="部会", description=None,
-                                place=None, target_role_id=None,
-                                deadline_iso="2099-01-01T00:00:00",
-                                created_by="111", channel_id="ch")
+    await srepo.create_schedule(
+        G1,
+        schedule_id="sch1",
+        title="部会",
+        description=None,
+        place=None,
+        target_role_id=None,
+        deadline_iso="2099-01-01T00:00:00",
+        created_by="111",
+        channel_id="ch",
+    )
     await srepo.add_option(G1, "opt1", "sch1", "7/3(木)", "2099-01-01", None, "msg")
 
 
@@ -65,7 +74,19 @@ def test_import_tasks_dedup_and_dry_run():
             await _seed_base(db)  # 班「翼」の解決に必要
             rows = [
                 ["1", "td1", "既存タスク", "Taro", "翼", "", "3", "open", "111", "2026-01-01", ""],
-                ["2", "", "新規タスク", "Taro", "翼", "2026-07-05", "2", "open", "111", "2026-01-02", ""],
+                [
+                    "2",
+                    "",
+                    "新規タスク",
+                    "Taro",
+                    "翼",
+                    "2026-07-05",
+                    "2",
+                    "open",
+                    "111",
+                    "2026-01-02",
+                    "",
+                ],
                 ["", "", "IDなしはスキップ", "", "", "", "", "open", "", "", ""],
             ]
             # dry-run: DB は変わらないが集計は出る
@@ -80,8 +101,8 @@ def test_import_tasks_dedup_and_dry_run():
             stats = await mig.import_tasks(db, G1, rows, apply=True)
             assert stats.migrated == 2
             row = await db.fetchone(
-                "SELECT title, team_key FROM tasks WHERE guild_id = ? AND local_task_id = 2",
-                (G1,))
+                "SELECT title, team_key FROM tasks WHERE guild_id = ? AND local_task_id = 2", (G1,)
+            )
             assert row["title"] == "新規タスク"
             assert row["team_key"] == "wing"  # 班名→キー解決
 
@@ -93,6 +114,7 @@ def test_import_tasks_dedup_and_dry_run():
             assert row["c"] == 2
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -105,9 +127,9 @@ def test_import_members_and_skill_registration():
         try:
             await _seed_base(db)  # 111=Taro 既存
             rows = [
-                ["111", "Taro", "翼", "", "○", "CAD", "2026-01-01", "在籍"],      # 既存 → skip
+                ["111", "Taro", "翼", "", "○", "CAD", "2026-01-01", "在籍"],  # 既存 → skip
                 ["222", "Jiro", "翼", "", "", "はんだ、CAD", "2026-01-02", "在籍"],  # 新規
-                ["abc", "Bad", "", "", "", "", "", ""],                              # ID 非数値 → skip
+                ["abc", "Bad", "", "", "", "", "", ""],  # ID 非数値 → skip
             ]
             stats = await mig.import_members(db, G1, rows, apply=True)
             assert stats.input_rows == 3
@@ -121,18 +143,18 @@ def test_import_members_and_skill_registration():
             assert sorted(m["skills"]) == ["CAD", "はんだ"]
             # 技能タグがギルドのマスタに自動登録されている
             rows = await db.fetchall(
-                "SELECT skill_name FROM skill_tags WHERE guild_id = ? ORDER BY skill_name",
-                (G1,))
+                "SELECT skill_name FROM skill_tags WHERE guild_id = ? ORDER BY skill_name", (G1,)
+            )
             assert [r["skill_name"] for r in rows] == ["CAD", "はんだ"]
 
             # 再実行（冪等）
             stats = await mig.import_members(db, G1, rows, apply=True)
             assert stats.migrated == 0
-            row = await db.fetchone(
-                "SELECT COUNT(*) AS c FROM members WHERE guild_id = ?", (G1,))
+            row = await db.fetchone("SELECT COUNT(*) AS c FROM members WHERE guild_id = ?", (G1,))
             assert row["c"] == 2
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -146,17 +168,17 @@ def test_import_attendance_resolution_and_dedup():
             await _seed_base(db)
             rows = [
                 ["sch1", "部会", "7/3(木)", "Taro", "ok", "2026-07-03", "2026-07-03 12:00"],
-                ["sch1", "部会", "7/3(木)", "Taro", "yes", "", ""],       # yes→ok だが重複
-                ["sch1", "部会", "7/3(木)", "不明な人", "ok", "", ""],     # ユーザー解決不可
-                ["schX", "?", "7/3(木)", "Taro", "ok", "", ""],            # schedule 無し
+                ["sch1", "部会", "7/3(木)", "Taro", "yes", "", ""],  # yes→ok だが重複
+                ["sch1", "部会", "7/3(木)", "不明な人", "ok", "", ""],  # ユーザー解決不可
+                ["schX", "?", "7/3(木)", "Taro", "ok", "", ""],  # schedule 無し
             ]
             stats = await mig.import_attendance(db, G1, rows, apply=True)
             assert stats.input_rows == 4
             assert stats.migrated == 1
             assert stats.skipped == 3
             row = await db.fetchone(
-                "SELECT status FROM schedule_votes WHERE guild_id = ? AND option_id = 'opt1'",
-                (G1,))
+                "SELECT status FROM schedule_votes WHERE guild_id = ? AND option_id = 'opt1'", (G1,)
+            )
             assert row["status"] == "ok"
 
             # 再実行（冪等）
@@ -164,6 +186,7 @@ def test_import_attendance_resolution_and_dedup():
             assert stats.migrated == 0
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -186,22 +209,25 @@ def test_import_layer_rows_dedup():
             assert stats.skipped == 1
             # 桁名マスタに登録される
             row = await db.fetchone(
-                "SELECT 1 FROM layer_keta WHERE guild_id = ? AND keta_name = '主翼前桁'",
-                (G1,))
+                "SELECT 1 FROM layer_keta WHERE guild_id = ? AND keta_name = '主翼前桁'", (G1,)
+            )
             assert row is not None
             # synced_flag=1 で保存される（Sheets 側に既に存在した記録のため）
             row = await db.fetchone(
-                "SELECT synced_flag FROM layer_records WHERE guild_id = ?", (G1,))
+                "SELECT synced_flag FROM layer_records WHERE guild_id = ?", (G1,)
+            )
             assert row["synced_flag"] == 1
 
             # 再実行（冪等）
             stats = await mig.import_layer_rows(db, G1, "主翼前桁", rows, apply=True)
             assert stats.migrated == 0
             row = await db.fetchone(
-                "SELECT COUNT(*) AS c FROM layer_records WHERE guild_id = ?", (G1,))
+                "SELECT COUNT(*) AS c FROM layer_records WHERE guild_id = ?", (G1,)
+            )
             assert row["c"] == 2
         finally:
             await db.close()
+
     run(_main())
 
 

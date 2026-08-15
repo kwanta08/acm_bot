@@ -8,6 +8,7 @@
 
 実行: venv/bin/python -m pytest tests/
 """
+
 import asyncio
 import os
 import sys
@@ -114,16 +115,21 @@ def test_build_setup_embed_marks_missing():
     gconf = GuildConfig(guild_id=G1, default_announce_channel_id=111)
     embed = build_setup_embed(gconf)
     desc = embed.description or ""
-    assert "<#111>" in desc                    # 設定済みはメンション表示
-    assert "⚠️ 未設定" in desc                  # 未設定項目を明示
-    assert "未設定が 7 件" in desc               # 全8項目中1件のみ設定済み
+    assert "<#111>" in desc  # 設定済みはメンション表示
+    assert "⚠️ 未設定" in desc  # 未設定項目を明示
+    assert "未設定が 7 件" in desc  # 全8項目中1件のみ設定済み
 
     full = GuildConfig(
         guild_id=G1,
-        bot_log_channel_id=1, default_announce_channel_id=2,
-        default_schedule_channel_id=3, default_progress_channel_id=4,
-        default_task_channel_id=5, today_label_channel_id=6,
-        exec_role_id=7, admin_role_id=8)
+        bot_log_channel_id=1,
+        default_announce_channel_id=2,
+        default_schedule_channel_id=3,
+        default_progress_channel_id=4,
+        default_task_channel_id=5,
+        today_label_channel_id=6,
+        exec_role_id=7,
+        admin_role_id=8,
+    )
     embed_full = build_setup_embed(full)
     assert "未設定" not in (embed_full.description or "")
     assert "すべての項目が設定済み" in embed_full.description
@@ -159,6 +165,7 @@ def test_non_admin_is_rejected():
 # ------------------------------------------------------------------
 # 班の一括作成（/setup の「班を一括作成」ステップ）
 # ------------------------------------------------------------------
+
 
 def test_parse_team_names():
     assert parse_team_names("設計班, 製造班, 広報班") == ["設計班", "製造班", "広報班"]
@@ -231,6 +238,7 @@ def test_zero_teams_commands_helpers_work():
 # ------------------------------------------------------------------
 # サークル名（CLUB_NAME）
 # ------------------------------------------------------------------
+
 
 def test_club_name_fallback():
     """未設定時は汎用表現「サークル」にフォールバックすること。"""

@@ -8,6 +8,7 @@
 services/ 配下のコード（変更禁止のため guild_id を渡せない）に
 リポジトリを渡す際に利用する。
 """
+
 from __future__ import annotations
 
 import functools

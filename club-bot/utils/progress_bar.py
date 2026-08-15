@@ -9,6 +9,7 @@ Embed 内のテキストとして描画する。
 詳細なグラフはブラウザ（Web ダッシュボード）側で描画する
 （docs/DESIGN_PUBLIC_DISTRIBUTION.md 4章 / Phase 3）。
 """
+
 from __future__ import annotations
 
 # 塗り・空白に使う文字（等幅でなくても崩れにくい全角ブロック）
@@ -42,11 +43,10 @@ def percent(value: float | None) -> str:
 
 
 def truncate(label: str, limit: int = MAX_LABEL) -> str:
-    return label if len(label) <= limit else label[:limit - 1] + "…"
+    return label if len(label) <= limit else label[: limit - 1] + "…"
 
 
-def render_lines(items: list[tuple[str, float]], *,
-                 width: int = DEFAULT_WIDTH) -> list[str]:
+def render_lines(items: list[tuple[str, float]], *, width: int = DEFAULT_WIDTH) -> list[str]:
     """(名前, 進捗率) の一覧を1行ずつのテキストへ整形する。
 
     名前は最長のものに合わせて左詰めし、バーの開始位置を揃える。
@@ -61,9 +61,9 @@ def render_lines(items: list[tuple[str, float]], *,
     ]
 
 
-def render_block(items: list[tuple[str, float]], *,
-                 width: int = DEFAULT_WIDTH,
-                 max_rows: int = 25) -> str:
+def render_block(
+    items: list[tuple[str, float]], *, width: int = DEFAULT_WIDTH, max_rows: int = 25
+) -> str:
     """Embed に貼り付けるコードブロック（等幅表示）を返す。
 
     行数が max_rows を超える場合は打ち切り、残件数を末尾に添える。

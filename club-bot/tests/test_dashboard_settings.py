@@ -4,6 +4,7 @@
 - ホワイトリスト外のキー（Todoist トークン等）は変更できないこと
 - 更新が他サーバーへ影響しないこと・監査ログに残ること
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -42,9 +43,13 @@ def _tmp_db_path() -> str:
 
 def _config(db_path: str) -> DashboardConfig:
     return DashboardConfig(
-        client_id="cid", client_secret="secret",
+        client_id="cid",
+        client_secret="secret",
         redirect_uri="https://example.com/auth/callback",
-        secret_key="unit-test-secret", db_path=db_path, secure_cookie=False)
+        secret_key="unit-test-secret",
+        db_path=db_path,
+        secure_cookie=False,
+    )
 
 
 async def _seed(db_path: str) -> None:
@@ -69,9 +74,9 @@ def _transport(permissions: str):
         if request.url.path.endswith("/users/@me"):
             return httpx.Response(200, json={"id": USER_ID, "username": "y"})
         if request.url.path.endswith("/users/@me/guilds"):
-            return httpx.Response(200, json=[
-                {"id": str(GUILD_A), "name": "A大学",
-                 "permissions": permissions}])
+            return httpx.Response(
+                200, json=[{"id": str(GUILD_A), "name": "A大学", "permissions": permissions}]
+            )
         return httpx.Response(404, json={})
 
     return httpx.MockTransport(handler)
@@ -108,8 +113,7 @@ def test_read_settings_lists_whitelist_only():
         assert "PROGRESS_DEFAULT_CHANNEL_ID" in keys
         # 機密値になりうるキーは一覧にも値にも出ない
         assert "TODOIST_API_TOKEN_LEGACY" not in keys
-        assert "secret-token" not in client.get(
-            f"/api/guilds/{GUILD_A}/settings").text
+        assert "secret-token" not in client.get(f"/api/guilds/{GUILD_A}/settings").text
         assert body["can_edit"] is True
         current = {s["key"]: s["value"] for s in body["settings"]}
         assert current["GUILD_NAME"] == "A大学 鳥人間"
@@ -122,17 +126,16 @@ def test_admin_can_update_settings():
     asyncio.run(_seed(db_path))
     client = _client(db_path)
     try:
-        res = client.patch(f"/api/guilds/{GUILD_A}/settings",
-                           json={"GUILD_NAME": "A大学 人力飛行機部",
-                                 "PROGRESS_DEFAULT_CHANNEL_ID": "12345"})
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/settings",
+            json={"GUILD_NAME": "A大学 人力飛行機部", "PROGRESS_DEFAULT_CHANNEL_ID": "12345"},
+        )
         assert res.status_code == 200
     finally:
         client.__exit__(None, None, None)
 
-    assert asyncio.run(_setting(db_path, GUILD_A, "GUILD_NAME")) == \
-        "A大学 人力飛行機部"
-    assert asyncio.run(
-        _setting(db_path, GUILD_A, "PROGRESS_DEFAULT_CHANNEL_ID")) == "12345"
+    assert asyncio.run(_setting(db_path, GUILD_A, "GUILD_NAME")) == "A大学 人力飛行機部"
+    assert asyncio.run(_setting(db_path, GUILD_A, "PROGRESS_DEFAULT_CHANNEL_ID")) == "12345"
     # 他サーバーには影響しない
     assert asyncio.run(_setting(db_path, GUILD_B, "GUILD_NAME")) == "B大学 鳥人間"
 
@@ -140,12 +143,10 @@ def test_admin_can_update_settings():
 def test_non_admin_cannot_update():
     db_path = _tmp_db_path()
     asyncio.run(_seed(db_path))
-    client = _client(db_path, permissions="0")   # サーバー管理権限なし
+    client = _client(db_path, permissions="0")  # サーバー管理権限なし
     try:
-        assert client.get(
-            f"/api/guilds/{GUILD_A}/settings").json()["can_edit"] is False
-        res = client.patch(f"/api/guilds/{GUILD_A}/settings",
-                           json={"GUILD_NAME": "書き換え"})
+        assert client.get(f"/api/guilds/{GUILD_A}/settings").json()["can_edit"] is False
+        res = client.patch(f"/api/guilds/{GUILD_A}/settings", json={"GUILD_NAME": "書き換え"})
         assert res.status_code == 403
     finally:
         client.__exit__(None, None, None)
@@ -157,16 +158,16 @@ def test_unknown_keys_are_rejected():
     asyncio.run(_seed(db_path))
     client = _client(db_path)
     try:
-        for payload in ({"TODOIST_API_TOKEN_LEGACY": "x"},
-                        {"ENCRYPTION_KEY": "x"},
-                        {"AUTO_SETUP_DONE": "x"},
-                        {}):
-            assert client.patch(f"/api/guilds/{GUILD_A}/settings",
-                                json=payload).status_code == 400
+        for payload in (
+            {"TODOIST_API_TOKEN_LEGACY": "x"},
+            {"ENCRYPTION_KEY": "x"},
+            {"AUTO_SETUP_DONE": "x"},
+            {},
+        ):
+            assert client.patch(f"/api/guilds/{GUILD_A}/settings", json=payload).status_code == 400
     finally:
         client.__exit__(None, None, None)
-    assert asyncio.run(
-        _setting(db_path, GUILD_A, "TODOIST_API_TOKEN_LEGACY")) == "secret-token"
+    assert asyncio.run(_setting(db_path, GUILD_A, "TODOIST_API_TOKEN_LEGACY")) == "secret-token"
 
 
 def test_channel_ids_must_be_numeric():
@@ -174,8 +175,9 @@ def test_channel_ids_must_be_numeric():
     asyncio.run(_seed(db_path))
     client = _client(db_path)
     try:
-        res = client.patch(f"/api/guilds/{GUILD_A}/settings",
-                           json={"BOT_LOG_CHANNEL_ID": "#bot-log"})
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/settings", json={"BOT_LOG_CHANNEL_ID": "#bot-log"}
+        )
         assert res.status_code == 400
     finally:
         client.__exit__(None, None, None)
@@ -186,8 +188,10 @@ def test_empty_value_deletes_setting():
     asyncio.run(_seed(db_path))
     client = _client(db_path)
     try:
-        assert client.patch(f"/api/guilds/{GUILD_A}/settings",
-                            json={"GUILD_NAME": ""}).status_code == 200
+        assert (
+            client.patch(f"/api/guilds/{GUILD_A}/settings", json={"GUILD_NAME": ""}).status_code
+            == 200
+        )
     finally:
         client.__exit__(None, None, None)
     assert asyncio.run(_setting(db_path, GUILD_A, "GUILD_NAME")) is None
@@ -198,8 +202,7 @@ def test_settings_change_is_audited():
     asyncio.run(_seed(db_path))
     client = _client(db_path)
     try:
-        client.patch(f"/api/guilds/{GUILD_A}/settings",
-                     json={"GUILD_NAME": "新しい名前"})
+        client.patch(f"/api/guilds/{GUILD_A}/settings", json={"GUILD_NAME": "新しい名前"})
     finally:
         client.__exit__(None, None, None)
 
@@ -213,8 +216,7 @@ def test_settings_change_is_audited():
 
     entries = asyncio.run(_entries())
     assert any(e["action"] == "dashboard.settings" for e in entries)
-    detail = next(e["detail"] for e in entries
-                  if e["action"] == "dashboard.settings")
+    detail = next(e["detail"] for e in entries if e["action"] == "dashboard.settings")
     assert "A大学 鳥人間" in detail and "新しい名前" in detail
 
 
@@ -223,10 +225,13 @@ def test_other_guild_settings_are_forbidden():
     asyncio.run(_seed(db_path))
     client = _client(db_path)
     try:
-        assert client.get(
-            f"/api/guilds/{GUILD_B}/settings").status_code == 403
-        assert client.patch(f"/api/guilds/{GUILD_B}/settings",
-                            json={"GUILD_NAME": "乗っ取り"}).status_code == 403
+        assert client.get(f"/api/guilds/{GUILD_B}/settings").status_code == 403
+        assert (
+            client.patch(
+                f"/api/guilds/{GUILD_B}/settings", json={"GUILD_NAME": "乗っ取り"}
+            ).status_code
+            == 403
+        )
     finally:
         client.__exit__(None, None, None)
     assert asyncio.run(_setting(db_path, GUILD_B, "GUILD_NAME")) == "B大学 鳥人間"

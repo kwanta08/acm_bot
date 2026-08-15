@@ -10,6 +10,7 @@
 Cookie のサイズ上限（4KB）に収めるため、セッションには
 「アクセスできるサーバーの最小情報」だけを入れる。
 """
+
 from __future__ import annotations
 
 import secrets
@@ -48,6 +49,7 @@ class OAuthError(Exception):
 @dataclass(frozen=True)
 class SessionUser:
     """ログイン中の利用者（セッションに保存する最小情報）。"""
+
     id: str
     name: str
     avatar: str | None = None
@@ -60,6 +62,7 @@ class SessionGuild:
     manage_guild は Discord 側の「サーバー管理」権限。編集操作の可否は
     これに DB 上の役割（班長など）を加えて dashboard/security.py が決める。
     """
+
     id: str
     name: str
     manage_guild: bool = False
@@ -67,15 +70,17 @@ class SessionGuild:
 
 def build_authorize_url(config: DashboardConfig, state: str) -> str:
     """Discord の認可画面 URL を組み立てる。"""
-    params = httpx.QueryParams({
-        "client_id": config.client_id,
-        "redirect_uri": config.redirect_uri,
-        "response_type": "code",
-        "scope": " ".join(OAUTH_SCOPES),
-        "state": state,
-        # 毎回同意画面を出さない（すでに許可済みならそのまま戻る）
-        "prompt": "none",
-    })
+    params = httpx.QueryParams(
+        {
+            "client_id": config.client_id,
+            "redirect_uri": config.redirect_uri,
+            "response_type": "code",
+            "scope": " ".join(OAUTH_SCOPES),
+            "state": state,
+            # 毎回同意画面を出さない（すでに許可済みならそのまま戻る）
+            "prompt": "none",
+        }
+    )
     return f"{DISCORD_AUTHORIZE_URL}?{params}"
 
 
@@ -97,8 +102,7 @@ def has_manage_guild(permissions: Any) -> bool:
     return bool(bits & (PERM_MANAGE_GUILD | PERM_ADMINISTRATOR))
 
 
-async def exchange_code(config: DashboardConfig, code: str,
-                        client: httpx.AsyncClient) -> str:
+async def exchange_code(config: DashboardConfig, code: str, client: httpx.AsyncClient) -> str:
     """認可コードをアクセストークンに交換する。
 
     アクセストークンは**セッションに保存しない**（ログイン時に一度だけ使い、
@@ -128,16 +132,15 @@ async def exchange_code(config: DashboardConfig, code: str,
     return str(token)
 
 
-async def _get(client: httpx.AsyncClient, path: str,
-               token: str) -> Any:
+async def _get(client: httpx.AsyncClient, path: str, token: str) -> Any:
     try:
-        res = await client.get(f"{DISCORD_API_BASE}{path}",
-                               headers={"Authorization": f"Bearer {token}"})
+        res = await client.get(
+            f"{DISCORD_API_BASE}{path}", headers={"Authorization": f"Bearer {token}"}
+        )
     except httpx.HTTPError as e:
         raise OAuthError("Discord へ接続できませんでした。") from e
     if res.status_code != 200:
-        log.warning("Discord API 呼び出しに失敗しました（%s status=%s）",
-                    path, res.status_code)
+        log.warning("Discord API 呼び出しに失敗しました（%s status=%s）", path, res.status_code)
         raise OAuthError("Discord から情報を取得できませんでした。")
     return res.json()
 
@@ -145,21 +148,19 @@ async def _get(client: httpx.AsyncClient, path: str,
 async def fetch_user(client: httpx.AsyncClient, token: str) -> SessionUser:
     """`identify` スコープで利用者情報を取得する。"""
     data = await _get(client, "/users/@me", token)
-    name = (data.get("global_name") or data.get("username")
-            or str(data.get("id", "")))
-    return SessionUser(id=str(data["id"]), name=str(name),
-                       avatar=data.get("avatar"))
+    name = data.get("global_name") or data.get("username") or str(data.get("id", ""))
+    return SessionUser(id=str(data["id"]), name=str(name), avatar=data.get("avatar"))
 
 
-async def fetch_guilds(client: httpx.AsyncClient,
-                       token: str) -> list[dict[str, Any]]:
+async def fetch_guilds(client: httpx.AsyncClient, token: str) -> list[dict[str, Any]]:
     """`guilds` スコープで所属サーバー一覧を取得する。"""
     data = await _get(client, "/users/@me/guilds", token)
     return list(data) if isinstance(data, list) else []
 
 
-def select_accessible_guilds(user_guilds: list[dict[str, Any]],
-                             bot_guild_ids: set[int]) -> list[SessionGuild]:
+def select_accessible_guilds(
+    user_guilds: list[dict[str, Any]], bot_guild_ids: set[int]
+) -> list[SessionGuild]:
     """利用者の所属サーバーのうち bot も参加しているものだけを返す。
 
     bot が居ないサーバーを候補に出さないことで、
@@ -170,20 +171,22 @@ def select_accessible_guilds(user_guilds: list[dict[str, Any]],
         raw_id = str(guild.get("id") or "")
         if not raw_id.isdigit() or int(raw_id) not in bot_guild_ids:
             continue
-        out.append(SessionGuild(
-            id=raw_id,
-            name=str(guild.get("name") or raw_id),
-            manage_guild=has_manage_guild(guild.get("permissions")),
-        ))
+        out.append(
+            SessionGuild(
+                id=raw_id,
+                name=str(guild.get("name") or raw_id),
+                manage_guild=has_manage_guild(guild.get("permissions")),
+            )
+        )
     if len(out) > MAX_SESSION_GUILDS:
-        log.warning("アクセス可能サーバーが %d 件あるため %d 件に切り詰めます",
-                    len(out), MAX_SESSION_GUILDS)
+        log.warning(
+            "アクセス可能サーバーが %d 件あるため %d 件に切り詰めます", len(out), MAX_SESSION_GUILDS
+        )
         out = out[:MAX_SESSION_GUILDS]
     return out
 
 
-def store_session(session: dict[str, Any], user: SessionUser,
-                  guilds: list[SessionGuild]) -> None:
+def store_session(session: dict[str, Any], user: SessionUser, guilds: list[SessionGuild]) -> None:
     """セッション（署名付き Cookie の中身）を書き込む。
 
     アクセストークンは保存しない。保持するのは利用者の表示情報と、
@@ -198,8 +201,7 @@ def read_user(session: dict[str, Any]) -> SessionUser | None:
     raw = session.get(SESSION_USER_KEY)
     if not isinstance(raw, dict) or not raw.get("id"):
         return None
-    return SessionUser(id=str(raw["id"]), name=str(raw.get("name") or ""),
-                       avatar=raw.get("avatar"))
+    return SessionUser(id=str(raw["id"]), name=str(raw.get("name") or ""), avatar=raw.get("avatar"))
 
 
 def read_guilds(session: dict[str, Any]) -> list[SessionGuild]:
@@ -209,16 +211,17 @@ def read_guilds(session: dict[str, Any]) -> list[SessionGuild]:
     out: list[SessionGuild] = []
     for item in raw:
         if isinstance(item, dict) and str(item.get("id", "")).isdigit():
-            out.append(SessionGuild(
-                id=str(item["id"]),
-                name=str(item.get("name") or item["id"]),
-                manage_guild=bool(item.get("manage_guild")),
-            ))
+            out.append(
+                SessionGuild(
+                    id=str(item["id"]),
+                    name=str(item.get("name") or item["id"]),
+                    manage_guild=bool(item.get("manage_guild")),
+                )
+            )
     return out
 
 
-def find_session_guild(session: dict[str, Any],
-                       guild_id: int) -> SessionGuild | None:
+def find_session_guild(session: dict[str, Any], guild_id: int) -> SessionGuild | None:
     """セッションで検証済みのサーバーだけを返す（未検証なら None）。
 
     **アクセス制御の入口**。リクエストで与えられた guild_id は、

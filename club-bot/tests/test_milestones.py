@@ -7,6 +7,7 @@
 - v12 相当の既存 DB からマイグレーションで追加され、既存データが壊れないこと
 - 大会日はギルド別設定 COMPETITION_DATE で、既定値を持たないこと
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -82,10 +83,16 @@ def test_fresh_schema_has_milestones_table():
     async def _main():
         db = await _connected_db()
         try:
-            cols = {r["name"] for r in
-                    await db.fetchall("PRAGMA table_info(progress_milestones)")}
-            assert {"milestone_id", "guild_id", "node_id", "name", "due_date",
-                    "created_at", "updated_at"} <= cols
+            cols = {r["name"] for r in await db.fetchall("PRAGMA table_info(progress_milestones)")}
+            assert {
+                "milestone_id",
+                "guild_id",
+                "node_id",
+                "name",
+                "due_date",
+                "created_at",
+                "updated_at",
+            } <= cols
             assert await db._user_version() == SCHEMA_VERSION
         finally:
             await db.close()
@@ -97,8 +104,7 @@ def test_milestone_index_exists():
     async def _main():
         db = await _connected_db()
         try:
-            rows = await db.fetchall(
-                "SELECT name FROM sqlite_master WHERE type = 'index'")
+            rows = await db.fetchall("SELECT name FROM sqlite_master WHERE type = 'index'")
             assert "idx_progress_milestones_guild_due" in {r["name"] for r in rows}
         finally:
             await db.close()
@@ -152,8 +158,7 @@ def test_v12_db_gains_milestones_and_keeps_nodes():
             rows = await db.fetchall("PRAGMA table_info(progress_milestones)")
             assert rows, "progress_milestones が作られていない"
 
-            node = await db.fetchone(
-                "SELECT * FROM progress_nodes WHERE guild_id = ?", (G1,))
+            node = await db.fetchone("SELECT * FROM progress_nodes WHERE guild_id = ?", (G1,))
             assert node["name"] == "主翼"
             assert node["manual_progress"] == 0.5
             assert await db._user_version() == SCHEMA_VERSION
@@ -270,6 +275,7 @@ def test_milestones_are_guild_scoped():
 # ---------------------------------------------------------------------
 def test_competition_date_has_no_default():
     """大会も日程もサークルごとに違うので既定値を持たない。"""
+
     async def _main():
         db = await _connected_db()
         try:
@@ -312,16 +318,20 @@ def _dt(*args) -> datetime:
 
 
 def _pnode(node_id, progress, created, updated, parent=None, name=None):
-    return ProgressNode(node_id=node_id, parent_id=parent,
-                        name=name or node_id, manual_progress=progress,
-                        created_at=created, updated_at=updated)
+    return ProgressNode(
+        node_id=node_id,
+        parent_id=parent,
+        name=name or node_id,
+        manual_progress=progress,
+        created_at=created,
+        updated_at=updated,
+    )
 
 
 def _status(progress, created, updated, due, *, today=TODAY):
     tree = build_and_aggregate([_pnode("wing", progress, created, updated)])
     node = tree.by_id["wing"]
-    return evaluate_milestone(node, "接着完了", due, today=today,
-                              pace=node_pace(node, today=today))
+    return evaluate_milestone(node, "接着完了", due, today=today, pace=node_pace(node, today=today))
 
 
 def test_on_track_when_pace_is_enough():
@@ -392,22 +402,30 @@ def test_zero_progress_with_history_is_behind_not_unknown():
 
 def test_aggregated_progress_is_used_for_parent_nodes():
     """親ノードは子から積み上げた集計進捗で判定される。"""
-    tree = build_and_aggregate([
-        _pnode("airframe", None, "2026-07-01", "2026-08-11"),
-        _pnode("wing", 0.6, "2026-07-01", "2026-08-11", parent="airframe"),
-        _pnode("tail", 0.4, "2026-07-01", "2026-08-11", parent="airframe"),
-    ])
+    tree = build_and_aggregate(
+        [
+            _pnode("airframe", None, "2026-07-01", "2026-08-11"),
+            _pnode("wing", 0.6, "2026-07-01", "2026-08-11", parent="airframe"),
+            _pnode("tail", 0.4, "2026-07-01", "2026-08-11", parent="airframe"),
+        ]
+    )
     node = tree.by_id["airframe"]
-    st = evaluate_milestone(node, "機体完成", date(2026, 9, 1), today=TODAY,
-                            pace=node_pace(node, today=TODAY))
+    st = evaluate_milestone(
+        node, "機体完成", date(2026, 9, 1), today=TODAY, pace=node_pace(node, today=TODAY)
+    )
     assert abs(st.progress - 0.5) < 1e-9
 
 
 # ---- 桁巻きの作業記録からのペース ----------------------------------
 def test_spar_pace_from_layer_records():
     """10日で5層 → 0.5層/日。目標10層なら 0.05（進捗率/日）。"""
-    dates = [date(2026, 8, 1), date(2026, 8, 3), date(2026, 8, 5),
-             date(2026, 8, 8), date(2026, 8, 11)]
+    dates = [
+        date(2026, 8, 1),
+        date(2026, 8, 3),
+        date(2026, 8, 5),
+        date(2026, 8, 8),
+        date(2026, 8, 11),
+    ]
     pace = spar_pace(dates, target_layers=10)
     assert pace.source == SOURCE_LAYER_RECORDS
     assert abs(pace.per_day - 0.05) < 1e-9
@@ -428,43 +446,55 @@ def test_spar_pace_requires_target_layers():
 
 def test_spar_pace_overrides_node_pace():
     tree = build_and_aggregate([_pnode("spar", 0.5, "2026-08-02", "2026-08-12")])
-    milestones = [{"node_id": "spar", "name": "積層完了",
-                   "due_date": "2026-09-01"}]
+    milestones = [{"node_id": "spar", "name": "積層完了", "due_date": "2026-09-01"}]
     override = spar_pace([date(2026, 8, 1), date(2026, 8, 11)], 10)
 
-    result = evaluate_all(tree, milestones, today=TODAY,
-                          pace_by_node={"spar": override})
+    result = evaluate_all(tree, milestones, today=TODAY, pace_by_node={"spar": override})
     assert result[0].pace_source == SOURCE_LAYER_RECORDS
 
 
 # ---- 一覧の判定 ----------------------------------------------------
 def test_evaluate_all_sorts_by_due_date():
-    tree = build_and_aggregate([
-        _pnode("wing", 0.5, "2026-08-02", "2026-08-12"),
-        _pnode("tail", 0.5, "2026-08-02", "2026-08-12"),
-    ])
-    result = evaluate_all(tree, [
-        {"node_id": "wing", "name": "後", "due_date": "2026-09-10"},
-        {"node_id": "tail", "name": "先", "due_date": "2026-08-20"},
-    ], today=TODAY)
+    tree = build_and_aggregate(
+        [
+            _pnode("wing", 0.5, "2026-08-02", "2026-08-12"),
+            _pnode("tail", 0.5, "2026-08-02", "2026-08-12"),
+        ]
+    )
+    result = evaluate_all(
+        tree,
+        [
+            {"node_id": "wing", "name": "後", "due_date": "2026-09-10"},
+            {"node_id": "tail", "name": "先", "due_date": "2026-08-20"},
+        ],
+        today=TODAY,
+    )
     assert [s.name for s in result] == ["先", "後"]
 
 
 def test_evaluate_all_skips_milestones_of_missing_nodes():
     """ノードが消えても行は残る（FK を張っていない）ので表示から外す。"""
     tree = build_and_aggregate([_pnode("wing", 0.5, "2026-08-02", "2026-08-12")])
-    result = evaluate_all(tree, [
-        {"node_id": "wing", "name": "生きている", "due_date": "2026-09-01"},
-        {"node_id": "deleted", "name": "消えたノード", "due_date": "2026-09-01"},
-    ], today=TODAY)
+    result = evaluate_all(
+        tree,
+        [
+            {"node_id": "wing", "name": "生きている", "due_date": "2026-09-01"},
+            {"node_id": "deleted", "name": "消えたノード", "due_date": "2026-09-01"},
+        ],
+        today=TODAY,
+    )
     assert [s.name for s in result] == ["生きている"]
 
 
 def test_evaluate_all_skips_broken_due_dates():
     tree = build_and_aggregate([_pnode("wing", 0.5, "2026-08-02", "2026-08-12")])
-    result = evaluate_all(tree, [
-        {"node_id": "wing", "name": "壊れた期限", "due_date": "not-a-date"},
-    ], today=TODAY)
+    result = evaluate_all(
+        tree,
+        [
+            {"node_id": "wing", "name": "壊れた期限", "due_date": "not-a-date"},
+        ],
+        today=TODAY,
+    )
     assert result == []
 
 
@@ -478,10 +508,10 @@ def test_most_nodes_are_judgeable_in_a_realistic_tree():
     nodes = [_pnode("airframe", None, "2026-06-01", "2026-08-11")]
     milestones = []
     for i in range(6):
-        nodes.append(_pnode(f"part{i}", 0.1 * (i + 1), "2026-06-01",
-                            "2026-08-11", parent="airframe"))
-        milestones.append({"node_id": f"part{i}", "name": "完了",
-                           "due_date": "2026-09-01"})
+        nodes.append(
+            _pnode(f"part{i}", 0.1 * (i + 1), "2026-06-01", "2026-08-11", parent="airframe")
+        )
+        milestones.append({"node_id": f"part{i}", "name": "完了", "due_date": "2026-09-01"})
     result = evaluate_all(build_and_aggregate(nodes), milestones, today=TODAY)
 
     unknown = [s for s in result if s.verdict == VERDICT_UNKNOWN]
@@ -527,8 +557,7 @@ def test_milestone_commands_require_expected_levels():
 
 
 def test_countdown_is_a_top_level_command():
-    names = {c.qualified_name
-             for c in Progress(_FakeProgressBot()).walk_app_commands()}
+    names = {c.qualified_name for c in Progress(_FakeProgressBot()).walk_app_commands()}
     assert "countdown" in names
     assert {"milestone add", "milestone remove", "milestone list"} <= names
 
@@ -541,16 +570,22 @@ def test_competition_date_help_points_at_the_setting_key():
 
 # ---- Embed --------------------------------------------------------
 def _statuses_for_embed():
-    tree = build_and_aggregate([
-        _pnode("late", 0.1, "2026-07-13", "2026-08-12"),
-        _pnode("fine", 0.5, "2026-08-02", "2026-08-12"),
-        _pnode("fresh", 0.3, "2026-08-12", "2026-08-12"),
-    ])
-    return evaluate_all(tree, [
-        {"node_id": "late", "name": "遅れ", "due_date": "2026-08-22"},
-        {"node_id": "fine", "name": "余裕", "due_date": "2026-09-11"},
-        {"node_id": "fresh", "name": "不明", "due_date": "2026-09-01"},
-    ], today=TODAY)
+    tree = build_and_aggregate(
+        [
+            _pnode("late", 0.1, "2026-07-13", "2026-08-12"),
+            _pnode("fine", 0.5, "2026-08-02", "2026-08-12"),
+            _pnode("fresh", 0.3, "2026-08-12", "2026-08-12"),
+        ]
+    )
+    return evaluate_all(
+        tree,
+        [
+            {"node_id": "late", "name": "遅れ", "due_date": "2026-08-22"},
+            {"node_id": "fine", "name": "余裕", "due_date": "2026-09-11"},
+            {"node_id": "fresh", "name": "不明", "due_date": "2026-09-01"},
+        ],
+        today=TODAY,
+    )
 
 
 def test_countdown_embed_summarises_delays():
@@ -581,10 +616,8 @@ def test_countdown_embed_fits_discord_limits():
     milestones = []
     for i in range(40):
         tree_nodes.append(_pnode(f"n{i}", 0.2, "2026-06-01", "2026-08-11"))
-        milestones.append({"node_id": f"n{i}", "name": f"節目{i}",
-                           "due_date": "2026-09-01"})
-    statuses = evaluate_all(build_and_aggregate(tree_nodes), milestones,
-                            today=TODAY)
+        milestones.append({"node_id": f"n{i}", "name": f"節目{i}", "due_date": "2026-09-01"})
+    statuses = evaluate_all(build_and_aggregate(tree_nodes), milestones, today=TODAY)
     embed = build_countdown_embed("2026-09-30", statuses, TODAY)
     assert len(embed.fields) <= 25
     assert len(embed) <= 6000
@@ -630,7 +663,7 @@ class _AlertBot:
 
 
 def _alert_cog(db, channels):
-    cog = Reminders.__new__(Reminders)   # ループを起動せずに組み立てる
+    cog = Reminders.__new__(Reminders)  # ループを起動せずに組み立てる
     cog.bot = _AlertBot(db, channels)
     cog.log_repo = RemindersLogRepository(db)
     return cog
@@ -638,14 +671,16 @@ def _alert_cog(db, channels):
 
 async def _seed_behind_guild(db, guild_id: int, channel_id: int) -> None:
     """遅延しているマイルストーンを1件持つサーバーを作る。"""
-    await SettingsRepository(db).set(
-        guild_id, "PROGRESS_DEFAULT_CHANNEL_ID", str(channel_id))
+    await SettingsRepository(db).set(guild_id, "PROGRESS_DEFAULT_CHANNEL_ID", str(channel_id))
     repo = ProgressRepository(db)
-    await repo.upsert_node(guild_id, "wing", name="主翼",
-                           manual_progress=0.1, now_text="2026-07-13 10:00")
+    await repo.upsert_node(
+        guild_id, "wing", name="主翼", manual_progress=0.1, now_text="2026-07-13 10:00"
+    )
     await db.execute(
         "UPDATE progress_nodes SET created_at = '2026-07-13 10:00',"
-        " updated_at = '2026-08-12 10:00' WHERE guild_id = ?", (guild_id,))
+        " updated_at = '2026-08-12 10:00' WHERE guild_id = ?",
+        (guild_id,),
+    )
     await repo.add_milestone(guild_id, "wing", "接着完了", "2026-08-22", NOW)
 
 
@@ -656,8 +691,7 @@ def test_weekly_alert_sends_only_to_guilds_with_delays():
             ch_a, ch_b = _Channel(9001), _Channel(9002)
             await _seed_behind_guild(db, G1, 9001)
             # G2 はマイルストーンを持たない → 沈黙
-            await SettingsRepository(db).set(
-                G2, "PROGRESS_DEFAULT_CHANNEL_ID", "9002")
+            await SettingsRepository(db).set(G2, "PROGRESS_DEFAULT_CHANNEL_ID", "9002")
 
             cog = _alert_cog(db, {G1: ch_a, G2: ch_b})
             sent = await cog.run_milestone_alerts(_dt(2026, 8, 12, 8, 30))
@@ -715,6 +749,7 @@ def test_weekly_alert_sends_again_next_week():
 
 def test_send_failure_in_one_guild_does_not_stop_others():
     """送信に失敗したサーバーがあっても、他サーバーへは送られる。"""
+
     async def _main():
         db = await _connected_db()
         try:
@@ -748,4 +783,4 @@ def test_weekly_alert_loop_is_registered():
 def test_alert_runs_on_monday_only():
     """月曜以外は何もしない（週次のため）。"""
     assert MILESTONE_ALERT_WEEKDAY == 0
-    assert _dt(2026, 8, 12).weekday() == 2   # このテストの基準日は水曜
+    assert _dt(2026, 8, 12).weekday() == 2  # このテストの基準日は水曜

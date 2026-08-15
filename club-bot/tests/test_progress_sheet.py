@@ -2,6 +2,7 @@
 
 gspread は使わず、フェイクの book / client を注入して検証する。
 """
+
 from __future__ import annotations
 
 import os
@@ -14,11 +15,36 @@ from services import progress_sheet_service as pss
 HEADER = pss.PROGRESS_HEADER
 
 
-def _row(node_id="", parent="", order="", depth="", name="", assignee="",
-         status="", manual="", agg="", bar="", source="", td_id="",
-         updated=""):
-    return [node_id, parent, order, depth, name, assignee, status,
-            manual, agg, bar, source, td_id, updated]
+def _row(
+    node_id="",
+    parent="",
+    order="",
+    depth="",
+    name="",
+    assignee="",
+    status="",
+    manual="",
+    agg="",
+    bar="",
+    source="",
+    td_id="",
+    updated="",
+):
+    return [
+        node_id,
+        parent,
+        order,
+        depth,
+        name,
+        assignee,
+        status,
+        manual,
+        agg,
+        bar,
+        source,
+        td_id,
+        updated,
+    ]
 
 
 # ---------------------------------------------------------------------
@@ -28,10 +54,8 @@ def test_grid_to_nodes_basic():
     grid = [
         HEADER,
         _row("m1", "", "1", "", "本機", "", "", "", "", "", "manual"),
-        _row("p1", "m1", "1", "", "主翼", "山田", "製作中", "50%", "", "",
-             "manual"),
-        _row("td_100", "p1", "2", "", "リブ", "", "", "1", "", "",
-             "todoist", "100"),
+        _row("p1", "m1", "1", "", "主翼", "山田", "製作中", "50%", "", "", "manual"),
+        _row("td_100", "p1", "2", "", "リブ", "", "", "1", "", "", "todoist", "100"),
     ]
     nodes = pss.grid_to_nodes(grid)
     assert [n.node_id for n in nodes] == ["m1", "p1", "td_100"]
@@ -70,19 +94,16 @@ def test_parse_mapping_grid():
     grid = [
         pss.MAPPING_HEADER,
         ["主翼班", "p1", "111", "222"],
-        ["", "x"],           # 名前欠落はスキップ
-        ["尾翼班", ""],      # ノード ID 欠落はスキップ
-        ["電装班", "p2"],    # 旧2列形式（通知チャンネル・ギルド列なし）も読める
+        ["", "x"],  # 名前欠落はスキップ
+        ["尾翼班", ""],  # ノード ID 欠落はスキップ
+        ["電装班", "p2"],  # 旧2列形式（通知チャンネル・ギルド列なし）も読める
         ["桁班", "p3", "333"],  # 旧3列形式（ギルド列なし）も読める
     ]
     mapping = pss.parse_mapping_grid(grid)
     assert mapping == [
-        {"project_name": "主翼班", "node_id": "p1",
-         "notify_channel_id": "111", "guild_id": "222"},
-        {"project_name": "電装班", "node_id": "p2",
-         "notify_channel_id": "", "guild_id": ""},
-        {"project_name": "桁班", "node_id": "p3",
-         "notify_channel_id": "333", "guild_id": ""},
+        {"project_name": "主翼班", "node_id": "p1", "notify_channel_id": "111", "guild_id": "222"},
+        {"project_name": "電装班", "node_id": "p2", "notify_channel_id": "", "guild_id": ""},
+        {"project_name": "桁班", "node_id": "p3", "notify_channel_id": "333", "guild_id": ""},
     ]
 
 

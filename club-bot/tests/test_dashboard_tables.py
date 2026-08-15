@@ -5,6 +5,7 @@
 - ホワイトリスト外のテーブル名は 404（SQL へ渡らない）
 - 未ログイン 401 / 他サーバー 403
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -44,8 +45,15 @@ GUILD_B = 200000000000000002
 USER_ID = "42"
 NOW = "2026-08-11 10:00"
 
-EXPECTED_TABLES = {"tasks", "members", "teams", "schedules",
-                   "schedule_votes", "layer_records", "progress"}
+EXPECTED_TABLES = {
+    "tasks",
+    "members",
+    "teams",
+    "schedules",
+    "schedule_votes",
+    "layer_records",
+    "progress",
+}
 
 
 def _tmp_db_path() -> str:
@@ -57,9 +65,13 @@ def _tmp_db_path() -> str:
 
 def _config(db_path: str) -> DashboardConfig:
     return DashboardConfig(
-        client_id="cid", client_secret="secret",
+        client_id="cid",
+        client_secret="secret",
         redirect_uri="https://example.com/auth/callback",
-        secret_key="unit-test-secret", db_path=db_path, secure_cookie=False)
+        secret_key="unit-test-secret",
+        db_path=db_path,
+        secure_cookie=False,
+    )
 
 
 async def _seed(db_path: str) -> None:
@@ -79,19 +91,29 @@ async def _seed(db_path: str) -> None:
             await members.upsert_member(guild_id, USER_ID, f"{mark}の部員")
             await members.upsert_team(guild_id, "wing", f"{mark}の主翼班")
             await tasks.create_task(guild_id, f"{mark}のタスク", USER_ID)
-            await progress.upsert_node(guild_id, "m1", name=f"{mark}の機体",
-                                       now_text=NOW)
+            await progress.upsert_node(guild_id, "m1", name=f"{mark}の機体", now_text=NOW)
             await schedules.create_schedule(
-                guild_id, f"sch-{guild_id}", f"{mark}のミーティング",
-                f"{mark}の説明", "部室", None, "2026-09-01 19:00", USER_ID,
-                "1")
+                guild_id,
+                f"sch-{guild_id}",
+                f"{mark}のミーティング",
+                f"{mark}の説明",
+                "部室",
+                None,
+                "2026-09-01 19:00",
+                USER_ID,
+                "1",
+            )
             await schedules.add_option(
-                guild_id, f"opt-{guild_id}", f"sch-{guild_id}",
-                f"{mark}の候補日", "2026-09-01 19:00", None, None)
-            await schedules.set_vote(guild_id, f"opt-{guild_id}",
-                                     USER_ID, "ok")
-            await sessions.add_record(guild_id, USER_ID, f"{mark}の主桁",
-                                      "1", NOW, NOW, 60)
+                guild_id,
+                f"opt-{guild_id}",
+                f"sch-{guild_id}",
+                f"{mark}の候補日",
+                "2026-09-01 19:00",
+                None,
+                None,
+            )
+            await schedules.set_vote(guild_id, f"opt-{guild_id}", USER_ID, "ok")
+            await sessions.add_record(guild_id, USER_ID, f"{mark}の主桁", "1", NOW, NOW, 60)
     finally:
         await db.close()
 
@@ -101,8 +123,7 @@ def _discord_transport(guilds: list[dict]):
         if request.url.path.endswith("/oauth2/token"):
             return httpx.Response(200, json={"access_token": "at"})
         if request.url.path.endswith("/users/@me"):
-            return httpx.Response(200, json={"id": USER_ID,
-                                             "username": "yamada"})
+            return httpx.Response(200, json={"id": USER_ID, "username": "yamada"})
         if request.url.path.endswith("/users/@me/guilds"):
             return httpx.Response(200, json=guilds)
         return httpx.Response(404, json={})
@@ -113,8 +134,10 @@ def _discord_transport(guilds: list[dict]):
 def _logged_in_client(db_path: str, *, permissions: str = "32") -> TestClient:
     app = create_app(_config(db_path))
     app.state.http_client = httpx.AsyncClient(
-        transport=_discord_transport([
-            {"id": str(GUILD_A), "name": "A大学", "permissions": permissions}]))
+        transport=_discord_transport(
+            [{"id": str(GUILD_A), "name": "A大学", "permissions": permissions}]
+        )
+    )
     client = TestClient(app, follow_redirects=False)
     client.__enter__()
     res = client.get("/auth/login")
@@ -153,8 +176,7 @@ def test_update_rejects_non_editable_column():
         try:
             repo = TableRepository(db)
             with pytest.raises(UnknownColumnError):
-                await repo.update_row(GUILD_A, "members", 1,
-                                      {"user_id": "999"})
+                await repo.update_row(GUILD_A, "members", 1, {"user_id": "999"})
             with pytest.raises(UnknownColumnError):
                 await repo.update_row(GUILD_A, "members", 1, {"guild_id": 1})
         finally:
@@ -226,7 +248,7 @@ def test_read_table_returns_columns_and_rows():
         assert body["table"]["pk"] == "member_id"
         names = [c["name"] for c in body["columns"]]
         assert "display_name" in names
-        assert "guild_id" not in names        # スコープ列は見せない
+        assert "guild_id" not in names  # スコープ列は見せない
         assert body["total"] == 1
         assert body["rows"][0]["display_name"] == "A大学の部員"
     finally:
@@ -253,8 +275,7 @@ def test_unknown_table_returns_404():
     client = _logged_in_client(db_path)
     try:
         for key in ("settings", "todoist_configs", "guilds", "'; DROP TABLE"):
-            assert client.get(
-                f"/api/guilds/{GUILD_A}/tables/{key}").status_code == 404
+            assert client.get(f"/api/guilds/{GUILD_A}/tables/{key}").status_code == 404
     finally:
         client.__exit__(None, None, None)
 
@@ -264,10 +285,8 @@ def test_tables_require_scope():
     asyncio.run(_seed(db_path))
     client = _logged_in_client(db_path)
     try:
-        assert client.get(
-            f"/api/guilds/{GUILD_B}/tables").status_code == 403
-        assert client.get(
-            f"/api/guilds/{GUILD_B}/tables/members").status_code == 403
+        assert client.get(f"/api/guilds/{GUILD_B}/tables").status_code == 403
+        assert client.get(f"/api/guilds/{GUILD_B}/tables/members").status_code == 403
     finally:
         client.__exit__(None, None, None)
 
@@ -302,7 +321,7 @@ def test_csv_export_returns_labels_and_rows():
         assert f"members_{GUILD_A}.csv" in res.headers["content-disposition"]
         body = res.content.decode("utf-8-sig")
         lines = body.strip().splitlines()
-        assert lines[0].startswith("ID,")        # 見出しは表示名
+        assert lines[0].startswith("ID,")  # 見出しは表示名
         assert "表示名" in lines[0]
         assert "A大学の部員" in body
         # Excel 対策の BOM が付く
@@ -321,8 +340,7 @@ def test_csv_export_is_guild_scoped():
             assert res.status_code == 200, key
             assert "B大学" not in res.content.decode("utf-8-sig"), key
         # 他サーバーの CSV は取得できない
-        assert client.get(
-            f"/api/guilds/{GUILD_B}/tables/members/export.csv").status_code == 403
+        assert client.get(f"/api/guilds/{GUILD_B}/tables/members/export.csv").status_code == 403
     finally:
         client.__exit__(None, None, None)
 
@@ -332,8 +350,7 @@ def test_csv_export_requires_login():
     asyncio.run(_seed(db_path))
     app = create_app(_config(db_path))
     with TestClient(app) as anon:
-        assert anon.get(
-            f"/api/guilds/{GUILD_A}/tables/members/export.csv").status_code == 401
+        assert anon.get(f"/api/guilds/{GUILD_A}/tables/members/export.csv").status_code == 401
 
 
 def test_csv_export_unknown_table_is_404():
@@ -341,8 +358,7 @@ def test_csv_export_unknown_table_is_404():
     asyncio.run(_seed(db_path))
     client = _logged_in_client(db_path)
     try:
-        assert client.get(
-            f"/api/guilds/{GUILD_A}/tables/settings/export.csv").status_code == 404
+        assert client.get(f"/api/guilds/{GUILD_A}/tables/settings/export.csv").status_code == 404
     finally:
         client.__exit__(None, None, None)
 
@@ -361,6 +377,7 @@ def test_csv_export_is_audited():
         await db.connect()
         try:
             from repositories.audit_log_repository import AuditLogRepository
+
             return await AuditLogRepository(db).list_recent(GUILD_A)
         finally:
             await db.close()
@@ -401,17 +418,16 @@ def test_weight_can_be_updated_through_table_repository():
         db = Database(_tmp_db_path())
         await db.connect()
         try:
-            await ProgressRepository(db).upsert_node(
-                GUILD_A, "wing", name="主翼", now_text=NOW)
+            await ProgressRepository(db).upsert_node(GUILD_A, "wing", name="主翼", now_text=NOW)
             row = await db.fetchone(
-                "SELECT progress_node_id FROM progress_nodes"
-                " WHERE guild_id = ?", (GUILD_A,))
+                "SELECT progress_node_id FROM progress_nodes WHERE guild_id = ?", (GUILD_A,)
+            )
             pk = row["progress_node_id"]
 
             table = TableRepository(db)
             assert await table.update_row(
-                GUILD_A, "progress", pk,
-                {"actual_weight_g": 1240.0, "target_weight_g": 1100.0})
+                GUILD_A, "progress", pk, {"actual_weight_g": 1240.0, "target_weight_g": 1100.0}
+            )
 
             after = await table.get_row(GUILD_A, "progress", pk)
             assert after["actual_weight_g"] == 1240.0
@@ -431,17 +447,19 @@ def test_weight_update_does_not_cross_guilds():
             await repo.upsert_node(GUILD_A, "wing", name="主翼", now_text=NOW)
             await repo.upsert_node(GUILD_B, "wing", name="別大学", now_text=NOW)
             row_b = await db.fetchone(
-                "SELECT progress_node_id FROM progress_nodes"
-                " WHERE guild_id = ?", (GUILD_B,))
+                "SELECT progress_node_id FROM progress_nodes WHERE guild_id = ?", (GUILD_B,)
+            )
 
             table = TableRepository(db)
             # B の行 ID を A のスコープで更新しようとしても通らない
-            assert await table.update_row(
-                GUILD_A, "progress", row_b["progress_node_id"],
-                {"actual_weight_g": 999.0}) is False
+            assert (
+                await table.update_row(
+                    GUILD_A, "progress", row_b["progress_node_id"], {"actual_weight_g": 999.0}
+                )
+                is False
+            )
 
-            after = await table.get_row(GUILD_B, "progress",
-                                        row_b["progress_node_id"])
+            after = await table.get_row(GUILD_B, "progress", row_b["progress_node_id"])
             assert after["actual_weight_g"] is None
         finally:
             await db.close()

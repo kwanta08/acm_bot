@@ -13,6 +13,7 @@ progress_spar_links.target_layers が持つ。旧構成で必要だった
 移行スクリプト scripts/migrate_progress_sheet_to_db.py が目標層数を
 取り込むために残している。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -63,6 +64,7 @@ def progress_status(progress: float) -> str:
 @dataclass
 class SparSyncPlan:
     """桁巻き進捗を progress_nodes へ反映するための更新計画。"""
+
     # (node_id, 進捗率 0.0〜1.0)
     updates: list[tuple[str, float]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
@@ -72,8 +74,9 @@ class SparSyncPlan:
         return len(self.updates)
 
 
-def plan_spar_sync(node_ids: set[str], links: list[dict[str, Any]],
-                   completed_by_keta: dict[str, int]) -> SparSyncPlan:
+def plan_spar_sync(
+    node_ids: set[str], links: list[dict[str, Any]], completed_by_keta: dict[str, int]
+) -> SparSyncPlan:
     """桁の紐付けと完了層数から進捗更新計画を組み立てる（純粋関数）。
 
     進捗率 = 完了層数 ÷ 目標層数（1.0 でクランプ）。
@@ -85,21 +88,19 @@ def plan_spar_sync(node_ids: set[str], links: list[dict[str, Any]],
         node_id = str(link["node_id"])
         if node_id not in node_ids:
             plan.errors.append(
-                f"桁「{link['keta_name']}」の紐付け先ノード `{node_id}` が"
-                "見つかりません")
+                f"桁「{link['keta_name']}」の紐付け先ノード `{node_id}` が見つかりません"
+            )
             continue
         target = int(link["target_layers"])
         if target <= 0:
-            plan.errors.append(
-                f"桁「{link['keta_name']}」の目標層数が不正です（{target}）")
+            plan.errors.append(f"桁「{link['keta_name']}」の目標層数が不正です（{target}）")
             continue
         done = int(completed_by_keta.get(link["keta_name"], 0))
         plan.updates.append((node_id, min(done / target, 1.0)))
     return plan
 
 
-async def sync_spar_winding_db(repo: Any, guild_id: int,
-                               now_text: str) -> SparSyncPlan:
+async def sync_spar_winding_db(repo: Any, guild_id: int, now_text: str) -> SparSyncPlan:
     """桁巻きの進捗を該当ノードへ反映する。
 
     桁の紐付けが1件も無いギルドでは何もしない（エラーにはしない）。
@@ -108,11 +109,14 @@ async def sync_spar_winding_db(repo: Any, guild_id: int,
     if not links:
         return SparSyncPlan()
     node_ids = {row["node_id"] for row in await repo.list_nodes(guild_id)}
-    plan = plan_spar_sync(node_ids, links,
-                          await repo.count_completed_layers(guild_id))
+    plan = plan_spar_sync(node_ids, links, await repo.count_completed_layers(guild_id))
     for node_id, progress in plan.updates:
         await repo.set_progress(
-            guild_id, node_id, progress, now_text,
+            guild_id,
+            node_id,
+            progress,
+            now_text,
             status=progress_status(progress),
-            source=SOURCE_SPAR_WINDING)
+            source=SOURCE_SPAR_WINDING,
+        )
     return plan

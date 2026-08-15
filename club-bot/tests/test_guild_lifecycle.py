@@ -11,6 +11,7 @@ Bot をサーバーから外してもデータが残り続けていた問題へ�
 - 猶予日数がギルド別設定 DATA_RETENTION_DAYS で上書きできること
 - 1つのギルドの退出が他ギルドに影響しないこと
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -66,8 +67,14 @@ def test_fresh_schema_has_lifecycle_columns():
         db = await _connected_db()
         try:
             cols = await _columns(db, "guilds")
-            assert {"guild_id", "guild_name", "joined_at", "setup_version",
-                    "left_at", "purge_after"} <= cols
+            assert {
+                "guild_id",
+                "guild_name",
+                "joined_at",
+                "setup_version",
+                "left_at",
+                "purge_after",
+            } <= cols
             assert await db._user_version() == SCHEMA_VERSION
         finally:
             await db.close()
@@ -79,8 +86,7 @@ def test_purge_after_index_exists():
     async def _main():
         db = await _connected_db()
         try:
-            rows = await db.fetchall(
-                "SELECT name FROM sqlite_master WHERE type = 'index'")
+            rows = await db.fetchall("SELECT name FROM sqlite_master WHERE type = 'index'")
             assert "idx_guilds_purge_after" in {r["name"] for r in rows}
         finally:
             await db.close()
@@ -107,8 +113,7 @@ def _make_v10_db() -> str:
         """
     )
     conn.execute(
-        "INSERT INTO guilds (guild_id, guild_name, joined_at, setup_version)"
-        " VALUES (?, ?, ?, 2)",
+        "INSERT INTO guilds (guild_id, guild_name, joined_at, setup_version) VALUES (?, ?, ?, 2)",
         (G1, "既存サークル", "2026-01-01T00:00:00+09:00"),
     )
     conn.commit()
@@ -124,8 +129,7 @@ def test_v10_db_gains_columns_and_keeps_existing_rows():
             cols = await _columns(db, "guilds")
             assert {"left_at", "purge_after"} <= cols
 
-            row = await db.fetchone(
-                "SELECT * FROM guilds WHERE guild_id = ?", (G1,))
+            row = await db.fetchone("SELECT * FROM guilds WHERE guild_id = ?", (G1,))
             assert row is not None, "既存ギルドの行が失われた"
             assert row["guild_name"] == "既存サークル"
             assert row["joined_at"] == "2026-01-01T00:00:00+09:00"
@@ -141,6 +145,7 @@ def test_v10_db_gains_columns_and_keeps_existing_rows():
 
 def test_migration_is_idempotent():
     """同じ DB を二度開いても列追加が失敗しない。"""
+
     async def _main():
         path = _make_v10_db()
         for _ in range(2):
@@ -165,7 +170,8 @@ def test_mark_left_records_timestamps():
             left = datetime(2026, 8, 12, 10, 0, tzinfo=TZ)
 
             left_iso, purge_iso = await repo.mark_left(
-                G1, DEFAULT_DATA_RETENTION_DAYS, left_at=left)
+                G1, DEFAULT_DATA_RETENTION_DAYS, left_at=left
+            )
 
             row = await repo.get(G1)
             assert row["left_at"] == left_iso
@@ -180,6 +186,7 @@ def test_mark_left_records_timestamps():
 
 def test_mark_left_does_not_delete_data():
     """退出を記録した時点ではデータを消さない。"""
+
     async def _main():
         db = await _connected_db()
         try:
@@ -213,8 +220,9 @@ def test_rejoin_clears_lifecycle_and_keeps_data():
             assert row["left_at"] is None
             assert row["purge_after"] is None
             teams = await MemberRepository(db).list_teams(G1)
-            assert [t["team_key"] for t in teams] == ["struct"], \
+            assert [t["team_key"] for t in teams] == ["struct"], (
                 "再参加で既存データがそのまま復活すること"
+            )
         finally:
             await db.close()
 
@@ -223,6 +231,7 @@ def test_rejoin_clears_lifecycle_and_keeps_data():
 
 def test_retention_days_zero_marks_immediately():
     """DATA_RETENTION_DAYS=0 なら退出時点で削除対象になる。"""
+
     async def _main():
         db = await _connected_db()
         try:

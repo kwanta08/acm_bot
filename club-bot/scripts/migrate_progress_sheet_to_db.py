@@ -51,6 +51,7 @@
     取り込み件数・スキップ理由・ツリーの検証結果（孤児・循環）。
     秘密情報は一切出力しない。
 """
+
 from __future__ import annotations
 
 import argparse
@@ -75,14 +76,17 @@ from utils.parser import now, to_iso
 @dataclass
 class Stats:
     """取り込み結果の集計。"""
+
     input_rows: int = 0
     imported: int = 0
     skipped: int = 0
     warnings: list[str] = field(default_factory=list)
 
     def line(self, name: str) -> str:
-        return (f"{name}: 入力 {self.input_rows} 行 / 取り込み {self.imported} / "
-                f"スキップ {self.skipped} / 警告 {len(self.warnings)}")
+        return (
+            f"{name}: 入力 {self.input_rows} 行 / 取り込み {self.imported} / "
+            f"スキップ {self.skipped} / 警告 {len(self.warnings)}"
+        )
 
 
 # ---------------------------------------------------------------------
@@ -108,8 +112,9 @@ def node_to_upsert_kwargs(node) -> dict:
     }
 
 
-def spar_links_from_sheets(spar_mappings: list[dict[str, str]],
-                           master: dict[str, int]) -> tuple[list[dict], list[str]]:
+def spar_links_from_sheets(
+    spar_mappings: list[dict[str, str]], master: dict[str, int]
+) -> tuple[list[dict], list[str]]:
     """桁巻き対応表と桁マスタから progress_spar_links の行を組み立てる。
 
     目標層数が桁マスタに無い桁はスキップし、理由を警告として返す。
@@ -122,19 +127,19 @@ def spar_links_from_sheets(spar_mappings: list[dict[str, str]],
         if not target or target <= 0:
             warnings.append(
                 f"桁「{key}」は桁マスタに目標層数が無いためスキップしました"
-                "（移行後に /progress spar-link で登録してください）")
+                "（移行後に /progress spar-link で登録してください）"
+            )
             continue
-        rows.append({"keta_name": key, "node_id": m["node_id"],
-                     "target_layers": int(target)})
+        rows.append({"keta_name": key, "node_id": m["node_id"], "target_layers": int(target)})
     return rows, warnings
 
 
 # ---------------------------------------------------------------------
 # 取り込み
 # ---------------------------------------------------------------------
-async def import_nodes(repo: ProgressRepository, guild_id: int,
-                       grid: list[list], now_text: str,
-                       apply: bool) -> Stats:
+async def import_nodes(
+    repo: ProgressRepository, guild_id: int, grid: list[list], now_text: str, apply: bool
+) -> Stats:
     stats = Stats()
     nodes = pss.grid_to_nodes(grid)
     stats.input_rows = max(len(grid) - 1, 0)
@@ -142,23 +147,21 @@ async def import_nodes(repo: ProgressRepository, guild_id: int,
     # 取り込む前に構造を検証する（孤児・循環はシート側の書き間違い）
     tree = build_tree([*nodes])
     for err in tree.errors:
-        stats.warnings.append(
-            f"行 `{err.node_id or '(ID なし)'}`: {err.reason}")
+        stats.warnings.append(f"行 `{err.node_id or '(ID なし)'}`: {err.reason}")
 
     for node in nodes:
         if not node.node_id:
             stats.skipped += 1
             continue
         if apply:
-            await repo.upsert_node(guild_id, now_text=now_text,
-                                   **node_to_upsert_kwargs(node))
+            await repo.upsert_node(guild_id, now_text=now_text, **node_to_upsert_kwargs(node))
         stats.imported += 1
     return stats
 
 
-async def import_todoist_links(repo: ProgressRepository, guild_id: int,
-                               grid: list[list], now_text: str,
-                               apply: bool) -> Stats:
+async def import_todoist_links(
+    repo: ProgressRepository, guild_id: int, grid: list[list], now_text: str, apply: bool
+) -> Stats:
     stats = Stats()
     mappings = pss.parse_mapping_grid(grid)
     stats.input_rows = max(len(grid) - 1, 0)
@@ -170,54 +173,59 @@ async def import_todoist_links(repo: ProgressRepository, guild_id: int,
             stats.skipped += 1
             stats.warnings.append(
                 f"プロジェクト「{m['project_name']}」は別サーバー"
-                f"（{origin}）の登録のためスキップしました")
+                f"（{origin}）の登録のためスキップしました"
+            )
             continue
         if apply:
             await repo.upsert_todoist_link(
-                guild_id, m["project_name"], m["node_id"], now_text,
-                notify_channel_id=m.get("notify_channel_id") or "")
+                guild_id,
+                m["project_name"],
+                m["node_id"],
+                now_text,
+                notify_channel_id=m.get("notify_channel_id") or "",
+            )
         stats.imported += 1
     return stats
 
 
-async def import_spar_links(repo: ProgressRepository, guild_id: int,
-                            rows: list[dict], now_text: str,
-                            apply: bool) -> Stats:
+async def import_spar_links(
+    repo: ProgressRepository, guild_id: int, rows: list[dict], now_text: str, apply: bool
+) -> Stats:
     stats = Stats(input_rows=len(rows))
     for row in rows:
         if apply:
             await repo.upsert_spar_link(
-                guild_id, row["keta_name"], row["node_id"],
-                row["target_layers"], now_text)
+                guild_id, row["keta_name"], row["node_id"], row["target_layers"], now_text
+            )
         stats.imported += 1
     return stats
 
 
-async def import_default_channel(db: Database, guild_id: int,
-                                 sheet_settings: dict[str, str],
-                                 apply: bool) -> str | None:
+async def import_default_channel(
+    db: Database, guild_id: int, sheet_settings: dict[str, str], apply: bool
+) -> str | None:
     """「設定」タブのデフォルト通知チャンネルID を settings へ移す。"""
     raw = (sheet_settings.get(pss.SHEET_KEY_DEFAULT_CHANNEL) or "").strip()
     if not raw.isdigit():
         return None
     if apply:
         await SettingsRepository(db).set(
-            guild_id, progress_sync_service.SETTINGS_DEFAULT_CHANNEL_KEY, raw)
+            guild_id, progress_sync_service.SETTINGS_DEFAULT_CHANNEL_KEY, raw
+        )
     return raw
 
 
 # ---------------------------------------------------------------------
 # シート読み込み
 # ---------------------------------------------------------------------
-def _read_sheets(client: pss.ProgressSheetClient,
-                 spreadsheet_id: str) -> dict:
+def _read_sheets(client: pss.ProgressSheetClient, spreadsheet_id: str) -> dict:
     """必要なシートをまとめて読む（存在しないシートは空として扱う）。"""
+
     def _safe(fn, *args):
         try:
             return fn(*args)
         except Exception as e:  # noqa: BLE001  (シート未作成・権限不足)
-            print(f"警告: シートを読めませんでした（{type(e).__name__}）。"
-                  "空として続行します。")
+            print(f"警告: シートを読めませんでした（{type(e).__name__}）。空として続行します。")
             return []
 
     out = {
@@ -244,12 +252,10 @@ def _read_sheets(client: pss.ProgressSheetClient,
 async def main(args: argparse.Namespace) -> None:
     guild_id = args.guild_id or int((os.getenv("GUILD_ID") or "0").strip() or 0)
     if not guild_id:
-        print("ERROR: --guild-id または環境変数 GUILD_ID で対象ギルドを"
-              "指定してください。")
+        print("ERROR: --guild-id または環境変数 GUILD_ID で対象ギルドを指定してください。")
         sys.exit(1)
     if not args.spreadsheet_id:
-        print("ERROR: --spreadsheet-id で移行元のスプレッドシート ID を"
-              "指定してください。")
+        print("ERROR: --spreadsheet-id で移行元のスプレッドシート ID を指定してください。")
         sys.exit(1)
 
     database_url = (os.getenv("DATABASE_URL") or "").strip()
@@ -264,8 +270,10 @@ async def main(args: argparse.Namespace) -> None:
             shutil.copy2(db_path, backup)
             print(f"バックアップを作成しました: {backup}")
     elif args.apply:
-        print("注意: PostgreSQL へ適用します。事前に pg_dump を取得して"
-              "ください（本スクリプトは自動バックアップを行いません）。")
+        print(
+            "注意: PostgreSQL へ適用します。事前に pg_dump を取得して"
+            "ください（本スクリプトは自動バックアップを行いません）。"
+        )
 
     client = pss.ProgressSheetClient()
     try:
@@ -282,61 +290,71 @@ async def main(args: argparse.Namespace) -> None:
 
         if args.replace:
             existing = await repo.count_nodes(guild_id)
-            print(f"--replace: 既存の進捗ノード {existing} 件を削除します"
-                  f"（guild={guild_id}）")
+            print(f"--replace: 既存の進捗ノード {existing} 件を削除します（guild={guild_id}）")
             if args.apply:
                 await repo.delete_all_nodes(guild_id)
 
         results: list[tuple[str, Stats]] = []
-        results.append(("進捗管理 → progress_nodes", await import_nodes(
-            repo, guild_id, sheets["progress"], now_text, args.apply)))
-        results.append(("Todoist対応表 → progress_todoist_links",
-                        await import_todoist_links(
-                            repo, guild_id, sheets["mapping"], now_text,
-                            args.apply)))
+        results.append(
+            (
+                "進捗管理 → progress_nodes",
+                await import_nodes(repo, guild_id, sheets["progress"], now_text, args.apply),
+            )
+        )
+        results.append(
+            (
+                "Todoist対応表 → progress_todoist_links",
+                await import_todoist_links(repo, guild_id, sheets["mapping"], now_text, args.apply),
+            )
+        )
 
         spar_rows, spar_warnings = spar_links_from_sheets(
-            pss.parse_spar_mapping_grid(sheets["spar_mapping"]),
-            sheets["spar_master"])
-        spar_stats = await import_spar_links(
-            repo, guild_id, spar_rows, now_text, args.apply)
+            pss.parse_spar_mapping_grid(sheets["spar_mapping"]), sheets["spar_master"]
+        )
+        spar_stats = await import_spar_links(repo, guild_id, spar_rows, now_text, args.apply)
         spar_stats.warnings.extend(spar_warnings)
         spar_stats.skipped += len(spar_warnings)
         results.append(("桁巻き対応表 → progress_spar_links", spar_stats))
 
-        channel = await import_default_channel(
-            db, guild_id, sheets["sheet_settings"], args.apply)
+        channel = await import_default_channel(db, guild_id, sheets["sheet_settings"], args.apply)
 
-        print(f"\n===== 移行結果（guild={guild_id}"
-              f"{'' if args.apply else ' / dry-run'}） =====")
+        print(f"\n===== 移行結果（guild={guild_id}{'' if args.apply else ' / dry-run'}） =====")
         for name, stats in results:
             print(stats.line(name))
             for warning in stats.warnings[:20]:
                 print(f"  [警告] {warning}")
-        print("デフォルト通知チャンネル: "
-              + (f"{channel} を settings へ保存" if channel else "未設定（スキップ）"))
+        print(
+            "デフォルト通知チャンネル: "
+            + (f"{channel} を settings へ保存" if channel else "未設定（スキップ）")
+        )
 
         if args.apply:
-            print(f"\n完了しました。`/progress view` で確認してください。"
-                  f"（登録ノード数: {await repo.count_nodes(guild_id)}）")
+            print(
+                f"\n完了しました。`/progress view` で確認してください。"
+                f"（登録ノード数: {await repo.count_nodes(guild_id)}）"
+            )
         else:
-            print("\ndry-run のため DB は変更していません。"
-                  "実行するには --apply を付けてください。")
+            print("\ndry-run のため DB は変更していません。実行するには --apply を付けてください。")
     finally:
         await db.close()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description=__doc__,
-        formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--guild-id", type=int, default=None,
-                        help="取り込み先のギルド ID（未指定時は環境変数 GUILD_ID）")
-    parser.add_argument("--spreadsheet-id", default=None,
-                        help="移行元の中央スプレッドシート ID")
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--guild-id",
+        type=int,
+        default=None,
+        help="取り込み先のギルド ID（未指定時は環境変数 GUILD_ID）",
+    )
+    parser.add_argument("--spreadsheet-id", default=None, help="移行元の中央スプレッドシート ID")
     parser.add_argument("--db-path", default=None, help="SQLite のパス")
-    parser.add_argument("--replace", action="store_true",
-                        help="取り込み前に対象ギルドの進捗ノードを全削除する")
-    parser.add_argument("--apply", action="store_true",
-                        help="実際に移行を実行する（既定は dry-run）")
+    parser.add_argument(
+        "--replace", action="store_true", help="取り込み前に対象ギルドの進捗ノードを全削除する"
+    )
+    parser.add_argument(
+        "--apply", action="store_true", help="実際に移行を実行する（既定は dry-run）"
+    )
     asyncio.run(main(parser.parse_args()))

@@ -13,6 +13,7 @@ Reminders モジュール（仕様 11.5）。
 マルチテナント版: 各ループは「参加中の全ギルド」を対象にギルドごと処理する。
 送信先チャンネル・班マップはギルド別設定から解決する。
 """
+
 from __future__ import annotations
 
 from datetime import time, timedelta
@@ -72,8 +73,9 @@ def _channel_id_of(info: dict) -> int | None:
     return int(raw) if raw.isdigit() else None
 
 
-def _build_grouped_description(period_start, period_end, period_desc: str,
-                               items: list[dict]) -> str:
+def _build_grouped_description(
+    period_start, period_end, period_desc: str, items: list[dict]
+) -> str:
     """
     items: [{"due_date": date, "title": str, "priority": int,
             "url": str | None, "category": str}]
@@ -132,8 +134,7 @@ class Reminders(commands.Cog):
                 await self._process_schedule_reminders(guild.id)
                 await self._process_schedule_close(guild.id)
             except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
-                log.warning("日程調整の定期処理に失敗 (guild=%s): %s",
-                            guild.id, type(e).__name__)
+                log.warning("日程調整の定期処理に失敗 (guild=%s): %s", guild.id, type(e).__name__)
 
     @schedule_tick.before_loop
     async def _before_tick(self):
@@ -145,7 +146,8 @@ class Reminders(commands.Cog):
         window_end = current + timedelta(hours=1)
         try:
             candidates = await self.schedule_repo.list_reminder_candidates(
-                guild_id, to_iso(current), to_iso(window_end))
+                guild_id, to_iso(current), to_iso(window_end)
+            )
         except Exception as e:  # noqa: BLE001
             log.warning("催促候補取得失敗 (guild=%s): %s", guild_id, e)
             return
@@ -156,14 +158,17 @@ class Reminders(commands.Cog):
             try:
                 count = await schedule_cog.notify_unanswered(s)
                 await self.schedule_repo.mark_reminder_sent(guild_id, s["schedule_id"])
-                await self._log_reminder(guild_id, "schedule_unanswered", s["schedule_id"], None,
-                                         None, "success")
+                await self._log_reminder(
+                    guild_id, "schedule_unanswered", s["schedule_id"], None, None, "success"
+                )
                 log.info("締切前催促: %s（%d名, guild=%s）", s["title"], count, guild_id)
             except Exception as e:  # noqa: BLE001
-                await self._log_reminder(guild_id, "schedule_unanswered", s["schedule_id"], None,
-                                         None, "failed", str(e))
+                await self._log_reminder(
+                    guild_id, "schedule_unanswered", s["schedule_id"], None, None, "failed", str(e)
+                )
                 await self.bot.log_to_channel(
-                    f"[Reminder] 催促失敗 {s['schedule_id']}: {e}", guild_id=guild_id)
+                    f"[Reminder] 催促失敗 {s['schedule_id']}: {e}", guild_id=guild_id
+                )
 
     async def _process_schedule_close(self, guild_id: int):
         """締切を過ぎた投票を自動クローズ。"""
@@ -181,7 +186,8 @@ class Reminders(commands.Cog):
                 log.info("自動締切: %s (guild=%s)", s["title"], guild_id)
             except Exception as e:  # noqa: BLE001
                 await self.bot.log_to_channel(
-                    f"[Reminder] 自動締切失敗 {s['schedule_id']}: {e}", guild_id=guild_id)
+                    f"[Reminder] 自動締切失敗 {s['schedule_id']}: {e}", guild_id=guild_id
+                )
 
     # ---------- 毎朝 08:30: タスク通知 ----------
     @tasks.loop(time=time(hour=8, minute=30, tzinfo=TZ))
@@ -198,8 +204,7 @@ class Reminders(commands.Cog):
                 try:
                     await job(guild.id)
                 except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
-                    log.warning("%s に失敗 (guild=%s): %s",
-                                label, guild.id, type(e).__name__)
+                    log.warning("%s に失敗 (guild=%s): %s", label, guild.id, type(e).__name__)
 
     @daily_morning.before_loop
     async def _before_morning(self):
@@ -227,8 +232,7 @@ class Reminders(commands.Cog):
                     period_end=today,
                 )
             except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
-                log.warning("超過タスク通知失敗 (guild=%s): %s",
-                            guild.id, type(e).__name__)
+                log.warning("超過タスク通知失敗 (guild=%s): %s", guild.id, type(e).__name__)
 
     @daily_night.before_loop
     async def _before_night(self):
@@ -265,15 +269,13 @@ class Reminders(commands.Cog):
             try:
                 count = await self._alert_milestones(guild.id, current, key)
             except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
-                log.warning("マイルストーン通知に失敗 (guild=%s): %s",
-                            guild.id, type(e).__name__)
+                log.warning("マイルストーン通知に失敗 (guild=%s): %s", guild.id, type(e).__name__)
                 continue
             if count:
                 sent[guild.id] = count
         return sent
 
-    async def _alert_milestones(self, guild_id: int, current,
-                                week_key: str) -> int:
+    async def _alert_milestones(self, guild_id: int, current, week_key: str) -> int:
         target_id = f"milestone:{week_key}"
         if await self.log_repo.exists(guild_id, MILESTONE_ALERT_TYPE, target_id):
             return 0
@@ -296,25 +298,29 @@ class Reminders(commands.Cog):
             return 0
 
         left = days_until_competition(gconf.competition_date, current.date())
-        head = (f"大会まで残り {left} 日。" if left is not None and left >= 0
-                else "")
+        head = f"大会まで残り {left} 日。" if left is not None and left >= 0 else ""
         lines = [
             f"・**{s.node_name}: {s.name}** — "
-            + (f"期限まで {s.days_left} 日" if s.days_left > 0
-               else "本日が期限" if s.days_left == 0
-               else f"{-s.days_left} 日超過")
+            + (
+                f"期限まで {s.days_left} 日"
+                if s.days_left > 0
+                else "本日が期限"
+                if s.days_left == 0
+                else f"{-s.days_left} 日超過"
+            )
             + f" / 進捗 {s.progress * 100:.0f}%"
             for s in behind[:20]
         ]
         if len(behind) > 20:
             lines.append(f"…ほか {len(behind) - 20} 件")
         embed = task_embed(
-            "⚠️ 遅れているマイルストーン",
-            f"{head}遅延 **{len(behind)} 件**\n\n" + "\n".join(lines))
+            "⚠️ 遅れているマイルストーン", f"{head}遅延 **{len(behind)} 件**\n\n" + "\n".join(lines)
+        )
 
         await self._safe_send(guild_id, channel, embed=embed)
-        await self._log_reminder(guild_id, MILESTONE_ALERT_TYPE, target_id,
-                                 None, str(channel_id), "sent")
+        await self._log_reminder(
+            guild_id, MILESTONE_ALERT_TYPE, target_id, None, str(channel_id), "sent"
+        )
         return len(behind)
 
     # ---------- 毎日 04:00: 期限切れギルドのデータ削除 ----------
@@ -346,8 +352,7 @@ class Reminders(commands.Cog):
             try:
                 results[guild_id] = await self._purge_one(guild_id, row)
             except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
-                log.warning("データ削除に失敗 (guild=%s): %s",
-                            guild_id, type(e).__name__)
+                log.warning("データ削除に失敗 (guild=%s): %s", guild_id, type(e).__name__)
         return results
 
     async def _purge_one(self, guild_id: int, row) -> dict[str, int]:
@@ -368,8 +373,10 @@ class Reminders(commands.Cog):
         config.invalidate_guild(guild_id)
 
         reason = "退出後の保持期間満了" if row["left_at"] else "管理者による削除要求"
-        summary = (f"[Data] サーバーのデータを削除しました（{reason}）: "
-                   f"{total} 行 / {len(deleted)} テーブル")
+        summary = (
+            f"[Data] サーバーのデータを削除しました（{reason}）: "
+            f"{total} 行 / {len(deleted)} テーブル"
+        )
         log.info("%s (guild=%s, 内訳=%s)", summary, guild_id, deleted)
         if channel is not None:
             await self._safe_send(guild_id, channel, content=f"```\n{summary}\n```")
@@ -413,8 +420,9 @@ class Reminders(commands.Cog):
             due = getattr(getattr(t, "due", None), "string", None) or "期限なし"
             embed.add_field(name=t.content, value=f"期限: {due}", inline=False)
         await self._safe_send(guild_id, channel, embed=embed)
-        await self._log_reminder(guild_id, "task_today_label", "batch", None,
-                                 str(channel.id), "success")
+        await self._log_reminder(
+            guild_id, "task_today_label", "batch", None, str(channel.id), "success"
+        )
 
     # ---------- Todoist セクション別通知 ----------
     async def push_section_tasks(self, guild_id: int) -> int:
@@ -449,13 +457,15 @@ class Reminders(commands.Cog):
                     continue
                 raw_pr = getattr(t, "priority", None)
                 pr_int = raw_pr.value if hasattr(raw_pr, "value") else (raw_pr or 1)
-                items.append({
-                    "due_date": due_date,
-                    "title": t.content,
-                    "priority": pr_int,
-                    "url": _todoist_task_url(t.id),
-                    "category": section_name,
-                })
+                items.append(
+                    {
+                        "due_date": due_date,
+                        "title": t.content,
+                        "priority": pr_int,
+                        "url": _todoist_task_url(t.id),
+                        "category": section_name,
+                    }
+                )
             if not items:
                 continue
 
@@ -469,7 +479,8 @@ class Reminders(commands.Cog):
             if channel is None:
                 await self.bot.log_to_channel(
                     f"[Reminder] セクション通知の送信先がありません（{section_name}）",
-                    guild_id=guild_id)
+                    guild_id=guild_id,
+                )
                 continue
 
             team_disp = info.get("name", team_key)
@@ -478,8 +489,13 @@ class Reminders(commands.Cog):
             embed.description = desc[:4096]
             await self._safe_send(guild_id, channel, embed=embed)
             await self._log_reminder(
-                guild_id, "todoist_section", f"section:{section_id}", None,
-                str(channel.id), "success")
+                guild_id,
+                "todoist_section",
+                f"section:{section_id}",
+                None,
+                str(channel.id),
+                "success",
+            )
             sent += 1
 
         if default_channel is None:
@@ -507,13 +523,15 @@ class Reminders(commands.Cog):
                     continue
                 raw_pr = getattr(t, "priority", None)
                 pr_int = raw_pr.value if hasattr(raw_pr, "value") else (raw_pr or 1)
-                unlinked_items.append({
-                    "due_date": due_date,
-                    "title": t.content,
-                    "priority": pr_int,
-                    "url": _todoist_task_url(t.id),
-                    "category": section.name,
-                })
+                unlinked_items.append(
+                    {
+                        "due_date": due_date,
+                        "title": t.content,
+                        "priority": pr_int,
+                        "url": _todoist_task_url(t.id),
+                        "category": section.name,
+                    }
+                )
 
         try:
             no_section_tasks = await svc.get_tasks_without_section()
@@ -527,13 +545,15 @@ class Reminders(commands.Cog):
                 continue
             raw_pr = getattr(t, "priority", None)
             pr_int = raw_pr.value if hasattr(raw_pr, "value") else (raw_pr or 1)
-            unlinked_items.append({
-                "due_date": due_date,
-                "title": t.content,
-                "priority": pr_int,
-                "url": _todoist_task_url(t.id),
-                "category": "セクションなし",
-            })
+            unlinked_items.append(
+                {
+                    "due_date": due_date,
+                    "title": t.content,
+                    "priority": pr_int,
+                    "url": _todoist_task_url(t.id),
+                    "category": "セクションなし",
+                }
+            )
 
         if unlinked_items:
             desc = _build_grouped_description(today, until, "今日から7日以内", unlinked_items)
@@ -541,7 +561,8 @@ class Reminders(commands.Cog):
             embed.description = desc[:4096]
             await self._safe_send(guild_id, default_channel, embed=embed)
             await self._log_reminder(
-                guild_id, "todoist_unlinked", "unlinked", None, str(default_channel.id), "success")
+                guild_id, "todoist_unlinked", "unlinked", None, str(default_channel.id), "success"
+            )
             sent += 1
 
         return sent
@@ -582,14 +603,24 @@ class Reminders(commands.Cog):
             log.warning("班一覧取得失敗 (guild=%s): %s", guild_id, e)
             return {}
         return {
-            t["team_key"]: {"name": t.get("team_name") or t["team_key"],
-                            "channel_id": t.get("channel_id")}
+            t["team_key"]: {
+                "name": t.get("team_name") or t["team_key"],
+                "channel_id": t.get("channel_id"),
+            }
             for t in teams
         }
 
-    async def _dispatch_by_team(self, guild_id: int, tasks_: list[dict], *, title: str,
-                                reminder_type: str, period_desc: str,
-                                period_start, period_end) -> None:
+    async def _dispatch_by_team(
+        self,
+        guild_id: int,
+        tasks_: list[dict],
+        *,
+        title: str,
+        reminder_type: str,
+        period_desc: str,
+        period_start,
+        period_end,
+    ) -> None:
         team_map = await self._team_map(guild_id)
         default_channel = await self._task_channel(guild_id)
 
@@ -611,8 +642,7 @@ class Reminders(commands.Cog):
             else:
                 info = team_map.get(bucket_key, {})
                 channel_id = _channel_id_of(info)
-                channel = (self.bot.get_channel(channel_id)
-                           if channel_id is not None else None)
+                channel = self.bot.get_channel(channel_id) if channel_id is not None else None
                 if channel is None:
                     channel = default_channel
                 heading = f"{title}｜{info.get('name', bucket_key)}班"
@@ -620,7 +650,8 @@ class Reminders(commands.Cog):
             if channel is None:
                 await self.bot.log_to_channel(
                     f"[Reminder] 送信先チャンネルが見つかりません（{reminder_type}）",
-                    guild_id=guild_id)
+                    guild_id=guild_id,
+                )
                 continue
 
             items = []
@@ -629,17 +660,22 @@ class Reminders(commands.Cog):
                 try:
                     due_date = from_iso(t["due_date"]).date()
                 except (TypeError, ValueError):
-                    log.warning("期限を解釈できないタスクをスキップ (guild=%s): %r",
-                                guild_id, t.get("due_date"))
+                    log.warning(
+                        "期限を解釈できないタスクをスキップ (guild=%s): %r",
+                        guild_id,
+                        t.get("due_date"),
+                    )
                     continue
                 url = _todoist_task_url(t["todoist_task_id"]) if t.get("todoist_task_id") else None
-                items.append({
-                    "due_date": due_date,
-                    "title": t["title"],
-                    "priority": t.get("priority") or 1,
-                    "url": url,
-                    "category": "班別タスク",
-                })
+                items.append(
+                    {
+                        "due_date": due_date,
+                        "title": t["title"],
+                        "priority": t.get("priority") or 1,
+                        "url": url,
+                        "category": "班別タスク",
+                    }
+                )
             if not items:
                 continue
 
@@ -651,7 +687,10 @@ class Reminders(commands.Cog):
                 guild_id,
                 reminder_type,
                 f"team:{bucket_key}" if bucket_key else "batch",
-                None, str(channel.id), "success")
+                None,
+                str(channel.id),
+                "success",
+            )
 
     def _assignee_name(self, task: dict, guild) -> str:
         if task.get("assignee_id") and guild:
@@ -665,12 +704,20 @@ class Reminders(commands.Cog):
         except discord.HTTPException as e:
             await self.bot.log_to_channel(f"[Reminder] 通知送信失敗: {e}", guild_id=guild_id)
 
-    async def _log_reminder(self, guild_id: int, rtype: str, target_id: str,
-                            target_user_id: str | None, channel_id: str | None,
-                            status: str, error: str | None = None):
+    async def _log_reminder(
+        self,
+        guild_id: int,
+        rtype: str,
+        target_id: str,
+        target_user_id: str | None,
+        channel_id: str | None,
+        status: str,
+        error: str | None = None,
+    ):
         try:
-            await self.log_repo.add(guild_id, rtype, target_id, target_user_id,
-                                    channel_id, status, error)
+            await self.log_repo.add(
+                guild_id, rtype, target_id, target_user_id, channel_id, status, error
+            )
         except Exception as e:  # noqa: BLE001
             log.warning("reminders_log 記録失敗: %s", e)
 

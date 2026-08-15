@@ -11,6 +11,7 @@ Web 層のバグやメモリリークで Discord から切断される事態を�
 DB は bot と同じものを共有する（読み書きはすべて guild_id スコープの
 リポジトリ層を経由する）。
 """
+
 from __future__ import annotations
 
 import os
@@ -51,10 +52,8 @@ async def lifespan(app: FastAPI):
     if missing:
         # 起動自体は止めない（/healthz と静的配信は動かせる）。
         # ログイン導線だけが使えない状態になる。
-        log.warning("ダッシュボードの設定が不足しています: %s",
-                    ", ".join(missing))
-    log.info("ダッシュボードを起動しました（DB: %s）",
-             get_database().driver_name)
+        log.warning("ダッシュボードの設定が不足しています: %s", ", ".join(missing))
+    log.info("ダッシュボードを起動しました（DB: %s）", get_database().driver_name)
     try:
         yield
     finally:
@@ -71,11 +70,10 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
     config = config or get_config()
     app = FastAPI(
         title="鳥人間サークル運営 Bot ダッシュボード",
-        description="Discord でログインし、自分のサーバーのデータだけを"
-                    "表形式で閲覧・編集します。",
+        description="Discord でログインし、自分のサーバーのデータだけを表形式で閲覧・編集します。",
         version="0.1.0",
         lifespan=lifespan,
-        docs_url=None,      # 公開 HTTP の攻撃面を増やさない
+        docs_url=None,  # 公開 HTTP の攻撃面を増やさない
         redoc_url=None,
         openapi_url=None,
     )
@@ -89,7 +87,7 @@ def create_app(config: DashboardConfig | None = None) -> FastAPI:
         secret_key=config.secret_key or secrets.token_urlsafe(48),
         session_cookie=SESSION_COOKIE,
         max_age=config.session_max_age,
-        same_site="lax",       # OAuth のリダイレクトで Cookie を保持できる最小設定
+        same_site="lax",  # OAuth のリダイレクトで Cookie を保持できる最小設定
         https_only=config.secure_cookie,
     )
 
