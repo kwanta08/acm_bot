@@ -238,8 +238,9 @@ function progressChart(rows, { max = 25 } = {}) {
   return chart;
 }
 
-// シートタブ（Google スプレッドシートのタブ相当）。
+// シートタブ（Google スプレッドシートのタブ相当。表の下に置く）。
 // 出欠回答（予定ごと）と桁巻き記録（桁ごと）で共通に使う。
+// タブ名はタイトルのみ（日程調整の開催日時はツールチップで確認できる）。
 function renderSheetTabs(data) {
   const sheets = data.sheets;
   return el("div", { class: "sheetbar", role: "tablist" },
@@ -251,8 +252,33 @@ function renderSheetTabs(data) {
       onclick: () => { if (s.id !== sheets.active) selectSheet(data.table.key, s.id); },
     }, [
       el("span", { class: "sheet-label", text: s.label }),
-      s.at ? el("span", { class: "sheet-sub", text: s.at }) : null,
     ])));
+}
+
+// 出欠回答のピボット表（1行 = 候補日時、セル = 表示名を改行区切りで列挙）
+function attendancePivotTable(pivot) {
+  const head = el("tr", {}, pivot.columns.map((c) => el("th", { text: c.label })));
+  const body = pivot.rows.map((row) =>
+    el("tr", {}, pivot.columns.map((c) => {
+      if (c.key === "at") {
+        return el("td", { class: "pivot-at", text: row.at, title: row.label || "" });
+      }
+      const names = row.groups[c.key] || [];
+      const td = el("td", { class: "pivot-cell" });
+      if (names.length > 0) {
+        td.append(
+          el("div", { class: "pivot-count", text: `${c.label} (${names.length})` }),
+          el("div", { class: "pivot-names", text: names.join("\n") }),
+        );
+      }
+      return td;
+    })));
+  return el("div", { class: "grid-wrap" }, [
+    el("table", { class: "grid pivot" }, [
+      el("thead", {}, [head]),
+      el("tbody", {}, body),
+    ]),
+  ]);
 }
 
 function renderGrid(data) {
@@ -268,12 +294,28 @@ function renderGrid(data) {
     return;
   }
 
+  // タブはスプレッドシートと同じく表の下（画面下部）に置く
   const sheetbar = data.sheets ? renderSheetTabs(data) : null;
+  const csvHref = `/api/guilds/${state.guildId}/tables/${data.table.key}/export.csv`;
+
+  // 出欠回答はピボット表（候補日時 × 参加/不参加/未定/未回答）で表示する
+  if (data.pivot) {
+    grid.replaceChildren(...[
+      el("div", { class: "toolbar" }, [
+        el("a", { class: "button", href: csvHref, download: "", text: "CSV をダウンロード" }),
+      ]),
+      data.pivot.rows.length > 0
+        ? attendancePivotTable(data.pivot)
+        : el("p", { class: "empty", text: "候補日時がまだ登録されていません。" }),
+      sheetbar,
+    ].filter(Boolean));
+    return;
+  }
 
   if (data.rows.length === 0) {
     grid.replaceChildren(...[
-      sheetbar,
       el("p", { class: "empty", text: "データがありません。" }),
+      sheetbar,
     ].filter(Boolean));
     return;
   }
@@ -292,10 +334,8 @@ function renderGrid(data) {
     : "閲覧のみの権限です（編集には班長以上の権限が必要です）。";
 
   const chart = data.table.key === "progress" ? progressChart(data.rows) : null;
-  const csvHref = `/api/guilds/${state.guildId}/tables/${data.table.key}/export.csv`;
 
   grid.replaceChildren(...[
-    sheetbar,
     el("div", { class: "toolbar" }, [
       el("span", { class: "empty", text: `${data.total} 件中 ${data.rows.length} 件を表示 — ${hint}` }),
       el("a", { class: "button", href: csvHref, download: "", text: "CSV をダウンロード" }),
@@ -307,6 +347,7 @@ function renderGrid(data) {
         el("tbody", {}, body),
       ]),
     ]),
+    sheetbar,
   ].filter(Boolean));
 }
 

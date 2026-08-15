@@ -327,6 +327,25 @@ Discord の ID が生のまま、日時は ISO 文字列のまま表示されて
         `tests/test_dashboard_display.py`（JST 秒・日付跨ぎ・フォールバック）、
         `tests/test_name_cache.py`（同期・優先順位・guild_id スコープ）
 
+- [x] **F6-2** 出欠回答をピボット表（Google スプレッドシート風）にする。
+      - **変更ファイル**: `dashboard/display.py`（`build_attendance_pivot`）,
+        `dashboard/routers/tables.py`, `repositories/schedule_repository.py`
+        （`list_schedule_votes`）, `dashboard/static/app.js` / `style.css`,
+        `tests/test_dashboard_views.py`
+      - **受入**:
+        - シートタブは**表の下**（スプレッドシートと同じ位置）。タブ名は
+          予定タイトルのみ、選択中は太字＋背景色、多いときは横スクロール
+        - シート内は固定 5 列（候補日時 / 参加 / 不参加 / 未定 / 未回答）、
+          **1 行 = 候補日時 1 つ**（昇順・JST 秒単位）。各セルは該当者の
+          表示名を改行区切りで列挙し、セル冒頭に `参加 (8)` の形式で人数を出す
+        - 未回答 = 回答対象者のうち**この予定のどの候補にも投票していない人**
+          （bot の催促 `notify_unanswered` と同じ「予定単位」の定義）。
+          回答対象者は bot では対象ロールのメンバーだが、ダッシュボードは
+          ロールを解決できないため **members 台帳の現役メンバー**を使う
+        - 候補 0 件・該当者 0 人のセルは空表示（クラッシュしない）
+      - **検証**: 列構成・昇順・区分整列・未回答の顔ぶれ・台帳外回答者の
+        フォールバック・候補 0 件・guild_id スコープ
+
 ---
 
 ## 実施順の理由
@@ -369,3 +388,4 @@ Discord の ID が生のまま、日時は ISO 文字列のまま表示されて
 | F5-2 | `/season list\|new\|rollover` と在籍状態の反映。**設計判断**: (1) `list_members()` に `include_alumni`（既定 False）を足し、既定の一覧・検索から卒業者を外した。`search_support()` はこれを経由するので自動的に効く。既存テスト（`test_teams_skills` / `test_multi_tenant` 含む）が全て通ることを確認済み。(2) rollover の確定処理は `services/season_service.perform_rollover()` に切り出して Discord なしでテストできるようにした。(3) **選ばれなかったメンバーの status には触れない**（`test_rollover_does_not_touch_unselected_members`）。(4) 卒業者選択は `discord.ui.UserSelect`（上限25名）。**申し送り**: 一度に26名以上を卒業させる場合はコマンドを複数回実行する必要がある |
 | F5-3 | 年度スナップショットとドキュメント更新。`/season rollover` の完了時に `cogs/data.build_export_zip()` を**共有**して ZIP を添付する（エクスポートを再実装しない）。`docs/GUIDE.md` の年度替わりの章を `/season rollover` 前提へ全面的に書き換え、`README.md` の機能表に `/help` `/weight` `/countdown` `/season` `/data` を追加、`docs/OPERATION.md` に不足していた **26 コマンド**を追記した（新機能15件のほか、`/set_*` `/settings_*` `/member setup` `/schedule edit-deadline` など既存の記載漏れ11件も含む）。**回帰テスト**: `tests/test_docs_commands.py` が `bot.tree` の全89コマンドと `OPERATION.md` を突き合わせ、記載漏れと逆に実装から消えたコマンドの両方を検出する |
 | F6-1 | ダッシュボードのシートタブ・ID 表示廃止・JST 秒表示（スキーマ v15）。**設計判断**: (1) ダッシュボードは設計上 Bot トークンを持たないため、名前解決は Discord API ではなく **bot が同期する `discord_name_cache` テーブル**で行う（`cogs/name_cache.py` が起動時全同期＋イベント差分。ユーザー行は退会後も残し「最後に知られた名前」を出す。チャンネル行は削除で消しフォールバック表示に落とす）。(2) シート切替は新規 API を作らず既存 `/tables/{key}` に `?sheet=` を足し、絞り込み条件はリポジトリ側で固定（votes は options 経由の副問い合わせ、桁は `keta = ?`。編集 PATCH・CSV・監査は既存の仕組みへ相乗り）。(3) 行の生値（ID・ISO）は変えず `_display` を添える方式にし、編集入力は従来どおり生値で行う。(4) 予定タブの「開催日時」は最初の候補日（無ければ締切）。(5) naive な既存日時は保存規約（utils/parser.TZ）の壁時計として解釈し、**DB の書き換えマイグレーションはしない**。(6) ダッシュボード CSV は画面と同じ表示値で出す（生値の完全バックアップは `/data export` が担当）。**申し送り**: ロール ID（班長ロール等）は未解決のまま（キャッシュ対象は user/channel のみ）。設定画面 API（settings ルーター）はフロント未実装のため対象外。キャッシュが空の期間（v15 適用直後〜bot 初回同期まで）は members 台帳名で表示される |
+| F6-2 | 出欠回答をピボット表（候補日時 × 参加/不参加/未定/未回答）へ変更し、シートタブを表の下（スプレッドシートと同じ位置）へ移した。**設計判断**: (1) `未回答` は bot の催促（`notify_unanswered`）と同じ**予定単位**の定義（どの候補にも1票も無い人。全行で同じ顔ぶれ）。(2) 回答対象者は bot では `target_role_id` のロールメンバーだが、ロール構成員は DB に無くダッシュボードでは解決できないため、**members 台帳の現役メンバー（active_flag=1 かつ status='active'）**で代替した。ロール限定の予定では未回答が過大に出うる。(3) ピボットは既存応答に `pivot` として**追加**し、フラットな `rows` と CSV・PATCH は従来どおり残した（API 後方互換。UI だけがピボットを使う）。(4) タブ名はタイトルのみとし、開催日時はツールチップへ移した。**申し送り**: 未回答をロール基準にしたい場合は名前キャッシュに `entity_type='role_member'` 相当の同期を足す必要がある。ピボットのセル編集（クリックで出欠変更）は未実装 |

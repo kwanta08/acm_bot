@@ -82,29 +82,25 @@ button.primary, .button.primary {
   color: var(--accent-fg);
 }
 
-/* シートタブ（Google スプレッドシートのタブ相当。
+/* シートタブ（Google スプレッドシートのタブ相当。**表の下**に置く。
    出欠回答=予定ごと / 桁巻き記録=桁ごと の共通コンポーネント） */
 .sheetbar {
   display: flex;
   align-items: stretch;
   gap: 0.25rem;
-  margin-bottom: 0.9rem;
-  border-bottom: 2px solid var(--border);
+  margin-top: 0.9rem;
+  border-top: 2px solid var(--border);
   overflow-x: auto;               /* タブが多いときは横スクロール */
   scrollbar-width: thin;
 }
 
 .sheet-tab {
   flex: 0 0 auto;                 /* タブを潰さず横に並べてスクロールさせる */
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 0.1rem;
   max-width: 16rem;
   padding: 0.35rem 0.85rem;
   border: 1px solid var(--border);
-  border-bottom: none;
-  border-radius: 6px 6px 0 0;
+  border-top: none;
+  border-radius: 0 0 6px 6px;
   background: var(--row-alt);
   color: var(--fg);
   cursor: pointer;
@@ -112,27 +108,37 @@ button.primary, .button.primary {
 }
 
 .sheet-tab .sheet-label {
-  font-weight: 600;
+  display: block;
   max-width: 100%;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.sheet-tab .sheet-sub {
-  font-size: 0.75rem;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-/* 選択中のタブは色とアクセントバーで明示する */
+/* 選択中のタブは太字＋背景色で明示する */
 .sheet-tab.active {
-  background: var(--bg);
+  background: var(--accent);
   border-color: var(--accent);
-  box-shadow: inset 0 2px 0 var(--accent);
+  color: var(--accent-fg);
 }
 
-.sheet-tab.active .sheet-label { color: var(--accent); }
+.sheet-tab.active .sheet-label { font-weight: 700; }
+
+/* 出欠回答のピボット表（1行 = 候補日時。セルに表示名を縦に列挙） */
+table.grid.pivot th,
+table.grid.pivot td { vertical-align: top; }
+
+td.pivot-at { white-space: nowrap; font-weight: 600; }
+
+td.pivot-cell { white-space: normal; min-width: 9rem; }
+
+.pivot-count {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin-bottom: 0.15rem;
+}
+
+.pivot-names { white-space: pre-line; line-height: 1.7; }
 
 /* 表グリッド（横スクロールは表の中だけに閉じ込める） */
 .grid-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
