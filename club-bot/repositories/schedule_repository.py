@@ -143,6 +143,23 @@ class ScheduleRepository(BaseRepository):
         )
         return dict(row) if row else None
 
+    async def list_schedule_votes(self, guild_id: int, schedule_id: str) -> list[dict[str, Any]]:
+        """予定配下の全候補への回答を返す（ダッシュボードの出欠ピボット用）。
+
+        候補ごとではなく予定単位で一括取得する（1クエリ。N+1 を作らない）。
+        """
+        rows = await self.db.fetchall(
+            """
+            SELECT v.option_id, v.user_id, v.status
+            FROM schedule_votes v
+            JOIN schedule_options o
+              ON o.option_id = v.option_id AND o.guild_id = v.guild_id
+            WHERE v.guild_id = ? AND o.schedule_id = ?
+            """,
+            (guild_id, schedule_id),
+        )
+        return [dict(r) for r in rows]
+
     async def list_option_labels(self, guild_id: int) -> dict[str, str]:
         """option_id → 候補ラベルの辞書を返す（1クエリ）。
 

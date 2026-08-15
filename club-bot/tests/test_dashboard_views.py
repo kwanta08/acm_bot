@@ -252,6 +252,9 @@ def test_attendance_sheets_are_guild_scoped():
         ).json()
         assert stolen["total"] == 0
         assert stolen["rows"] == []
+        # ピボットにも他ギルドの候補・回答者は現れない
+        assert stolen["pivot"]["rows"] == []
+        assert "B大学" not in str(stolen)
     finally:
         client.__exit__(None, None, None)
 
@@ -319,9 +322,10 @@ def test_sheet_param_is_rejected_for_plain_tables():
     try:
         res = client.get(f"/api/guilds/{GUILD_A}/tables/members", params={"sheet": "x"})
         assert res.status_code == 400
-        # シート非対応の表は sheets を返さない
+        # シート非対応の表は sheets もピボットも返さない
         body = client.get(f"/api/guilds/{GUILD_A}/tables/members").json()
         assert body["sheets"] is None
+        assert body["pivot"] is None
     finally:
         client.__exit__(None, None, None)
 
@@ -420,5 +424,119 @@ def test_patch_response_includes_display():
         updated = res.json()["row"]
         assert updated["status"] == "ng"
         assert updated["_display"]["user_id"] == "山田(ニック)"
+    finally:
+        client.__exit__(None, None, None)
+
+
+# ---------------------------------------------------------------------
+# 出欠回答のピボット表（1行 = 候補日時、セル = 表示名の列挙）
+# ---------------------------------------------------------------------
+def test_attendance_pivot_columns_and_rows_ascending():
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    client = _logged_in_client(db_path)
+    try:
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/schedule_votes").json()
+        pivot = body["pivot"]
+        # 列構成は固定 5 列
+        assert [c["label"] for c in pivot["columns"]] == [
+            "候補日時",
+            "参加",
+            "不参加",
+            "未定",
+            "未回答",
+        ]
+        # 1行 = 候補日時1つ。昇順・JST 秒単位
+        assert [r["at"] for r in pivot["rows"]] == [
+            "2026-09-10 09:00:00",
+            "2026-09-11 09:00:00",
+        ]
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_attendance_pivot_groups_votes_by_status():
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    client = _logged_in_client(db_path)
+    try:
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/schedule_votes").json()
+        rows = body["pivot"]["rows"]
+        # 9/10 は参加、9/11 は未定（seed の投票どおり）。表示名で列挙される
+        assert rows[0]["groups"]["ok"] == ["山田(ニック)"]
+        assert rows[0]["groups"]["maybe"] == []
+        assert rows[1]["groups"]["ok"] == []
+        assert rows[1]["groups"]["maybe"] == ["山田(ニック)"]
+        # 未回答 = 現役の登録メンバーのうち、どの候補にも投票していない人。
+        # 全行で同じ顔ぶれ（bot の催促と同じ「予定単位」の定義）
+        for row in rows:
+            assert row["groups"]["none"] == ["台帳のみ部員"]
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_attendance_pivot_includes_unregistered_voter_with_fallback():
+    """台帳に無い回答者（退会済み等）も ID 付きフォールバック名でセルに出る。"""
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    client = _logged_in_client(db_path)
+    try:
+        body = client.get(
+            f"/api/guilds/{GUILD_A}/tables/schedule_votes", params={"sheet": "sch-a2"}
+        ).json()
+        rows = body["pivot"]["rows"]
+        assert rows[0]["groups"]["ng"] == ["不明なユーザー (43)"]
+        # 現役メンバーは誰も回答していないので全員が未回答
+        # （名前順: 台帳のみ部員 → 山田(ニック)）
+        assert rows[0]["groups"]["none"] == ["台帳のみ部員", "山田(ニック)"]
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_attendance_pivot_with_no_options_is_empty():
+    """候補日時が 0 件の予定でもクラッシュせず空のピボットを返す。"""
+    db_path = _tmp_db_path()
+
+    async def _seed_no_options():
+        db = Database(db_path)
+        await db.connect()
+        try:
+            await GuildRepository(db).ensure(GUILD_A, "A大学")
+            await MemberRepository(db).upsert_member(GUILD_A, USER_ID, "部員")
+            await ScheduleRepository(db).create_schedule(
+                GUILD_A,
+                "sch-x",
+                "候補未定の予定",
+                None,
+                None,
+                None,
+                "2026-09-01T19:00:00+09:00",
+                USER_ID,
+                "555",
+            )
+        finally:
+            await db.close()
+
+    asyncio.run(_seed_no_options())
+    client = _logged_in_client(db_path)
+    try:
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/schedule_votes")
+        assert res.status_code == 200
+        body = res.json()
+        assert body["sheets"]["active"] == "sch-x"
+        assert body["pivot"]["rows"] == []
+        assert body["rows"] == []
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_layer_records_have_no_pivot():
+    """ピボットは出欠回答だけ（桁巻き記録は従来のグリッド表示）。"""
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    client = _logged_in_client(db_path)
+    try:
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/layer_records").json()
+        assert body["pivot"] is None
     finally:
         client.__exit__(None, None, None)

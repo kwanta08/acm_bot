@@ -144,6 +144,24 @@ async def read_table(
         total = await repo.count_rows(table_key, sheet_id=sheet_id)
 
     maps = await _name_maps(scope, spec)
+
+    # 出欠回答はピボット表（1行 = 候補日時、セル = 表示名の列挙）も返す。
+    # 回答対象者はダッシュボードではロールを解決できないため、
+    # members 台帳の現役メンバー（active）を使う（dashboard/README.md 参照）
+    pivot: dict[str, Any] | None = None
+    if table_key == "schedule_votes" and sheet_id is not None:
+        schedules = scope.bind(ScheduleRepository(get_database()))
+        targets = [
+            str(m["user_id"])
+            for m in await scope.bind(MemberRepository(get_database())).list_members()
+        ]
+        pivot = display.build_attendance_pivot(
+            await schedules.list_options(sheet_id),
+            await schedules.list_schedule_votes(sheet_id),
+            targets,
+            maps.users,
+        )
+
     return {
         "table": {
             "key": spec.key,
@@ -154,6 +172,7 @@ async def read_table(
         "columns": _columns_payload(spec),
         "rows": display.attach_display(spec, rows, maps),
         "sheets": sheets_payload,
+        "pivot": pivot,
         "total": total,
         "limit": limit,
         "offset": offset,

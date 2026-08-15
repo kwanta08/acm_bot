@@ -185,3 +185,69 @@ def build_sheets(raw: list[dict[str, Any]]) -> list[dict[str, Any]]:
     epoch = datetime.min.replace(tzinfo=timezone.utc)
     items = sorted(raw, key=lambda s: as_utc(s.get("at")) or epoch, reverse=True)
     return [{"id": s["id"], "label": s["label"], "at": fmt_jst(s.get("at"))} for s in items]
+
+
+# ---------------------------------------------------------------------
+# 出欠回答のピボット表（Google スプレッドシート風。1行 = 候補日時）
+#
+# 列は固定: 候補日時 / 参加 / 不参加 / 未定 / 未回答。
+# ok/maybe/ng の語彙は bot 側（cogs/schedule.py の STATUS_LABELS）と
+# 対応させる。"none"（未回答）はダッシュボード側で計算する区分。
+# ---------------------------------------------------------------------
+ATTENDANCE_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("at", "候補日時"),
+    ("ok", "参加"),
+    ("ng", "不参加"),
+    ("maybe", "未定"),
+    ("none", "未回答"),
+)
+
+# 投票として有効なステータス（これ以外の値は表示しない）
+_VOTE_STATUSES = ("ok", "ng", "maybe")
+
+
+def build_attendance_pivot(
+    options: list[dict[str, Any]],
+    votes: list[dict[str, Any]],
+    target_ids: list[str],
+    users: Mapping[str, str],
+) -> dict[str, Any]:
+    """出欠回答のピボット表を組み立てる（純関数）。
+
+    - 1行 = 候補日時1つ（options の並び順 = 開始日時の昇順を保つ）
+    - 各セルはその区分に該当するメンバーの表示名リスト（名前順）
+    - 未回答 = 回答対象者（target_ids）のうち、**この予定のどの候補にも
+      投票していない**メンバー。bot の催促（notify_unanswered）と同じ
+      「予定単位」の定義なので、全行で同じ顔ぶれになる
+    """
+    voted = {str(v["user_id"]) for v in votes}
+    unanswered = sorted(user_label(uid, users) for uid in target_ids if str(uid) not in voted)
+
+    by_option: dict[str, dict[str, list[str]]] = {}
+    for vote in votes:
+        status = str(vote.get("status"))
+        if status not in _VOTE_STATUSES:
+            continue
+        groups = by_option.setdefault(str(vote["option_id"]), {})
+        groups.setdefault(status, []).append(user_label(vote["user_id"], users))
+
+    rows: list[dict[str, Any]] = []
+    for option in options:
+        groups = by_option.get(str(option["option_id"]), {})
+        rows.append(
+            {
+                # 候補日時は JST 秒単位。解釈できない値はそのまま出す
+                "at": fmt_jst(option.get("start_at")) or str(option.get("label") or ""),
+                "label": str(option.get("label") or ""),
+                "groups": {
+                    "ok": sorted(groups.get("ok", [])),
+                    "ng": sorted(groups.get("ng", [])),
+                    "maybe": sorted(groups.get("maybe", [])),
+                    "none": list(unanswered),
+                },
+            }
+        )
+    return {
+        "columns": [{"key": key, "label": label} for key, label in ATTENDANCE_COLUMNS],
+        "rows": rows,
+    }
