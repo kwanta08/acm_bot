@@ -7,6 +7,7 @@ bot と同じ utils.db.Database を使う（SQLite / PostgreSQL 両対応）。
 「接続を1つ持つ」ことだけを担当し、スコープの強制は
 dashboard/security.py が行う。
 """
+
 from __future__ import annotations
 
 from dashboard.config import DashboardConfig
@@ -20,9 +21,12 @@ async def open_database(config: DashboardConfig) -> Database:
     global _db
     if _db is not None:
         return _db
-    db = Database(config.db_path, database_url=config.database_url,
-                  pool_min_size=config.db_pool_min_size,
-                  pool_max_size=config.db_pool_max_size)
+    db = Database(
+        config.db_path,
+        database_url=config.database_url,
+        pool_min_size=config.db_pool_min_size,
+        pool_max_size=config.db_pool_max_size,
+    )
     await db.connect()
     _db = db
     return db

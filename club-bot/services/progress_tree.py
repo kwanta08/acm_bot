@@ -11,6 +11,7 @@
   progress_nodes.weight に 1 以外を入れれば重み付け平均になる）
 - 進捗率は内部的に 0.0〜1.0 の小数で扱う
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -25,19 +26,20 @@ SOURCE_SPAR_WINDING = "spar_winding"
 @dataclass
 class ProgressNode:
     """progress_nodes の1行に対応するノード。"""
+
     node_id: str
     parent_id: str | None = None
-    order: float = 0.0            # 表示順（兄弟間の並び。DB の sort_order）
+    order: float = 0.0  # 表示順（兄弟間の並び。DB の sort_order）
     name: str = ""
     assignee: str = ""
     status: str = ""
     manual_progress: float | None = None  # 進捗率(手入力)。0.0〜1.0
-    source: str = SOURCE_MANUAL   # manual / todoist / spar_winding
+    source: str = SOURCE_MANUAL  # manual / todoist / spar_winding
     todoist_task_id: str = ""
     # 旧・中央スプレッドシート上の行番号（1始まり）。
     # 移行スクリプトがシートを読むときだけ設定する。DB 経路では常に None
     row_index: int | None = None
-    weight: float = 1.0           # 集計時の重み
+    weight: float = 1.0  # 集計時の重み
     # 重量（g）。None は未入力。人力飛行機では重量が競技成績に直結するため、
     # 進捗と同じ木で積み上げる
     target_weight_g: float | None = None
@@ -63,6 +65,7 @@ class ProgressNode:
 @dataclass
 class TreeError:
     """ツリー構築・集計中に検出した異常（該当ノードはスキップされる）。"""
+
     node_id: str
     reason: str
 
@@ -70,6 +73,7 @@ class TreeError:
 @dataclass
 class ProgressTree:
     """構築済みツリー。roots は表示順でソート済み。"""
+
     roots: list[ProgressNode] = field(default_factory=list)
     by_id: dict[str, ProgressNode] = field(default_factory=dict)
     errors: list[TreeError] = field(default_factory=list)
@@ -118,8 +122,7 @@ def build_tree(nodes: list[ProgressNode]) -> ProgressTree:
             tree.errors.append(TreeError("", "ID が空の行があります"))
             continue
         if node.node_id in tree.by_id:
-            tree.errors.append(TreeError(
-                node.node_id, "ID が重複しています（最初の行のみ採用）"))
+            tree.errors.append(TreeError(node.node_id, "ID が重複しています（最初の行のみ採用）"))
             continue
         tree.by_id[node.node_id] = node
 
@@ -186,8 +189,7 @@ def _find_invalid_ids(tree: ProgressTree) -> set[str]:
     return invalid
 
 
-def _resolve_weight(own: float | None,
-                    child_values: list[float | None]) -> float | None:
+def _resolve_weight(own: float | None, child_values: list[float | None]) -> float | None:
     """重量の集計規則。
 
     **実測値（またはそのノードに入力された値）が入っていればそれを採用**し、
@@ -234,16 +236,16 @@ def aggregate(tree: ProgressTree) -> None:
                 if total_weight <= 0:
                     node.aggregated = 0.0
                 else:
-                    node.aggregated = sum(
-                        (c.aggregated or 0.0) * c.weight
-                        for c in node.children) / total_weight
+                    node.aggregated = (
+                        sum((c.aggregated or 0.0) * c.weight for c in node.children) / total_weight
+                    )
             # 重量は進捗率と同じ後行順の中で積み上げる
             node.aggregated_actual_weight_g = _resolve_weight(
-                node.actual_weight_g,
-                [c.aggregated_actual_weight_g for c in node.children])
+                node.actual_weight_g, [c.aggregated_actual_weight_g for c in node.children]
+            )
             node.aggregated_target_weight_g = _resolve_weight(
-                node.target_weight_g,
-                [c.aggregated_target_weight_g for c in node.children])
+                node.target_weight_g, [c.aggregated_target_weight_g for c in node.children]
+            )
 
 
 def build_and_aggregate(nodes: list[ProgressNode]) -> ProgressTree:
@@ -263,6 +265,7 @@ class WeightSummary:
     measured / total は「実測がどれだけ埋まっているか」を示す。
     実測が少ないほど集計値は見積もりに近く、確度が低い。
     """
+
     actual_g: float | None = None
     target_g: float | None = None
     measured_nodes: int = 0
@@ -297,8 +300,7 @@ def iter_subtree(node: ProgressNode):
         stack.extend(current.children)
 
 
-def weight_summary(tree: ProgressTree,
-                   node_id: str | None = None) -> WeightSummary:
+def weight_summary(tree: ProgressTree, node_id: str | None = None) -> WeightSummary:
     """ツリー全体、または指定ノードの部分木の重量サマリを返す。
 
     node_id を省略すると全ルートの合計。存在しない node_id では
@@ -361,15 +363,18 @@ def node_from_row(row: dict[str, Any]) -> ProgressNode:
         name=row.get("name") or "",
         assignee=row.get("assignee") or "",
         status=row.get("status") or "",
-        manual_progress=(None if row.get("manual_progress") is None
-                         else float(row["manual_progress"])),
+        manual_progress=(
+            None if row.get("manual_progress") is None else float(row["manual_progress"])
+        ),
         source=row.get("source") or SOURCE_MANUAL,
         todoist_task_id=row.get("todoist_task_id") or "",
         weight=float(row["weight"]) if row.get("weight") is not None else 1.0,
-        target_weight_g=(None if row.get("target_weight_g") is None
-                         else float(row["target_weight_g"])),
-        actual_weight_g=(None if row.get("actual_weight_g") is None
-                         else float(row["actual_weight_g"])),
+        target_weight_g=(
+            None if row.get("target_weight_g") is None else float(row["target_weight_g"])
+        ),
+        actual_weight_g=(
+            None if row.get("actual_weight_g") is None else float(row["actual_weight_g"])
+        ),
         created_at=row.get("created_at") or "",
         updated_at=row.get("updated_at") or "",
     )

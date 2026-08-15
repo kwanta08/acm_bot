@@ -12,6 +12,7 @@
 - Google Sheets 連携は撤去済み。記録の正本は SQLite/PostgreSQL で、
   CSV 出力は Web ダッシュボードと /report export-tasks が担う。
 """
+
 from __future__ import annotations
 
 import os
@@ -51,10 +52,12 @@ def _clean(value: str | None) -> str:
     if value is None:
         return ""
     # BOM・CR・NBSP・全角スペースなどの不可視文字を除去
-    value = value.replace("\ufeff", "").replace("\r", "").replace("\u00a0", " ").replace("\u3000", " ")
+    value = (
+        value.replace("\ufeff", "").replace("\r", "").replace("\u00a0", " ").replace("\u3000", " ")
+    )
     value = value.strip()
     # 値全体を囲む引用符を除去（"xxx" / 'xxx'）
-    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("\"", "'"):
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
         value = value[1:-1].strip()
     return value
 
@@ -114,6 +117,7 @@ class GuildConfig:
     config.for_guild(guild_id) で取得する。解決順は
     「ギルド別 DB 設定 > 環境変数（グローバル）> デフォルト」。
     """
+
     guild_id: int
 
     # チャンネル ID
@@ -164,6 +168,7 @@ class Config:
     環境変数 > データベース（レガシーギルド）の優先順でグローバル設定を読み込む。
     ギルド固有設定は for_guild() で解決する。
     """
+
     # Discord - 環境変数のみ（DISCORD_TOKEN は必須）
     discord_token: str = _get_str("DISCORD_TOKEN")
     # GUILD_ID は任意（後方互換のためのレガシーギルド ID。
@@ -183,9 +188,11 @@ class Config:
     admin_role_id: int | None = _get_int("ADMIN_ROLE_ID")
     leader_role_ids: list[int] = field(default_factory=lambda: _get_int_list("LEADER_ROLE_IDS"))
     primary_team_role_ids: dict[str, int] = field(
-        default_factory=lambda: _get_team_role_map("PRIMARY_TEAM_ROLE_IDS"))
+        default_factory=lambda: _get_team_role_map("PRIMARY_TEAM_ROLE_IDS")
+    )
     secondary_team_role_ids: dict[str, int] = field(
-        default_factory=lambda: _get_team_role_map("SECONDARY_TEAM_ROLE_IDS"))
+        default_factory=lambda: _get_team_role_map("SECONDARY_TEAM_ROLE_IDS")
+    )
 
     # Todoist - ギルド別管理（todoist_configs テーブル + /todoist-setup）。
     # トークン・プロジェクトIDは環境変数・settings からは読まない
@@ -251,9 +258,9 @@ class Config:
     # ------------------------------------------------------------------
     # ギルド別設定解決
     # ------------------------------------------------------------------
-    async def for_guild(self, guild_id: int,
-                        db: Database | None = None,
-                        force_reload: bool = False) -> GuildConfig:
+    async def for_guild(
+        self, guild_id: int, db: Database | None = None, force_reload: bool = False
+    ) -> GuildConfig:
         """
         ギルド固有設定をキャッシュ付きで返す。
 
@@ -284,6 +291,7 @@ class Config:
 
         if db is not None:
             from repositories.settings_repository import SettingsRepository
+
             repo = SettingsRepository(db)
 
             for key, attr in (
@@ -418,11 +426,11 @@ config = Config()
 
 # 機能ごとの Embed カラー（改訂版 13.2）
 COLOR_SCHEDULE = 0x3498DB  # 青
-COLOR_TASKS = 0xE67E22     # 橙
-COLOR_MEMBERS = 0x9B59B6   # 紫
-COLOR_ERROR = 0xE74C3C     # 赤
-COLOR_INFO = 0x95A5A6      # 情報（灰）
-COLOR_SUCCESS = 0x2ECC71   # 成功（緑）
+COLOR_TASKS = 0xE67E22  # 橙
+COLOR_MEMBERS = 0x9B59B6  # 紫
+COLOR_ERROR = 0xE74C3C  # 赤
+COLOR_INFO = 0x95A5A6  # 情報（灰）
+COLOR_SUCCESS = 0x2ECC71  # 成功（緑）
 
 # 班（teams）と技能タグ（skill_tags）は config.py の固定配列ではなく、
 # DB（teams / skill_tags テーブル）でギルド単位に管理する。

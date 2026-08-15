@@ -7,6 +7,7 @@
 - v11 相当の既存 DB からマイグレーションで列が増え、既存ノードが壊れないこと
 - PostgreSQL 用 DDL では DOUBLE PRECISION になること
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -131,8 +132,8 @@ def test_v11_db_gains_columns_and_keeps_nodes():
             assert {"target_weight_g", "actual_weight_g"} <= cols
 
             row = await db.fetchone(
-                "SELECT * FROM progress_nodes WHERE guild_id = ? AND node_id = ?",
-                (G1, "wing"))
+                "SELECT * FROM progress_nodes WHERE guild_id = ? AND node_id = ?", (G1, "wing")
+            )
             assert row is not None, "既存ノードが失われた"
             assert row["name"] == "主翼"
             assert row["manual_progress"] == 0.5
@@ -152,8 +153,7 @@ def test_weight_migration_is_idempotent():
         for _ in range(2):
             db = Database(path)
             await db.connect()
-            assert {"target_weight_g", "actual_weight_g"} <= \
-                await _columns(db, "progress_nodes")
+            assert {"target_weight_g", "actual_weight_g"} <= await _columns(db, "progress_nodes")
             await db.close()
 
     run(_main())
@@ -169,13 +169,13 @@ def test_weight_columns_are_updatable():
             repo = ProgressRepository(db)
             await repo.upsert_node(G1, "wing", name="主翼", now_text=NOW)
 
-            await repo.update_node(G1, "wing", now_text=NOW,
-                                   actual_weight_g=1240.5,
-                                   target_weight_g=1100.0)
+            await repo.update_node(
+                G1, "wing", now_text=NOW, actual_weight_g=1240.5, target_weight_g=1100.0
+            )
 
             row = await db.fetchone(
-                "SELECT * FROM progress_nodes WHERE guild_id = ? AND node_id = ?",
-                (G1, "wing"))
+                "SELECT * FROM progress_nodes WHERE guild_id = ? AND node_id = ?", (G1, "wing")
+            )
             assert row["actual_weight_g"] == 1240.5
             assert row["target_weight_g"] == 1100.0
         finally:
@@ -186,14 +186,15 @@ def test_weight_columns_are_updatable():
 
 def test_weight_survives_round_trip_through_tree():
     """DB → ProgressNode → 集計まで重量が流れること。"""
+
     async def _main():
         db = await _connected_db()
         try:
             repo = ProgressRepository(db)
             await repo.upsert_node(G1, "wing", name="主翼", now_text=NOW)
-            await repo.update_node(G1, "wing", now_text=NOW,
-                                   actual_weight_g=1240.0,
-                                   target_weight_g=1100.0)
+            await repo.update_node(
+                G1, "wing", now_text=NOW, actual_weight_g=1240.0, target_weight_g=1100.0
+            )
 
             tree = await load_tree(repo, G1)
             node = tree.by_id["wing"]
@@ -214,14 +215,12 @@ def test_weight_is_guild_scoped():
             await repo.upsert_node(G1, "wing", name="主翼", now_text=NOW)
             await repo.upsert_node(G2, "wing", name="別大学の主翼", now_text=NOW)
 
-            await repo.update_node(G1, "wing", now_text=NOW,
-                                   actual_weight_g=1240.0)
+            await repo.update_node(G1, "wing", now_text=NOW, actual_weight_g=1240.0)
 
             other = await db.fetchone(
-                "SELECT * FROM progress_nodes WHERE guild_id = ? AND node_id = ?",
-                (G2, "wing"))
-            assert other["actual_weight_g"] is None, \
-                "他サーバーの同名ノードを巻き込んで更新した"
+                "SELECT * FROM progress_nodes WHERE guild_id = ? AND node_id = ?", (G2, "wing")
+            )
+            assert other["actual_weight_g"] is None, "他サーバーの同名ノードを巻き込んで更新した"
         finally:
             await db.close()
 
@@ -232,87 +231,108 @@ def test_weight_is_guild_scoped():
 # 集計規則（F3-2）
 # ---------------------------------------------------------------------
 def _node(node_id, parent=None, *, actual=None, target=None, order=0.0):
-    return ProgressNode(node_id=node_id, parent_id=parent, order=order,
-                        name=node_id, actual_weight_g=actual,
-                        target_weight_g=target)
+    return ProgressNode(
+        node_id=node_id,
+        parent_id=parent,
+        order=order,
+        name=node_id,
+        actual_weight_g=actual,
+        target_weight_g=target,
+    )
 
 
 def test_leaf_weights_roll_up_to_parent():
     """葉だけに実測があるとき、親は子の合計になる。"""
-    tree = build_and_aggregate([
-        _node("airframe"),
-        _node("wing", "airframe", actual=800.0),
-        _node("tail", "airframe", actual=200.0),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe", actual=800.0),
+            _node("tail", "airframe", actual=200.0),
+        ]
+    )
     assert tree.by_id["airframe"].aggregated_actual_weight_g == 1000.0
 
 
 def test_parent_actual_beats_children_sum():
     """親に実測があれば、子の合計ではなく親の実測が勝つ。"""
-    tree = build_and_aggregate([
-        _node("airframe", actual=1500.0),
-        _node("wing", "airframe", actual=800.0),
-        _node("tail", "airframe", actual=200.0),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe", actual=1500.0),
+            _node("wing", "airframe", actual=800.0),
+            _node("tail", "airframe", actual=200.0),
+        ]
+    )
     assert tree.by_id["airframe"].aggregated_actual_weight_g == 1500.0
     # 子側は自分の実測のまま
     assert tree.by_id["wing"].aggregated_actual_weight_g == 800.0
 
 
 def test_target_weight_uses_same_rule():
-    tree = build_and_aggregate([
-        _node("airframe"),
-        _node("wing", "airframe", target=700.0),
-        _node("tail", "airframe", target=150.0),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe", target=700.0),
+            _node("tail", "airframe", target=150.0),
+        ]
+    )
     assert tree.by_id["airframe"].aggregated_target_weight_g == 850.0
 
-    tree = build_and_aggregate([
-        _node("airframe", target=900.0),
-        _node("wing", "airframe", target=700.0),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe", target=900.0),
+            _node("wing", "airframe", target=700.0),
+        ]
+    )
     assert tree.by_id["airframe"].aggregated_target_weight_g == 900.0
 
 
 def test_unmeasured_subtree_is_none_not_zero():
     """未計測は 0 g ではなく None（見積もりに混ぜない）。"""
-    tree = build_and_aggregate([
-        _node("airframe"),
-        _node("wing", "airframe"),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe"),
+        ]
+    )
     assert tree.by_id["airframe"].aggregated_actual_weight_g is None
     assert tree.by_id["wing"].aggregated_actual_weight_g is None
 
 
 def test_partially_measured_parent_sums_only_measured_children():
-    tree = build_and_aggregate([
-        _node("airframe"),
-        _node("wing", "airframe", actual=800.0),
-        _node("tail", "airframe"),          # 未計測
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe", actual=800.0),
+            _node("tail", "airframe"),  # 未計測
+        ]
+    )
     assert tree.by_id["airframe"].aggregated_actual_weight_g == 800.0
 
 
 def test_deep_tree_rolls_up_through_all_levels():
-    tree = build_and_aggregate([
-        _node("airframe"),
-        _node("wing", "airframe"),
-        _node("spar", "wing", actual=300.0),
-        _node("rib", "wing", actual=120.0),
-        _node("tail", "airframe", actual=200.0),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe"),
+            _node("spar", "wing", actual=300.0),
+            _node("rib", "wing", actual=120.0),
+            _node("tail", "airframe", actual=200.0),
+        ]
+    )
     assert tree.by_id["wing"].aggregated_actual_weight_g == 420.0
     assert tree.by_id["airframe"].aggregated_actual_weight_g == 620.0
 
 
 def test_cycle_does_not_hang_and_is_excluded():
     """循環データでも停止し、循環ノードは集計から外れる。"""
-    tree = build_and_aggregate([
-        _node("airframe"),
-        _node("wing", "airframe", actual=800.0),
-        _node("a", "b", actual=999.0),      # 循環
-        _node("b", "a", actual=999.0),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe", actual=800.0),
+            _node("a", "b", actual=999.0),  # 循環
+            _node("b", "a", actual=999.0),
+        ]
+    )
     assert "a" not in tree.by_id
     assert "b" not in tree.by_id
     assert tree.by_id["airframe"].aggregated_actual_weight_g == 800.0
@@ -320,11 +340,13 @@ def test_cycle_does_not_hang_and_is_excluded():
 
 
 def test_orphan_is_excluded_from_weight():
-    tree = build_and_aggregate([
-        _node("airframe"),
-        _node("wing", "airframe", actual=800.0),
-        _node("lost", "no-such-parent", actual=500.0),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe", actual=800.0),
+            _node("lost", "no-such-parent", actual=500.0),
+        ]
+    )
     assert "lost" not in tree.by_id
     assert tree.by_id["airframe"].aggregated_actual_weight_g == 800.0
 
@@ -333,11 +355,13 @@ def test_orphan_is_excluded_from_weight():
 # サマリ（実測入力率・目標との差）
 # ---------------------------------------------------------------------
 def test_summary_reports_totals_and_fill_rate():
-    tree = build_and_aggregate([
-        _node("airframe", target=1000.0),
-        _node("wing", "airframe", actual=800.0),
-        _node("tail", "airframe"),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe", target=1000.0),
+            _node("wing", "airframe", actual=800.0),
+            _node("tail", "airframe"),
+        ]
+    )
     summary = weight_summary(tree)
     assert summary.actual_g == 800.0
     assert summary.target_g == 1000.0
@@ -349,24 +373,28 @@ def test_summary_reports_totals_and_fill_rate():
 
 
 def test_summary_flags_over_target():
-    tree = build_and_aggregate([
-        _node("airframe", target=1100.0, actual=1240.0),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe", target=1100.0, actual=1240.0),
+        ]
+    )
     summary = weight_summary(tree)
     assert summary.diff_g == 140.0
     assert summary.is_over_target is True
 
 
 def test_summary_of_subtree():
-    tree = build_and_aggregate([
-        _node("airframe"),
-        _node("wing", "airframe", actual=800.0),
-        _node("spar", "wing", actual=300.0),
-        _node("tail", "airframe", actual=200.0),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe", actual=800.0),
+            _node("spar", "wing", actual=300.0),
+            _node("tail", "airframe", actual=200.0),
+        ]
+    )
     summary = weight_summary(tree, "wing")
-    assert summary.actual_g == 800.0     # 親の実測が勝つ
-    assert summary.total_nodes == 2      # wing と spar
+    assert summary.actual_g == 800.0  # 親の実測が勝つ
+    assert summary.total_nodes == 2  # wing と spar
     assert summary.measured_nodes == 2
 
 
@@ -390,12 +418,14 @@ def test_summary_of_empty_tree():
 # ---------------------------------------------------------------------
 def test_over_target_nodes_sorted_by_excess():
     """超過量の大きい順。親は子から積み上がった合計で判定される。"""
-    tree = build_and_aggregate([
-        _node("airframe"),
-        _node("wing", "airframe", actual=900.0, target=800.0),    # +100
-        _node("tail", "airframe", actual=260.0, target=200.0),    # +60
-        _node("fuse", "airframe", actual=100.0, target=150.0),    # -50
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe", actual=900.0, target=800.0),  # +100
+            _node("tail", "airframe", actual=260.0, target=200.0),  # +60
+            _node("fuse", "airframe", actual=100.0, target=150.0),  # -50
+        ]
+    )
     ranked = nodes_over_target(tree)
     # airframe は 1260 / 1150 で +110（機体全体としても超過している）
     assert [n.node_id for n, _ in ranked] == ["airframe", "wing", "tail"]
@@ -404,18 +434,22 @@ def test_over_target_nodes_sorted_by_excess():
 
 
 def test_over_target_excludes_nodes_within_target():
-    tree = build_and_aggregate([
-        _node("airframe"),
-        _node("wing", "airframe", actual=700.0, target=800.0),
-        _node("tail", "airframe", actual=150.0, target=200.0),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe", actual=700.0, target=800.0),
+            _node("tail", "airframe", actual=150.0, target=200.0),
+        ]
+    )
     assert nodes_over_target(tree) == []
 
 
 def test_over_target_skips_nodes_without_target():
-    tree = build_and_aggregate([
-        _node("wing", actual=900.0),      # 目標が無いので判定できない
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("wing", actual=900.0),  # 目標が無いので判定できない
+        ]
+    )
     assert nodes_over_target(tree) == []
 
 
@@ -443,16 +477,17 @@ def test_weight_set_requires_leader_level():
 
 
 def test_weight_commands_are_registered():
-    names = {c.qualified_name
-             for c in Progress(_FakeProgressBot()).walk_app_commands()}
+    names = {c.qualified_name for c in Progress(_FakeProgressBot()).walk_app_commands()}
     assert {"weight set", "weight view", "weight top"} <= names
 
 
 # ---- 表示 ----------------------------------------------------------
 def test_weight_line_formats_actual_target_and_diff():
-    tree = build_and_aggregate([
-        _node("airframe", actual=1240.0, target=1100.0),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe", actual=1240.0, target=1100.0),
+        ]
+    )
     assert weight_line(tree, "airframe") == "重量: 実測 1,240g / 目標 1,100g（+140g）"
 
 
@@ -463,10 +498,12 @@ def test_weight_line_shows_under_target_as_negative():
 
 def test_weight_line_is_empty_when_unset():
     """重量を使っていないサーバーでは行ごと出さない。"""
-    tree = build_and_aggregate([
-        _node("airframe"),
-        _node("wing", "airframe"),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe"),
+        ]
+    )
     assert weight_line(tree, "airframe") == ""
     assert weight_line(tree, None) == ""
 
@@ -476,44 +513,52 @@ def test_weight_line_with_only_actual():
     line = weight_line(tree, "wing")
     assert "実測 900g" in line
     assert "目標" not in line
-    assert "（" not in line   # 差分は出せない
+    assert "（" not in line  # 差分は出せない
 
 
 def test_progress_view_embed_unchanged_without_weights():
     """重量未設定なら /progress view の説明文は従来どおり。"""
-    tree = build_and_aggregate([
-        _node("airframe"),
-        _node("wing", "airframe"),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe"),
+        ]
+    )
     embed = build_level_embed(tree, "airframe")
     assert "重量" not in (embed.description or "")
 
 
 def test_progress_view_embed_shows_weight_when_set():
-    tree = build_and_aggregate([
-        _node("airframe"),
-        _node("wing", "airframe", actual=800.0, target=700.0),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe", actual=800.0, target=700.0),
+        ]
+    )
     embed = build_level_embed(tree, "airframe")
     assert "重量: 実測 800g / 目標 700g（+100g）" in (embed.description or "")
 
 
 def test_leaf_embed_shows_weight():
-    tree = build_and_aggregate([
-        _node("airframe"),
-        _node("wing", "airframe", actual=800.0, target=700.0),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe", actual=800.0, target=700.0),
+        ]
+    )
     embed = build_level_embed(tree, "wing")
     assert "進捗率" in (embed.description or "")
     assert "重量: 実測 800g" in (embed.description or "")
 
 
 def test_root_level_embed_shows_total_weight():
-    tree = build_and_aggregate([
-        _node("airframe"),
-        _node("wing", "airframe", actual=800.0),
-        _node("tail", "airframe", actual=200.0),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe", actual=800.0),
+            _node("tail", "airframe", actual=200.0),
+        ]
+    )
     embed = build_level_embed(tree, None)
     assert "実測 1,000g" in (embed.description or "")
 

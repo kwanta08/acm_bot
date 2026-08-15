@@ -7,6 +7,7 @@ reminders_log / layer 系）を混在させ、Repository・ビュー経由で
 
 実行: venv/bin/python -m pytest tests/  （pytest 未導入なら直接実行も可）
 """
+
 import asyncio
 import os
 import sys
@@ -77,15 +78,27 @@ def test_full_multiguild_isolation():
                 await members.add_skill(gid, "u1", f"技能{suffix}")
                 task_ids[gid] = await tasks.create_task(gid, f"タスク{suffix}", created_by="u1")
                 await schedules.create_schedule(
-                    gid, schedule_id=f"sch-{suffix}", title=f"部会{suffix}",
-                    description=None, place=None, target_role_id=None,
+                    gid,
+                    schedule_id=f"sch-{suffix}",
+                    title=f"部会{suffix}",
+                    description=None,
+                    place=None,
+                    target_role_id=None,
                     deadline_iso="2099-01-01T00:00:00",
-                    created_by="u1", channel_id="ch")
-                await schedules.add_option(gid, f"opt-{suffix}", f"sch-{suffix}",
-                                           "候補", "2099-01-01", None, "msg")
+                    created_by="u1",
+                    channel_id="ch",
+                )
+                await schedules.add_option(
+                    gid, f"opt-{suffix}", f"sch-{suffix}", "候補", "2099-01-01", None, "msg"
+                )
                 await schedules.set_vote(gid, f"opt-{suffix}", "u1", "ok")
-                await todoist.upsert(gid, crypto.encrypt_token(f"token-{suffix}"),
-                                     f"proj-{suffix}", "今日やること", "admin")
+                await todoist.upsert(
+                    gid,
+                    crypto.encrypt_token(f"token-{suffix}"),
+                    f"proj-{suffix}",
+                    "今日やること",
+                    "admin",
+                )
                 await audit.record(gid, "admin", "team.add", target="wing")
                 await rlog.add(gid, "task_overdue", "t1", None, "ch", "success")
                 await keta.add(gid, f"桁{suffix}", "u1", "2026-01-01")
@@ -161,6 +174,7 @@ def test_full_multiguild_isolation():
             assert await schedules.get_schedule(G2, "sch-B") is not None
         finally:
             await db.close()
+
     run(_main())
     crypto.reset_cache()
     os.environ.pop("ENCRYPTION_KEY", None)

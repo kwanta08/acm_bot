@@ -20,6 +20,7 @@ upsert する。正本は DB であり、Google Sheets には一切依存しな�
 - いずれかのプロジェクトの取得に失敗した場合は同期全体を中断する
   （部分的なアクティブ一覧で誤完了させない）
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -58,6 +59,7 @@ def _now_text() -> str:
 @dataclass
 class DbSyncPlan:
     """Todoist 取得結果を progress_nodes へ反映するための更新計画（純粋データ）。"""
+
     creates: list[dict[str, Any]] = field(default_factory=list)
     updates: list[tuple[str, dict[str, Any]]] = field(default_factory=list)
     completions: list[str] = field(default_factory=list)
@@ -79,6 +81,7 @@ class DbSyncPlan:
 @dataclass
 class GuildSyncResult:
     """1ギルド分の同期結果（通知・ログ用）。"""
+
     guild_id: int
     projects: int = 0
     added: int = 0
@@ -89,8 +92,7 @@ class GuildSyncResult:
     tree: ProgressTree | None = None
 
 
-def _descendant_todoist_nodes(tree: ProgressTree,
-                              anchor_ids: list[str]) -> dict[str, ProgressNode]:
+def _descendant_todoist_nodes(tree: ProgressTree, anchor_ids: list[str]) -> dict[str, ProgressNode]:
     """アンカー配下（自身を除く）の source=todoist ノードを返す。"""
     out: dict[str, ProgressNode] = {}
     for anchor_id in anchor_ids:
@@ -106,8 +108,9 @@ def _descendant_todoist_nodes(tree: ProgressTree,
     return out
 
 
-def plan_todoist_sync(nodes: list[ProgressNode],
-                      anchors: list[tuple[str, list[Any]]]) -> DbSyncPlan:
+def plan_todoist_sync(
+    nodes: list[ProgressNode], anchors: list[tuple[str, list[Any]]]
+) -> DbSyncPlan:
     """アクティブタスク一覧から progress_nodes の更新計画を組み立てる（純粋関数）。
 
     anchors: [(紐付け先ノードID, そのプロジェクトのアクティブタスク一覧)]
@@ -125,12 +128,11 @@ def plan_todoist_sync(nodes: list[ProgressNode],
         if anchor_id in tree.by_id:
             valid_anchor_ids.append(anchor_id)
         else:
-            plan.errors.append(
-                f"紐付け先ノード `{anchor_id}` が進捗ツリーに見つかりません")
+            plan.errors.append(f"紐付け先ノード `{anchor_id}` が進捗ツリーに見つかりません")
 
     active_ids: set[str] = {
-        f"{TODOIST_ID_PREFIX}{task.id}"
-        for _anchor_id, tasks in anchors for task in tasks}
+        f"{TODOIST_ID_PREFIX}{task.id}" for _anchor_id, tasks in anchors for task in tasks
+    }
 
     for anchor_id, tasks in anchors:
         if anchor_id not in tree.by_id:
@@ -138,27 +140,27 @@ def plan_todoist_sync(nodes: list[ProgressNode],
         for seq, task in enumerate(tasks, start=1):
             node_id = f"{TODOIST_ID_PREFIX}{task.id}"
             raw_parent = getattr(task, "parent_id", None)
-            parent_td = (f"{TODOIST_ID_PREFIX}{raw_parent}"
-                         if raw_parent else None)
+            parent_td = f"{TODOIST_ID_PREFIX}{raw_parent}" if raw_parent else None
             # 親タスクがアクティブかツリーに在ればそこへ、
             # 無ければ（親が先に完了した等）アンカー直下へぶら下げる
-            if parent_td and (parent_td in active_ids
-                              or parent_td in tree.by_id):
+            if parent_td and (parent_td in active_ids or parent_td in tree.by_id):
                 parent_id = parent_td
             else:
                 parent_id = anchor_id
 
             existing = tree.by_id.get(node_id)
             if existing is None:
-                plan.creates.append({
-                    "node_id": node_id,
-                    "parent_id": parent_id,
-                    "sort_order": float(seq),
-                    "name": str(task.content),
-                    "manual_progress": 0.0,
-                    "source": pt.SOURCE_TODOIST,
-                    "todoist_task_id": str(task.id),
-                })
+                plan.creates.append(
+                    {
+                        "node_id": node_id,
+                        "parent_id": parent_id,
+                        "sort_order": float(seq),
+                        "name": str(task.content),
+                        "manual_progress": 0.0,
+                        "source": pt.SOURCE_TODOIST,
+                        "todoist_task_id": str(task.id),
+                    }
+                )
                 continue
             if existing.source != pt.SOURCE_TODOIST:
                 continue  # 手入力・桁巻き由来の行は上書きしない
@@ -170,8 +172,7 @@ def plan_todoist_sync(nodes: list[ProgressNode],
             if fields:
                 plan.updates.append((node_id, fields))
 
-    for node_id, node in _descendant_todoist_nodes(
-            tree, valid_anchor_ids).items():
+    for node_id, node in _descendant_todoist_nodes(tree, valid_anchor_ids).items():
         if node_id in active_ids:
             continue
         if node.manual_progress == 1.0 and node.status == STATUS_DONE:
@@ -181,28 +182,23 @@ def plan_todoist_sync(nodes: list[ProgressNode],
     return plan
 
 
-async def apply_todoist_plan(repo: Any, guild_id: int, plan: DbSyncPlan,
-                             now_text: str) -> None:
+async def apply_todoist_plan(repo: Any, guild_id: int, plan: DbSyncPlan, now_text: str) -> None:
     """更新計画を DB へ適用する。"""
     for kwargs in plan.creates:
         await repo.upsert_node(guild_id, now_text=now_text, **kwargs)
     for node_id, fields in plan.updates:
         await repo.update_node(guild_id, node_id, now_text, **fields)
     for node_id in plan.completions:
-        await repo.set_progress(guild_id, node_id, 1.0, now_text,
-                                status=STATUS_DONE)
+        await repo.set_progress(guild_id, node_id, 1.0, now_text, status=STATUS_DONE)
 
 
-async def resolve_default_channel_id(db: Database,
-                                     guild_id: int) -> int | None:
+async def resolve_default_channel_id(db: Database, guild_id: int) -> int | None:
     """ギルドの既定通知チャンネル（settings）を返す。未設定なら None。"""
-    raw = (await SettingsRepository(db).get(
-        guild_id, SETTINGS_DEFAULT_CHANNEL_KEY) or "").strip()
+    raw = (await SettingsRepository(db).get(guild_id, SETTINGS_DEFAULT_CHANNEL_KEY) or "").strip()
     return int(raw) if raw.isdigit() else None
 
 
-def resolve_link_channel_id(link: dict[str, Any],
-                            default_channel_id: int | None) -> int | None:
+def resolve_link_channel_id(link: dict[str, Any], default_channel_id: int | None) -> int | None:
     """タスク通知の送信先を解決する。
 
     優先順: 紐付け行の通知チャンネル（プロジェクト専用）> ギルドの既定。
@@ -214,8 +210,7 @@ def resolve_link_channel_id(link: dict[str, Any],
     return default_channel_id
 
 
-async def sync_guild_db(db: Database, guild_id: int,
-                        todoist_svc: Any) -> GuildSyncResult:
+async def sync_guild_db(db: Database, guild_id: int, todoist_svc: Any) -> GuildSyncResult:
     """1ギルド分の Todoist 同期＋桁巻き反映＋再集計（DB 版）。
 
     - Todoist 未設定・紐付け0件のギルドは桁巻き反映と再集計だけ行う
@@ -227,8 +222,7 @@ async def sync_guild_db(db: Database, guild_id: int,
     now_text = _now_text()
 
     links = await repo.list_todoist_links(guild_id)
-    if links and todoist_svc is not None and getattr(
-            todoist_svc, "enabled", False):
+    if links and todoist_svc is not None and getattr(todoist_svc, "enabled", False):
         projects = await todoist_svc.get_projects()
         project_ids = {getattr(p, "name", ""): str(p.id) for p in projects}
         anchors: list[tuple[str, list[Any]]] = []
@@ -236,11 +230,10 @@ async def sync_guild_db(db: Database, guild_id: int,
             project_id = project_ids.get(link["project_name"])
             if project_id is None:
                 result.errors.append(
-                    f"Todoist プロジェクト「{link['project_name']}」が"
-                    "見つかりません")
+                    f"Todoist プロジェクト「{link['project_name']}」が見つかりません"
+                )
                 continue
-            anchors.append((link["node_id"],
-                            await todoist_svc.get_tasks(project_id=project_id)))
+            anchors.append((link["node_id"], await todoist_svc.get_tasks(project_id=project_id)))
         result.projects = len(anchors)
 
         if anchors:
@@ -252,38 +245,45 @@ async def sync_guild_db(db: Database, guild_id: int,
             result.completed = plan.completed
             result.errors.extend(plan.errors)
 
-    spar_plan = await spar_winding_service.sync_spar_winding_db(
-        repo, guild_id, now_text)
+    spar_plan = await spar_winding_service.sync_spar_winding_db(repo, guild_id, now_text)
     result.spar_updated = spar_plan.updated
     result.errors.extend(spar_plan.errors)
 
     tree = await pt.load_tree(repo, guild_id)
     result.tree = tree
     result.errors.extend(
-        f"ノードをスキップ: {e.node_id or '(ID なし)'} — {e.reason}"
-        for e in tree.errors)
-    log.info("進捗同期完了 (guild=%s): +%d / 更新%d / 完了%d / 桁巻き%d /"
-             " エラー%d", guild_id, result.added, result.updated,
-             result.completed, result.spar_updated, len(result.errors))
+        f"ノードをスキップ: {e.node_id or '(ID なし)'} — {e.reason}" for e in tree.errors
+    )
+    log.info(
+        "進捗同期完了 (guild=%s): +%d / 更新%d / 完了%d / 桁巻き%d / エラー%d",
+        guild_id,
+        result.added,
+        result.updated,
+        result.completed,
+        result.spar_updated,
+        len(result.errors),
+    )
     return result
 
 
-async def sync_all_guilds(db: Database, guild_ids: list[int],
-                          todoist_manager: Any) -> list[GuildSyncResult]:
+async def sync_all_guilds(
+    db: Database, guild_ids: list[int], todoist_manager: Any
+) -> list[GuildSyncResult]:
     """参加中の全ギルドを順に同期する（1ギルドの失敗は他を止めない）。"""
     results: list[GuildSyncResult] = []
     for guild_id in guild_ids:
         try:
             svc = await todoist_manager.for_guild(guild_id)
         except Exception as e:  # noqa: BLE001  (トークン復号失敗等)
-            log.warning("Todoist サービス取得失敗 (guild=%s): %s",
-                        guild_id, type(e).__name__)
+            log.warning("Todoist サービス取得失敗 (guild=%s): %s", guild_id, type(e).__name__)
             svc = None
         try:
             results.append(await sync_guild_db(db, guild_id, svc))
         except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
             log.warning("進捗同期失敗 (guild=%s): %s", guild_id, type(e).__name__)
-            results.append(GuildSyncResult(
-                guild_id=guild_id,
-                errors=[f"同期に失敗しました（{type(e).__name__}）"]))
+            results.append(
+                GuildSyncResult(
+                    guild_id=guild_id, errors=[f"同期に失敗しました（{type(e).__name__}）"]
+                )
+            )
     return results

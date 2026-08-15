@@ -9,6 +9,7 @@
 - 卒業者は削除せず status を動かすだけであること
 - すべて guild_id スコープであること
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -70,8 +71,14 @@ def test_fresh_schema_has_seasons_and_member_status():
         db = await _connected_db()
         try:
             season_cols = await _columns(db, "seasons")
-            assert {"season_id", "guild_id", "name", "started_at", "ended_at",
-                    "created_at"} <= season_cols
+            assert {
+                "season_id",
+                "guild_id",
+                "name",
+                "started_at",
+                "ended_at",
+                "created_at",
+            } <= season_cols
 
             member_cols = await _columns(db, "members")
             assert {"status", "left_season"} <= member_cols
@@ -86,10 +93,8 @@ def test_new_member_defaults_to_active():
     async def _main():
         db = await _connected_db()
         try:
-            await MemberRepository(db).upsert_member(
-                G1, "u1", "山田", primary_team="struct")
-            row = await db.fetchone(
-                "SELECT * FROM members WHERE guild_id = ?", (G1,))
+            await MemberRepository(db).upsert_member(G1, "u1", "山田", primary_team="struct")
+            row = await db.fetchone("SELECT * FROM members WHERE guild_id = ?", (G1,))
             assert row["status"] == "active"
             assert row["left_season"] is None
         finally:
@@ -102,8 +107,7 @@ def test_season_indexes_exist():
     async def _main():
         db = await _connected_db()
         try:
-            rows = await db.fetchall(
-                "SELECT name FROM sqlite_master WHERE type = 'index'")
+            rows = await db.fetchall("SELECT name FROM sqlite_master WHERE type = 'index'")
             names = {r["name"] for r in rows}
             assert "idx_seasons_guild_ended" in names
             assert "idx_members_guild_status" in names
@@ -149,8 +153,8 @@ def _make_v13_db() -> str:
             "INSERT INTO members (guild_id, user_id, display_name,"
             " primary_team, secondary_teams, is_leader, skills, notes,"
             " joined_at, active_flag) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
-            (guild_id, user_id, name, team, subs, leader, skills, notes,
-             "2026-04-01"))
+            (guild_id, user_id, name, team, subs, leader, skills, notes, "2026-04-01"),
+        )
     conn.commit()
     conn.close()
     return path
@@ -158,6 +162,7 @@ def _make_v13_db() -> str:
 
 def test_existing_members_all_become_active():
     """**移行で誰も勝手に卒業扱いにならない。**"""
+
     async def _main():
         db = Database(_make_v13_db())
         await db.connect()
@@ -178,8 +183,8 @@ def test_existing_member_columns_are_preserved():
         await db.connect()
         try:
             row = await db.fetchone(
-                "SELECT * FROM members WHERE guild_id = ? AND user_id = ?",
-                (G1, "u1"))
+                "SELECT * FROM members WHERE guild_id = ? AND user_id = ?", (G1, "u1")
+            )
             assert row["display_name"] == "山田"
             assert row["primary_team"] == "struct"
             assert json.loads(row["secondary_teams"]) == ["elec"]
@@ -223,6 +228,7 @@ def test_season_migration_is_idempotent():
 
 def test_existing_member_reads_still_work_after_migration():
     """既存の一覧取得が移行後もそのまま動く。"""
+
     async def _main():
         db = Database(_make_v13_db())
         await db.connect()
@@ -331,8 +337,9 @@ def test_seasons_are_guild_scoped():
             await repo.start_new(G1, "A大学2027")
 
             assert (await repo.current(G1))["name"] == "A大学2027"
-            assert (await repo.current(G2))["name"] == "B大学2026", \
+            assert (await repo.current(G2))["name"] == "B大学2026", (
                 "他サーバーの年度を終わらせてはいけない"
+            )
         finally:
             await db.close()
 
@@ -344,18 +351,18 @@ def test_seasons_are_guild_scoped():
 # ---------------------------------------------------------------------
 def test_set_status_keeps_the_row():
     """卒業者は削除しない（過去の記録の担当者名が引けなくなるため）。"""
+
     async def _main():
         db = await _connected_db()
         try:
             repo = MemberRepository(db)
             await repo.upsert_member(G1, "u1", "山田", primary_team="struct")
 
-            assert await repo.set_status(G1, "u1", "alumni",
-                                         left_season="2026年度") is True
+            assert await repo.set_status(G1, "u1", "alumni", left_season="2026年度") is True
 
             row = await db.fetchone(
-                "SELECT * FROM members WHERE guild_id = ? AND user_id = ?",
-                (G1, "u1"))
+                "SELECT * FROM members WHERE guild_id = ? AND user_id = ?", (G1, "u1")
+            )
             assert row is not None, "行が消えている"
             assert row["status"] == "alumni"
             assert row["left_season"] == "2026年度"
@@ -377,8 +384,7 @@ def test_reset_leaders_clears_every_leader_flag():
 
             assert await repo.reset_leaders(G1) == 2
 
-            rows = await db.fetchall(
-                "SELECT is_leader FROM members WHERE guild_id = ?", (G1,))
+            rows = await db.fetchall("SELECT is_leader FROM members WHERE guild_id = ?", (G1,))
             assert all(r["is_leader"] == 0 for r in rows)
         finally:
             await db.close()
@@ -398,8 +404,7 @@ def test_reset_leaders_is_guild_scoped():
 
             await repo.reset_leaders(G1)
 
-            other = await db.fetchone(
-                "SELECT is_leader FROM members WHERE guild_id = ?", (G2,))
+            other = await db.fetchone("SELECT is_leader FROM members WHERE guild_id = ?", (G2,))
             assert other["is_leader"] == 1, "他サーバーの班長を外してはいけない"
         finally:
             await db.close()
@@ -409,6 +414,7 @@ def test_reset_leaders_is_guild_scoped():
 
 def test_alumni_are_excluded_from_default_listing():
     """卒業者は既定の一覧・検索から外れる。"""
+
     async def _main():
         db = await _connected_db()
         try:
@@ -441,12 +447,10 @@ def test_alumni_can_be_included_explicitly():
             await repo.add_skill(G1, "u2", "溶接")
             await repo.set_status(G1, "u2", "alumni", left_season="2026年度")
 
-            names = {m["display_name"]
-                     for m in await repo.list_members(G1, include_alumni=True)}
+            names = {m["display_name"] for m in await repo.list_members(G1, include_alumni=True)}
             assert names == {"現役", "卒業生"}
 
-            found = await repo.search_support(G1, "struct", "溶接",
-                                              include_alumni=True)
+            found = await repo.search_support(G1, "struct", "溶接", include_alumni=True)
             assert len(found) == 2
         finally:
             await db.close()
@@ -459,11 +463,12 @@ def test_alumni_can_be_included_explicitly():
 # ---------------------------------------------------------------------
 async def _seed_members(db, guild_id: int) -> None:
     repo = MemberRepository(db)
-    for user_id, name, leader in (("u1", "続ける人", True),
-                                  ("u2", "卒業する人", True),
-                                  ("u3", "もう1人", False)):
-        await repo.upsert_member(guild_id, user_id, name,
-                                 primary_team="struct")
+    for user_id, name, leader in (
+        ("u1", "続ける人", True),
+        ("u2", "卒業する人", True),
+        ("u3", "もう1人", False),
+    ):
+        await repo.upsert_member(guild_id, user_id, name, primary_team="struct")
         await repo.set_leader(guild_id, user_id, leader)
 
 
@@ -472,8 +477,7 @@ def test_rollover_moves_only_selected_members_to_alumni():
         db = await _connected_db()
         try:
             await _seed_members(db, G1)
-            await SeasonRepository(db).create(G1, "2026年度",
-                                              started_at="2026-04-01")
+            await SeasonRepository(db).create(G1, "2026年度", started_at="2026-04-01")
 
             result = await perform_rollover(db, G1, "2027年度", ["u2"])
 
@@ -491,6 +495,7 @@ def test_rollover_moves_only_selected_members_to_alumni():
 
 def test_rollover_does_not_touch_unselected_members():
     """**選ばれなかった人の status は勝手に変えない。**"""
+
     async def _main():
         db = await _connected_db()
         try:
@@ -517,8 +522,7 @@ def test_rollover_resets_every_leader_flag():
             result = await perform_rollover(db, G1, "2027年度", [])
 
             assert result.leaders_reset == 2
-            rows = await db.fetchall(
-                "SELECT is_leader FROM members WHERE guild_id = ?", (G1,))
+            rows = await db.fetchall("SELECT is_leader FROM members WHERE guild_id = ?", (G1,))
             assert all(r["is_leader"] == 0 for r in rows)
         finally:
             await db.close()
@@ -528,6 +532,7 @@ def test_rollover_resets_every_leader_flag():
 
 def test_rollover_keeps_alumni_rows():
     """卒業者の行は消さない（過去の記録の担当者名を残すため）。"""
+
     async def _main():
         db = await _connected_db()
         try:
@@ -536,8 +541,8 @@ def test_rollover_keeps_alumni_rows():
             await perform_rollover(db, G1, "2027年度", ["u2"])
 
             row = await db.fetchone(
-                "SELECT * FROM members WHERE guild_id = ? AND user_id = ?",
-                (G1, "u2"))
+                "SELECT * FROM members WHERE guild_id = ? AND user_id = ?", (G1, "u2")
+            )
             assert row is not None
             assert row["display_name"] == "卒業する人"
             assert row["status"] == "alumni"
@@ -552,14 +557,13 @@ def test_rollover_records_the_season_the_member_left():
         db = await _connected_db()
         try:
             await _seed_members(db, G1)
-            await SeasonRepository(db).create(G1, "2026年度",
-                                              started_at="2026-04-01")
+            await SeasonRepository(db).create(G1, "2026年度", started_at="2026-04-01")
 
             await perform_rollover(db, G1, "2027年度", ["u2"])
 
             row = await db.fetchone(
-                "SELECT left_season FROM members WHERE guild_id = ?"
-                " AND user_id = ?", (G1, "u2"))
+                "SELECT left_season FROM members WHERE guild_id = ? AND user_id = ?", (G1, "u2")
+            )
             assert row["left_season"] == "2026年度"
         finally:
             await db.close()
@@ -572,8 +576,7 @@ def test_rollover_starts_the_new_season():
         db = await _connected_db()
         try:
             await _seed_members(db, G1)
-            await SeasonRepository(db).create(G1, "2026年度",
-                                              started_at="2026-04-01")
+            await SeasonRepository(db).create(G1, "2026年度", started_at="2026-04-01")
 
             await perform_rollover(db, G1, "2027年度", [])
 
@@ -588,6 +591,7 @@ def test_rollover_starts_the_new_season():
 
 def test_rollover_is_guild_scoped():
     """他サーバーのメンバー・班長・年度を巻き込まない。"""
+
     async def _main():
         db = await _connected_db()
         try:
@@ -599,10 +603,8 @@ def test_rollover_is_guild_scoped():
 
             repo = MemberRepository(db)
             assert await repo.count_by_status(G2) == {"active": 3}
-            rows = await db.fetchall(
-                "SELECT is_leader FROM members WHERE guild_id = ?", (G2,))
-            assert sum(r["is_leader"] for r in rows) == 2, \
-                "他サーバーの班長を外してはいけない"
+            rows = await db.fetchall("SELECT is_leader FROM members WHERE guild_id = ?", (G2,))
+            assert sum(r["is_leader"] for r in rows) == 2, "他サーバーの班長を外してはいけない"
             assert (await SeasonRepository(db).current(G2))["name"] == "B大学2026"
         finally:
             await db.close()
@@ -624,8 +626,9 @@ def test_rollover_rejects_duplicate_season_name():
 
 
 def test_rollover_summary_is_readable():
-    result = RolloverResult(new_season="2027年度", ended_season="2026年度",
-                            alumni=["u1", "u2"], leaders_reset=3)
+    result = RolloverResult(
+        new_season="2027年度", ended_season="2026年度", alumni=["u1", "u2"], leaders_reset=3
+    )
     summary = result.summary()
     assert "2026年度 を終了" in summary
     assert "2027年度 を開始" in summary
@@ -635,8 +638,10 @@ def test_rollover_summary_is_readable():
 
 def test_rollover_embed_states_that_data_is_kept():
     embed = rollover_result_embed(
-        RolloverResult(new_season="2027年度", ended_season="2026年度",
-                       alumni=["u1"], leaders_reset=2))
+        RolloverResult(
+            new_season="2027年度", ended_season="2026年度", alumni=["u1"], leaders_reset=2
+        )
+    )
     assert "削除していません" in (embed.description or "")
     assert len(embed) <= 6000
 
@@ -664,8 +669,7 @@ def test_season_commands_require_expected_levels():
 
 
 def test_season_commands_are_registered():
-    names = {c.qualified_name
-             for c in Season(_FakeSeasonBot()).walk_app_commands()}
+    names = {c.qualified_name for c in Season(_FakeSeasonBot()).walk_app_commands()}
     assert {"season list", "season new", "season rollover"} <= names
 
 
@@ -675,6 +679,7 @@ def test_snapshot_filename_has_no_guild_name():
 
 def test_rollover_snapshot_reuses_the_export_zip():
     """年度スナップショットは /data export と同じ中身（再実装しない）。"""
+
     async def _main():
         db = await _connected_db()
         try:

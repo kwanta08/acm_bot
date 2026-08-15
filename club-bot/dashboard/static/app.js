@@ -101,7 +101,11 @@ function renderTabs() {
     })));
 }
 
-function formatCell(value, column) {
+function formatCell(value, column, row) {
+  // サーバー側の解決層（dashboard/display.py）が付けた表示があれば最優先
+  // （ユーザー/チャンネル/候補の名前解決・JST 秒表示。生の ID は出さない）
+  const resolved = row && row._display ? row._display[column.name] : undefined;
+  if (resolved !== undefined && resolved !== null) return resolved;
   if (value === null || value === undefined || value === "") return "—";
   if (column.type === "bool") return value ? "はい" : "いいえ";
   if (column.type === "progress") {
@@ -140,7 +144,7 @@ function editableCell(td, row, column, data) {
     });
     const finish = async (commit) => {
       if (!commit) {
-        td.replaceChildren(document.createTextNode(formatCell(row[column.name], column)));
+        td.replaceChildren(document.createTextNode(formatCell(row[column.name], column, row)));
         return;
       }
       let value;
@@ -161,7 +165,7 @@ function editableCell(td, row, column, data) {
           },
         );
         Object.assign(row, res.row);
-        td.replaceChildren(document.createTextNode(formatCell(row[column.name], column)));
+        td.replaceChildren(document.createTextNode(formatCell(row[column.name], column, row)));
       } catch (e) {
         td.replaceChildren(el("span", { class: "cell-error", text: e.message }));
       }
@@ -234,11 +238,43 @@ function progressChart(rows, { max = 25 } = {}) {
   return chart;
 }
 
+// シートタブ（Google スプレッドシートのタブ相当）。
+// 出欠回答（予定ごと）と桁巻き記録（桁ごと）で共通に使う。
+function renderSheetTabs(data) {
+  const sheets = data.sheets;
+  return el("div", { class: "sheetbar", role: "tablist" },
+    sheets.items.map((s) => el("button", {
+      class: s.id === sheets.active ? "sheet-tab active" : "sheet-tab",
+      role: "tab",
+      "aria-selected": s.id === sheets.active ? "true" : "false",
+      title: s.at ? `${s.label} — ${s.at}` : s.label,
+      onclick: () => { if (s.id !== sheets.active) selectSheet(data.table.key, s.id); },
+    }, [
+      el("span", { class: "sheet-label", text: s.label }),
+      s.at ? el("span", { class: "sheet-sub", text: s.at }) : null,
+    ])));
+}
+
 function renderGrid(data) {
   const grid = document.getElementById("grid");
   if (!grid) return;
+
+  // 予定・桁がまだ1件も無い場合の空状態（タブも表も出さない）
+  if (data.sheets && data.sheets.items.length === 0) {
+    grid.replaceChildren(el("p", {
+      class: "empty",
+      text: `${data.sheets.noun}がまだ登録されていません。`,
+    }));
+    return;
+  }
+
+  const sheetbar = data.sheets ? renderSheetTabs(data) : null;
+
   if (data.rows.length === 0) {
-    grid.replaceChildren(el("p", { class: "empty", text: "データがありません。" }));
+    grid.replaceChildren(...[
+      sheetbar,
+      el("p", { class: "empty", text: "データがありません。" }),
+    ].filter(Boolean));
     return;
   }
   const head = el("tr", {}, data.columns.map((c) =>
@@ -246,7 +282,7 @@ function renderGrid(data) {
 
   const body = data.rows.map((row) =>
     el("tr", {}, data.columns.map((c) => {
-      const td = el("td", { text: formatCell(row[c.name], c) });
+      const td = el("td", { text: formatCell(row[c.name], c, row) });
       if (c.editable && data.can_edit) editableCell(td, row, c, data);
       return td;
     })));
@@ -258,7 +294,8 @@ function renderGrid(data) {
   const chart = data.table.key === "progress" ? progressChart(data.rows) : null;
   const csvHref = `/api/guilds/${state.guildId}/tables/${data.table.key}/export.csv`;
 
-  grid.replaceChildren(
+  grid.replaceChildren(...[
+    sheetbar,
     el("div", { class: "toolbar" }, [
       el("span", { class: "empty", text: `${data.total} 件中 ${data.rows.length} 件を表示 — ${hint}` }),
       el("a", { class: "button", href: csvHref, download: "", text: "CSV をダウンロード" }),
@@ -270,7 +307,7 @@ function renderGrid(data) {
         el("tbody", {}, body),
       ]),
     ]),
-  );
+  ].filter(Boolean));
 }
 
 // ---------------------------------------------------------------- 操作
@@ -280,7 +317,22 @@ async function selectTable(key) {
   const grid = document.getElementById("grid");
   if (grid) grid.replaceChildren(el("p", { class: "loading", text: "読み込み中…" }));
   try {
+    // シート未指定: シート対応の表ではサーバーが先頭（最新）のシートを選ぶ
     const data = await api(`/api/guilds/${state.guildId}/tables/${key}`);
+    state.canEdit = data.can_edit;
+    renderGrid(data);
+  } catch (e) {
+    if (grid) grid.replaceChildren(el("p", { class: "error", text: e.message }));
+  }
+}
+
+// シート（予定・桁）の切替。ページ全体はリロードせず表だけを差し替える
+async function selectSheet(key, sheetId) {
+  const grid = document.getElementById("grid");
+  if (grid) grid.replaceChildren(el("p", { class: "loading", text: "読み込み中…" }));
+  try {
+    const data = await api(
+      `/api/guilds/${state.guildId}/tables/${key}?sheet=${encodeURIComponent(sheetId)}`);
     state.canEdit = data.can_edit;
     renderGrid(data);
   } catch (e) {

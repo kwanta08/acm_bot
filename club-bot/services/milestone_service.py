@@ -13,6 +13,7 @@ progress_nodes が持つのは created_at / updated_at / 現在の進捗率だ�
 
 DB にも Discord にも依存しない純粋関数として置き、cogs から呼ぶ。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -21,15 +22,15 @@ from datetime import date, datetime
 from services.progress_tree import ProgressNode, ProgressTree
 
 # 判定結果
-VERDICT_DONE = "done"            # 完了済み
-VERDICT_ON_TRACK = "on_track"    # 現在のペースで間に合う
-VERDICT_BEHIND = "behind"        # 遅延
-VERDICT_OVERDUE = "overdue"      # 期限を過ぎている
-VERDICT_UNKNOWN = "unknown"      # 判定不能（履歴が足りない）
+VERDICT_DONE = "done"  # 完了済み
+VERDICT_ON_TRACK = "on_track"  # 現在のペースで間に合う
+VERDICT_BEHIND = "behind"  # 遅延
+VERDICT_OVERDUE = "overdue"  # 期限を過ぎている
+VERDICT_UNKNOWN = "unknown"  # 判定不能（履歴が足りない）
 
 # ペースの出どころ
-SOURCE_NODE = "node"             # progress_nodes の created_at / updated_at
-SOURCE_LAYER_RECORDS = "layer_records"   # 桁巻きの作業記録
+SOURCE_NODE = "node"  # progress_nodes の created_at / updated_at
+SOURCE_LAYER_RECORDS = "layer_records"  # 桁巻きの作業記録
 
 # 進捗率がこれ以上なら完了とみなす（浮動小数の丸め対策）
 _DONE_THRESHOLD = 0.9999
@@ -102,8 +103,7 @@ def spar_pace(record_dates: list[date], target_layers: int) -> Pace:
     if days <= 0:
         return Pace(reason="積層の作業記録が1日分しかない")
     layers_per_day = len(ordered) / days
-    return Pace(per_day=layers_per_day / target_layers,
-                source=SOURCE_LAYER_RECORDS)
+    return Pace(per_day=layers_per_day / target_layers, source=SOURCE_LAYER_RECORDS)
 
 
 @dataclass(frozen=True)
@@ -131,8 +131,9 @@ class MilestoneStatus:
         return max(0.0, 1.0 - self.progress)
 
 
-def evaluate_milestone(node: ProgressNode, name: str, due: date, *,
-                       today: date, pace: Pace) -> MilestoneStatus:
+def evaluate_milestone(
+    node: ProgressNode, name: str, due: date, *, today: date, pace: Pace
+) -> MilestoneStatus:
     """1つのマイルストーンを判定する。
 
     - 進捗が 100% なら期限に関係なく done
@@ -161,23 +162,25 @@ def evaluate_milestone(node: ProgressNode, name: str, due: date, *,
     remaining = 1.0 - progress
     if days_left == 0:
         # 当日で未完。ペースの有無に関わらず間に合わない
-        return MilestoneStatus(verdict=VERDICT_BEHIND,
-                               required_per_day=remaining, **common)
+        return MilestoneStatus(verdict=VERDICT_BEHIND, required_per_day=remaining, **common)
 
     required = remaining / days_left
     if pace.per_day is None:
-        return MilestoneStatus(verdict=VERDICT_UNKNOWN,
-                               required_per_day=required,
-                               reason=pace.reason, **common)
+        return MilestoneStatus(
+            verdict=VERDICT_UNKNOWN, required_per_day=required, reason=pace.reason, **common
+        )
 
-    verdict = (VERDICT_BEHIND if days_left * pace.per_day < remaining
-               else VERDICT_ON_TRACK)
+    verdict = VERDICT_BEHIND if days_left * pace.per_day < remaining else VERDICT_ON_TRACK
     return MilestoneStatus(verdict=verdict, required_per_day=required, **common)
 
 
-def evaluate_all(tree: ProgressTree, milestones: list[dict], *, today: date,
-                 pace_by_node: dict[str, Pace] | None = None,
-                 ) -> list[MilestoneStatus]:
+def evaluate_all(
+    tree: ProgressTree,
+    milestones: list[dict],
+    *,
+    today: date,
+    pace_by_node: dict[str, Pace] | None = None,
+) -> list[MilestoneStatus]:
     """マイルストーン一覧を期限順に判定する。
 
     ツリーに存在しない node_id を指すマイルストーンは除外する
@@ -194,14 +197,14 @@ def evaluate_all(tree: ProgressTree, milestones: list[dict], *, today: date,
         if due is None:
             continue
         pace = overrides.get(node.node_id) or node_pace(node, today=today)
-        out.append(evaluate_milestone(node, str(row.get("name") or ""), due,
-                                      today=today, pace=pace))
+        out.append(
+            evaluate_milestone(node, str(row.get("name") or ""), due, today=today, pace=pace)
+        )
     out.sort(key=lambda s: (s.due_date, s.name))
     return out
 
 
-def days_until_competition(competition_date: str | None,
-                           today: date) -> int | None:
+def days_until_competition(competition_date: str | None, today: date) -> int | None:
     """大会まで残り何日か。未設定・解釈不能なら None。"""
     due = parse_date(competition_date)
     if due is None:

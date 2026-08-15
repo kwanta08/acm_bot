@@ -5,6 +5,7 @@ config.for_guild() は権限チェック（utils/permissions.require）を含む
 そのサーバーの機能が丸ごと停止するため、環境変数の値は必ず
 _clean 経由で読み、不正値は「未設定」に倒す。
 """
+
 from __future__ import annotations
 
 import os
@@ -31,9 +32,11 @@ def clean_emoji_env(monkeypatch):
 
 
 def _emoji_ids(config: Config) -> list[int | None]:
-    return [config.schedule_emoji_ok_id,
-            config.schedule_emoji_maybe_id,
-            config.schedule_emoji_ng_id]
+    return [
+        config.schedule_emoji_ok_id,
+        config.schedule_emoji_maybe_id,
+        config.schedule_emoji_ng_id,
+    ]
 
 
 def test_unset_emoji_ids_are_none(clean_emoji_env):
@@ -41,7 +44,7 @@ def test_unset_emoji_ids_are_none(clean_emoji_env):
 
 
 def test_quoted_emoji_ids_are_parsed(clean_emoji_env):
-    """"123" のように引用符付きで書かれていても読めること。"""
+    """ "123" のように引用符付きで書かれていても読めること。"""
     for key in EMOJI_ENV_KEYS:
         clean_emoji_env.setenv(key, '"123456789012345678"')
     assert _emoji_ids(Config()) == [123456789012345678] * 3

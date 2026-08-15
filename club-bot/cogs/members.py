@@ -8,6 +8,7 @@ Members モジュール（仕様 11.4）。
 班・技能タグの選択肢は config 固定値ではなく、ギルドの DB
 （teams / skill_tags テーブル）から autocomplete で動的取得する。
 """
+
 from __future__ import annotations
 
 import discord
@@ -36,28 +37,30 @@ class Members(commands.Cog):
     skill_group = app_commands.Group(name="skill", description="技能タグ管理", parent=group)
 
     # ---------- autocomplete ----------
-    async def _team_ac(self, interaction: discord.Interaction,
-                       current: str) -> list[app_commands.Choice[str]]:
+    async def _team_ac(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
         if interaction.guild is None:
             return []
         return await team_service.team_choices(self.bot.db, interaction.guild.id, current)
 
-    async def _skill_ac(self, interaction: discord.Interaction,
-                        current: str) -> list[app_commands.Choice[str]]:
+    async def _skill_ac(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
         if interaction.guild is None:
             return []
         return await team_service.skill_choices(self.bot.db, interaction.guild.id, current)
 
-    async def _own_skill_ac(self, interaction: discord.Interaction,
-                            current: str) -> list[app_commands.Choice[str]]:
+    async def _own_skill_ac(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
         """実行者が現在持っている技能タグの候補（remove 用）。"""
         if interaction.guild is None:
             return []
         m = await self.repo.get_member(interaction.guild.id, str(interaction.user.id))
         skills = m["skills"] if m else []
         c = current.lower()
-        return [app_commands.Choice(name=s, value=s)
-                for s in skills if c in s.lower()][:25]
+        return [app_commands.Choice(name=s, value=s) for s in skills if c in s.lower()][:25]
 
     async def _valid_team(self, guild_id: int, team_key: str) -> dict | None:
         """有効な班を返す。未登録・無効化済みなら None。"""
@@ -77,10 +80,12 @@ class Members(commands.Cog):
         # PRIMARY/SECONDARY_TEAM_ROLE_IDS は後方互換のフォールバックとして、
         # teams 未設定のキーのみ補完する。
         teams = await self.repo.list_teams(guild.id, active_only=False)
-        primary_map = {t["team_key"]: int(t["member_role_id"])
-                       for t in teams if t.get("member_role_id")}
-        secondary_map = {t["team_key"]: int(t["secondary_role_id"])
-                         for t in teams if t.get("secondary_role_id")}
+        primary_map = {
+            t["team_key"]: int(t["member_role_id"]) for t in teams if t.get("member_role_id")
+        }
+        secondary_map = {
+            t["team_key"]: int(t["secondary_role_id"]) for t in teams if t.get("secondary_role_id")
+        }
         for k, v in gconf.primary_team_role_ids.items():
             primary_map.setdefault(k, v)
         for k, v in gconf.secondary_team_role_ids.items():
@@ -123,8 +128,9 @@ class Members(commands.Cog):
     @app_commands.describe(user="対象ユーザー", team="主所属班")
     @app_commands.autocomplete(team=_team_ac)
     @require(Level.L2)
-    async def register(self, interaction: discord.Interaction, user: discord.Member,
-                       team: str | None = None):
+    async def register(
+        self, interaction: discord.Interaction, user: discord.Member, team: str | None = None
+    ):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -136,8 +142,10 @@ class Members(commands.Cog):
                 await interaction.followup.send(
                     embed=error_embed(
                         f"班 `{team}` は登録されていません。"
-                        "管理者に `/team-add` での登録を依頼してください。"),
-                    ephemeral=True)
+                        "管理者に `/team-add` での登録を依頼してください。"
+                    ),
+                    ephemeral=True,
+                )
                 return
             team_name = t["team_name"]
         await self.repo.upsert_member(guild_id, str(user.id), user.display_name, team)
@@ -145,9 +153,11 @@ class Members(commands.Cog):
         if team_name:
             desc += f" / 主所属: {team_name}"
         await interaction.followup.send(
-            embed=success_embed("メンバーを登録しました", desc,
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed(
+                "メンバーを登録しました", desc, executor=interaction.user.display_name
+            ),
+            ephemeral=True,
+        )
         await self._sync_roles(interaction.guild, user, str(user.id))
 
     # ---------- profile ----------
@@ -163,9 +173,13 @@ class Members(commands.Cog):
         m = await self.repo.get_member(guild_id, str(target.id))
         if not m:
             await interaction.followup.send(
-                embed=info_embed("未登録", f"{target.display_name} はまだ登録されていません。\n"
-                                          "`/member register` で登録できます。"),
-                ephemeral=True)
+                embed=info_embed(
+                    "未登録",
+                    f"{target.display_name} はまだ登録されていません。\n"
+                    "`/member register` で登録できます。",
+                ),
+                ephemeral=True,
+            )
             return
         team_names = await team_service.team_name_map(self.bot.db, guild_id)
         primary = team_names.get(m.get("primary_team"), m.get("primary_team") or "—")
@@ -184,8 +198,7 @@ class Members(commands.Cog):
     @app_commands.describe(user="対象ユーザー", team="主所属班")
     @app_commands.autocomplete(team=_team_ac)
     @require(Level.L2)
-    async def assign_team(self, interaction: discord.Interaction, user: discord.Member,
-                          team: str):
+    async def assign_team(self, interaction: discord.Interaction, user: discord.Member, team: str):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -195,19 +208,22 @@ class Members(commands.Cog):
             await interaction.followup.send(
                 embed=error_embed(
                     f"班 `{team}` は登録されていません。"
-                    "管理者に `/team-add` での登録を依頼してください。"),
-                ephemeral=True)
+                    "管理者に `/team-add` での登録を依頼してください。"
+                ),
+                ephemeral=True,
+            )
             return
         await self.repo.upsert_member(guild_id, str(user.id), user.display_name)
         await self.repo.set_primary_team(guild_id, str(user.id), team)
         await interaction.followup.send(
-            embed=success_embed("所属班を設定しました",
-                                f"{user.display_name} → {t['team_name']}",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed(
+                "所属班を設定しました",
+                f"{user.display_name} → {t['team_name']}",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
         await self._sync_roles(interaction.guild, user, str(user.id))
-
-
 
     # ---------- assign-sub-team ----------
     @group.command(name="assign-sub-team", description="副所属班を追加または削除します。")
@@ -230,8 +246,10 @@ class Members(commands.Cog):
             await interaction.followup.send(
                 embed=error_embed(
                     f"班 `{team}` は登録されていません。"
-                    "管理者に `/team-add` での登録を依頼してください。"),
-                ephemeral=True)
+                    "管理者に `/team-add` での登録を依頼してください。"
+                ),
+                ephemeral=True,
+            )
             return
 
         await self.repo.upsert_member(guild_id, str(user.id), user.display_name)
@@ -265,7 +283,6 @@ class Members(commands.Cog):
             ephemeral=True,
         )
 
-
     # ---------- setup (統合コマンド) ----------
     @group.command(name="setup", description="主所属班・副所属班・班長を一括設定します。")
     @app_commands.describe(
@@ -291,8 +308,7 @@ class Members(commands.Cog):
         await self.repo.upsert_member(guild_id, str(user.id), user.display_name)
 
         # 有効な班キー → 表示名（DB から取得）
-        valid = {t["team_key"]: t["team_name"]
-                 for t in await self.repo.list_teams(guild_id)}
+        valid = {t["team_key"]: t["team_name"] for t in await self.repo.list_teams(guild_id)}
         changes: list[str] = []
 
         # 主所属班
@@ -301,7 +317,8 @@ class Members(commands.Cog):
                 await interaction.followup.send(
                     embed=error_embed(
                         f"班 `{primary_team}` は登録されていません。"
-                        "管理者に `/team-add` での登録を依頼してください。"),
+                        "管理者に `/team-add` での登録を依頼してください。"
+                    ),
                     ephemeral=True,
                 )
                 return
@@ -354,7 +371,6 @@ class Members(commands.Cog):
 
         await self._sync_roles(interaction.guild, user, str(user.id))
 
-
         await interaction.followup.send(
             embed=success_embed(
                 "メンバー設定を更新しました",
@@ -365,14 +381,16 @@ class Members(commands.Cog):
         )
 
     # ---------- set-channel ----------
-    @group.command(name="set-channel",
-                   description="班の通知先チャンネルを設定します（タスクの班別通知に使用）。")
+    @group.command(
+        name="set-channel",
+        description="班の通知先チャンネルを設定します（タスクの班別通知に使用）。",
+    )
     @app_commands.describe(team="対象の班", channel="通知を送るチャンネル")
     @app_commands.autocomplete(team=_team_ac)
     @require(Level.L3)
-    async def set_channel(self, interaction: discord.Interaction,
-                          team: str,
-                          channel: discord.TextChannel):
+    async def set_channel(
+        self, interaction: discord.Interaction, team: str, channel: discord.TextChannel
+    ):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -382,23 +400,29 @@ class Members(commands.Cog):
             await interaction.followup.send(
                 embed=error_embed(
                     f"班 `{team}` は登録されていません。"
-                    "管理者に `/team-add` での登録を依頼してください。"),
-                ephemeral=True)
+                    "管理者に `/team-add` での登録を依頼してください。"
+                ),
+                ephemeral=True,
+            )
             return
         await self.repo.upsert_team(guild_id, team, t["team_name"], channel_id=str(channel.id))
         await interaction.followup.send(
-            embed=success_embed("班の通知チャンネルを設定しました",
-                                f"{t['team_name']}班 → {channel.mention}\n"
-                                f"今後、この班のタスク通知（朝の7日以内・夜の超過）はこのチャンネルに届きます。",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed(
+                "班の通知チャンネルを設定しました",
+                f"{t['team_name']}班 → {channel.mention}\n"
+                f"今後、この班のタスク通知（朝の7日以内・夜の超過）はこのチャンネルに届きます。",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     # ---------- set-leader ----------
     @group.command(name="set-leader", description="班長フラグを設定します。")
     @app_commands.describe(user="対象ユーザー", is_leader="班長にするか")
     @require(Level.L3)
-    async def set_leader(self, interaction: discord.Interaction, user: discord.Member,
-                         is_leader: bool):
+    async def set_leader(
+        self, interaction: discord.Interaction, user: discord.Member, is_leader: bool
+    ):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -406,20 +430,22 @@ class Members(commands.Cog):
         await self.repo.upsert_member(guild_id, str(user.id), user.display_name)
         await self.repo.set_leader(guild_id, str(user.id), is_leader)
         await interaction.followup.send(
-            embed=success_embed("班長設定を更新しました",
-                                f"{user.display_name} → {'班長' if is_leader else '一般'}",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
-
+            embed=success_embed(
+                "班長設定を更新しました",
+                f"{user.display_name} → {'班長' if is_leader else '一般'}",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     # ---------- skill add / remove ----------
     @skill_group.command(name="add", description="技能タグを追加します。")
     @app_commands.describe(skill="技能タグ", user="対象（省略時は自分）")
     @app_commands.autocomplete(skill=_skill_ac)
     @require(Level.L1)
-    async def skill_add(self, interaction: discord.Interaction,
-                        skill: str,
-                        user: discord.Member | None = None):
+    async def skill_add(
+        self, interaction: discord.Interaction, skill: str, user: discord.Member | None = None
+    ):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -428,26 +454,30 @@ class Members(commands.Cog):
             await interaction.followup.send(
                 embed=error_embed(
                     f"技能タグ「{skill}」は登録されていません。"
-                    "管理者に `/skill-add` での登録を依頼してください。"),
-                ephemeral=True)
+                    "管理者に `/skill-add` での登録を依頼してください。"
+                ),
+                ephemeral=True,
+            )
             return
         target = user or interaction.user
         await self.repo.upsert_member(guild_id, str(target.id), target.display_name)
         await self.repo.add_skill(guild_id, str(target.id), skill)
         await interaction.followup.send(
-            embed=success_embed("技能を追加しました",
-                                f"{target.display_name} に「{skill}」",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
-
+            embed=success_embed(
+                "技能を追加しました",
+                f"{target.display_name} に「{skill}」",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     @skill_group.command(name="remove", description="技能タグを削除します。")
     @app_commands.describe(skill="技能タグ", user="対象（省略時は自分）")
     @app_commands.autocomplete(skill=_own_skill_ac)
     @require(Level.L1)
-    async def skill_remove(self, interaction: discord.Interaction,
-                           skill: str,
-                           user: discord.Member | None = None):
+    async def skill_remove(
+        self, interaction: discord.Interaction, skill: str, user: discord.Member | None = None
+    ):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -455,33 +485,43 @@ class Members(commands.Cog):
         target = user or interaction.user
         await self.repo.remove_skill(guild_id, str(target.id), skill)
         await interaction.followup.send(
-            embed=success_embed("技能を削除しました",
-                                f"{target.display_name} から「{skill}」",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
-
+            embed=success_embed(
+                "技能を削除しました",
+                f"{target.display_name} から「{skill}」",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     # ---------- support ----------
     @group.command(name="support", description="班・技能から支援候補を検索します。")
-    @app_commands.describe(team="班で絞り込み（任意）", skill="技能で絞り込み（任意）",
-                           include_alumni="卒業した人も含める（既定は現役のみ）")
+    @app_commands.describe(
+        team="班で絞り込み（任意）",
+        skill="技能で絞り込み（任意）",
+        include_alumni="卒業した人も含める（既定は現役のみ）",
+    )
     @app_commands.autocomplete(team=_team_ac, skill=_skill_ac)
     @require(Level.L2)
-    async def support(self, interaction: discord.Interaction,
-                      team: str | None = None,
-                      skill: str | None = None,
-                      include_alumni: bool = False):
+    async def support(
+        self,
+        interaction: discord.Interaction,
+        team: str | None = None,
+        skill: str | None = None,
+        include_alumni: bool = False,
+    ):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
             return
         if not team and not skill:
             await interaction.followup.send(
-                embed=error_embed("班または技能のいずれかを指定してください。"), ephemeral=True)
+                embed=error_embed("班または技能のいずれかを指定してください。"), ephemeral=True
+            )
             return
         team_names = await team_service.team_name_map(self.bot.db, guild_id)
         candidates = await self.repo.search_support(
-            guild_id, team, skill, include_alumni=include_alumni)
+            guild_id, team, skill, include_alumni=include_alumni
+        )
         cond = []
         if team:
             cond.append(f"班={team_names.get(team, team)}")
@@ -499,7 +539,8 @@ class Members(commands.Cog):
                 embed.add_field(
                     name=m["display_name"],
                     value=f"主所属: {primary} / 技能: {skills}",
-                    inline=False)
+                    inline=False,
+                )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 

@@ -8,6 +8,7 @@
 鍵の生成:
     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 """
+
 from __future__ import annotations
 
 import os
@@ -39,15 +40,16 @@ def get_fernet() -> Fernet:
     key = (os.getenv("ENCRYPTION_KEY") or "").strip().strip('"').strip("'")
     if not key:
         raise EncryptionKeyMissingError(
-            "ENCRYPTION_KEY が設定されていません。"
-            ".env に Fernet 鍵を設定してください。")
+            "ENCRYPTION_KEY が設定されていません。.env に Fernet 鍵を設定してください。"
+        )
     try:
         _fernet = Fernet(key.encode("ascii"))
     except (ValueError, TypeError) as e:
         raise EncryptionKeyMissingError(
             "ENCRYPTION_KEY の形式が不正です（Fernet 鍵ではありません）。"
-            "python -c \"from cryptography.fernet import Fernet; "
-            "print(Fernet.generate_key().decode())\" で生成してください。") from e
+            'python -c "from cryptography.fernet import Fernet; '
+            'print(Fernet.generate_key().decode())" で生成してください。'
+        ) from e
     return _fernet
 
 
@@ -72,7 +74,8 @@ def decrypt_token(cipher: str) -> str:
     except InvalidToken as e:
         raise TokenDecryptError(
             "暗号文を復号できません（ENCRYPTION_KEY の不一致またはデータ破損）。"
-            "/todoist-setup で再登録してください。") from e
+            "/todoist-setup で再登録してください。"
+        ) from e
 
 
 def reset_cache() -> None:

@@ -8,6 +8,7 @@ Todoist 連携サービス（ギルド別・暗号化トークン版）
   enabled=False の無効サービスが返り、全メソッドは no-op となる。
 - 例外・ログにトークン（平文・暗号文）を含めない。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -69,8 +70,7 @@ async def validate_token(token: str) -> bool:
 class TodoistService:
     """ギルド別 Todoist クライアント。enabled=False の場合は全メソッド no-op。"""
 
-    def __init__(self, token: str | None, project_id: str | None,
-                 label_name: str):
+    def __init__(self, token: str | None, project_id: str | None, label_name: str):
         self.enabled = bool(token) and TodoistAPI is not None
         self._api = TodoistAPI(token) if self.enabled else None
         self.project_id = project_id or None
@@ -91,16 +91,24 @@ class TodoistService:
     # ---------- タスク CRUD ----------
     # 失敗時は TodoistError を伝播させる（呼び出し側がユーザーへ
     # TODOIST_API_FAILED を表示できるようにするため、ここで握りつぶさない）
-    async def add_task(self, content: str, due_string: str | None = None,
-                       priority: int | None = None,
-                       description: str | None = None,
-                       labels: list[str] | None = None,
-                       section_id: str | None = None) -> Any | None:
+    async def add_task(
+        self,
+        content: str,
+        due_string: str | None = None,
+        priority: int | None = None,
+        description: str | None = None,
+        labels: list[str] | None = None,
+        section_id: str | None = None,
+    ) -> Any | None:
         if not self.enabled:
             return None
         kwargs: dict[str, Any] = {
-            "content": content, "due_string": due_string, "priority": priority,
-            "description": description, "labels": labels}
+            "content": content,
+            "due_string": due_string,
+            "priority": priority,
+            "description": description,
+            "labels": labels,
+        }
         if section_id:
             kwargs["section_id"] = section_id
         if self.project_id:
@@ -234,23 +242,27 @@ class TodoistServiceManager:
         try:
             cfg = await self._repo.get(guild_id)
         except Exception as e:  # noqa: BLE001
-            log.warning("Todoist 設定の取得に失敗 (guild=%s): %s",
-                        guild_id, type(e).__name__)
+            log.warning("Todoist 設定の取得に失敗 (guild=%s): %s", guild_id, type(e).__name__)
             return TodoistService.disabled()
         if not cfg or not cfg["enabled_flag"]:
             return TodoistService.disabled()
         try:
             token = crypto.decrypt_token(cfg["api_token_encrypted"])
         except crypto.EncryptionKeyMissingError:
-            log.error("ENCRYPTION_KEY 未設定/不正のため Todoist を利用できません"
-                      " (guild=%s)", guild_id)
+            log.error(
+                "ENCRYPTION_KEY 未設定/不正のため Todoist を利用できません (guild=%s)", guild_id
+            )
             return TodoistService.disabled()
         except crypto.TokenDecryptError:
-            log.warning("Todoist トークンの復号に失敗しました。"
-                        "/todoist-setup で再登録してください (guild=%s)", guild_id)
+            log.warning(
+                "Todoist トークンの復号に失敗しました。"
+                "/todoist-setup で再登録してください (guild=%s)",
+                guild_id,
+            )
             return TodoistService.disabled()
-        return TodoistService(token, cfg.get("project_id"),
-                              cfg.get("today_label_name") or "今日やること")
+        return TodoistService(
+            token, cfg.get("project_id"), cfg.get("today_label_name") or "今日やること"
+        )
 
     async def is_configured(self, guild_id: int) -> bool:
         """設定行の存在のみ確認する（復号はしない）。"""

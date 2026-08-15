@@ -5,6 +5,7 @@
 `on_message` ハンドラ・`message.content` 参照・prefix コマンドが持ち込まれた
 場合にここで落ちる。
 """
+
 from __future__ import annotations
 
 import io

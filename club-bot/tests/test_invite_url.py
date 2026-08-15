@@ -2,6 +2,7 @@
 
 Discord への接続は行わず、URL の組み立てと権限ビットのみ検証する。
 """
+
 from __future__ import annotations
 
 import os

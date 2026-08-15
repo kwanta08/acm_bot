@@ -7,6 +7,7 @@
     POST /auth/logout  → セッションを破棄
     GET  /api/me       → ログイン中の利用者とアクセスできるサーバー一覧
 """
+
 from __future__ import annotations
 
 import httpx
@@ -44,13 +45,12 @@ async def login(request: Request):
     config = _config(request)
     if not config.oauth_ready:
         return JSONResponse(
-            {"detail": "ダッシュボードのログイン設定が未完了です。"
-                       "運営者にお問い合わせください。"},
-            status_code=503)
+            {"detail": "ダッシュボードのログイン設定が未完了です。運営者にお問い合わせください。"},
+            status_code=503,
+        )
     state = auth.new_state()
     request.session[auth.SESSION_STATE_KEY] = state
-    return RedirectResponse(auth.build_authorize_url(config, state),
-                            status_code=307)
+    return RedirectResponse(auth.build_authorize_url(config, state), status_code=307)
 
 
 @router.get("/auth/callback", include_in_schema=False)
@@ -60,9 +60,9 @@ async def callback(request: Request, code: str = "", state: str = ""):
     # state はワンタイム。欠落・不一致は CSRF の可能性があるため拒否する
     if not expected or not state or not code or state != expected:
         return JSONResponse(
-            {"detail": "ログインを完了できませんでした。"
-                       "最初からやり直してください。"},
-            status_code=400)
+            {"detail": "ログインを完了できませんでした。最初からやり直してください。"},
+            status_code=400,
+        )
 
     client = _http_client(request)
     try:
@@ -74,8 +74,7 @@ async def callback(request: Request, code: str = "", state: str = ""):
 
     guilds = auth.select_accessible_guilds(user_guilds, await _bot_guild_ids())
     auth.store_session(request.session, user, guilds)
-    log.info("ダッシュボードにログインしました（user=%s, guilds=%d）",
-             user.id, len(guilds))
+    log.info("ダッシュボードにログインしました（user=%s, guilds=%d）", user.id, len(guilds))
     return RedirectResponse("/", status_code=303)
 
 

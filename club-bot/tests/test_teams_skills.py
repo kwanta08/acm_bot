@@ -7,6 +7,7 @@
 
 実行: venv/bin/python -m pytest tests/  （pytest 未導入なら直接実行も可）
 """
+
 import asyncio
 import os
 import sys
@@ -64,15 +65,21 @@ def test_fresh_schema_has_skill_tags_and_team_columns():
         db = await _connected_db()
         try:
             cols = {r["name"] for r in await db.fetchall("PRAGMA table_info(skill_tags)")}
-            assert {"skill_tag_id", "guild_id", "skill_name",
-                    "active_flag", "created_by", "created_at"} <= cols
+            assert {
+                "skill_tag_id",
+                "guild_id",
+                "skill_name",
+                "active_flag",
+                "created_by",
+                "created_at",
+            } <= cols
             cols = {r["name"] for r in await db.fetchall("PRAGMA table_info(teams)")}
-            assert {"member_role_id", "secondary_role_id",
-                    "created_at", "updated_at"} <= cols
+            assert {"member_role_id", "secondary_role_id", "created_at", "updated_at"} <= cols
             row = await db.fetchone("PRAGMA user_version")
             assert row[0] == SCHEMA_VERSION
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -107,6 +114,7 @@ def test_skill_tags_crud_and_isolation():
             assert len(await repo.list_all(G1)) == 2
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -154,6 +162,7 @@ def test_team_roles_and_isolation():
             assert await repo.count_primary_members(G1, "design") == 1
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -173,17 +182,21 @@ def test_v2_to_v3_migration_backfills_team_roles():
                 continue
             await conn.executescript(ddl)
         await conn.execute(
-            "INSERT INTO teams (guild_id, team_key, team_name) VALUES (?, 'design', '設計')",
-            (G1,))
+            "INSERT INTO teams (guild_id, team_key, team_name) VALUES (?, 'design', '設計')", (G1,)
+        )
         await conn.execute(
-            "INSERT INTO teams (guild_id, team_key, team_name) VALUES (?, 'design', '設計')",
-            (G2,))
-        await conn.execute(
-            "INSERT INTO settings (guild_id, setting_key, setting_value)"
-            " VALUES (?, 'PRIMARY_TEAM_ROLE_IDS', 'design:111,wing:222')", (G1,))
+            "INSERT INTO teams (guild_id, team_key, team_name) VALUES (?, 'design', '設計')", (G2,)
+        )
         await conn.execute(
             "INSERT INTO settings (guild_id, setting_key, setting_value)"
-            " VALUES (?, 'SECONDARY_TEAM_ROLE_IDS', 'design:333')", (G1,))
+            " VALUES (?, 'PRIMARY_TEAM_ROLE_IDS', 'design:111,wing:222')",
+            (G1,),
+        )
+        await conn.execute(
+            "INSERT INTO settings (guild_id, setting_key, setting_value)"
+            " VALUES (?, 'SECONDARY_TEAM_ROLE_IDS', 'design:333')",
+            (G1,),
+        )
         await conn.execute("PRAGMA user_version = 2")
         await conn.commit()
         await conn.close()
@@ -223,6 +236,7 @@ def test_v2_to_v3_migration_backfills_team_roles():
             assert t1["member_role_id"] == "111"
         finally:
             await db2.close()
+
     run(_main())
 
 
@@ -276,6 +290,7 @@ def test_team_service_choices():
             assert [c.value for c in choices] == ["tag29"]
         finally:
             await db.close()
+
     run(_main())
 
 

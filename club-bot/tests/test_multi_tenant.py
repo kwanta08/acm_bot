@@ -6,6 +6,7 @@
 
 実行: venv/bin/python -m pytest tests/  （pytest 未導入なら直接実行も可）
 """
+
 import asyncio
 import os
 import sys
@@ -30,9 +31,18 @@ G2 = 200000000000000002  # ギルド2
 LEGACY_G = 300000000000000003  # レガシーギルド（マイグレーション用）
 
 ALL_TABLES = [
-    "settings", "teams", "members", "schedules", "schedule_options",
-    "schedule_votes", "tasks", "reminders_log", "todoist_sections",
-    "layer_sessions", "layer_records", "layer_keta",
+    "settings",
+    "teams",
+    "members",
+    "schedules",
+    "schedule_options",
+    "schedule_votes",
+    "tasks",
+    "reminders_log",
+    "todoist_sections",
+    "layer_sessions",
+    "layer_records",
+    "layer_keta",
 ]
 
 # マイグレーション検証用の旧スキーマ（guild_id 無し・単一サーバー版）
@@ -179,6 +189,7 @@ def test_fresh_schema_has_guild_id():
             assert await db.get_setting(G2, "X") == "2"
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -189,37 +200,47 @@ def test_legacy_migration_backfills_guild_id():
         conn = await aiosqlite.connect(path)
         await conn.executescript(LEGACY_SCHEMA)
         await conn.execute(
-            "INSERT INTO settings (setting_key, setting_value) VALUES ('TZ', 'Asia/Tokyo')")
+            "INSERT INTO settings (setting_key, setting_value) VALUES ('TZ', 'Asia/Tokyo')"
+        )
+        await conn.execute("INSERT INTO teams (team_key, team_name) VALUES ('design', '設計')")
         await conn.execute(
-            "INSERT INTO teams (team_key, team_name) VALUES ('design', '設計')")
-        await conn.execute(
-            "INSERT INTO members (user_id, display_name, joined_at) VALUES ('42', 'taro', '2026-01-01')")
+            "INSERT INTO members (user_id, display_name, joined_at) VALUES ('42', 'taro', '2026-01-01')"
+        )
         await conn.execute(
             "INSERT INTO schedules (schedule_id, title, deadline, created_by, channel_id)"
-            " VALUES ('s1', 'mtg', '2026-01-02', '42', '99')")
+            " VALUES ('s1', 'mtg', '2026-01-02', '42', '99')"
+        )
         await conn.execute(
             "INSERT INTO schedule_options (option_id, schedule_id, label, start_at)"
-            " VALUES ('o1', 's1', '候補1', '2026-01-03')")
+            " VALUES ('o1', 's1', '候補1', '2026-01-03')"
+        )
         await conn.execute(
             "INSERT INTO schedule_votes (option_id, user_id, status, updated_at)"
-            " VALUES ('o1', '42', 'ok', '2026-01-01')")
+            " VALUES ('o1', '42', 'ok', '2026-01-01')"
+        )
         await conn.execute(
-            "INSERT INTO tasks (title, created_by, created_at) VALUES ('task1', '42', '2026-01-01')")
+            "INSERT INTO tasks (title, created_by, created_at) VALUES ('task1', '42', '2026-01-01')"
+        )
         await conn.execute(
             "INSERT INTO reminders_log (reminder_type, target_id, sent_at, status)"
-            " VALUES ('test', 'x', '2026-01-01', 'success')")
+            " VALUES ('test', 'x', '2026-01-01', 'success')"
+        )
         await conn.execute(
             "INSERT INTO todoist_sections (section_id, team_key, updated_at)"
-            " VALUES ('sec1', 'design', '2026-01-01')")
+            " VALUES ('sec1', 'design', '2026-01-01')"
+        )
         await conn.execute(
             "INSERT INTO layer_sessions (user_id, keta, layer_num, started_at)"
-            " VALUES ('42', '桁A', 1, '2026-01-01')")
+            " VALUES ('42', '桁A', 1, '2026-01-01')"
+        )
         await conn.execute(
             "INSERT INTO layer_records (user_id, keta, layer_num, started_at, ended_at, minutes)"
-            " VALUES ('42', '桁A', '1', '2026-01-01', '2026-01-01', 30)")
+            " VALUES ('42', '桁A', '1', '2026-01-01', '2026-01-01', 30)"
+        )
         await conn.execute(
             "INSERT INTO layer_keta (keta_name, created_by, created_at)"
-            " VALUES ('桁A', '42', '2026-01-01')")
+            " VALUES ('桁A', '42', '2026-01-01')"
+        )
         await conn.commit()
         await conn.close()
 
@@ -235,7 +256,8 @@ def test_legacy_migration_backfills_guild_id():
                     row = await db.fetchone(f"SELECT guild_id FROM {table} LIMIT 1")
                     assert row["guild_id"] == LEGACY_G, (
                         f"{table} の guild_id がレガシー値でバックフィルされていない: "
-                        f"{row['guild_id']}")
+                        f"{row['guild_id']}"
+                    )
                 # マイグレーション後も新規ギルドのデータを追加できる
                 repo = MemberRepository(db)
                 await repo.upsert_team(G2, "design", "設計")
@@ -246,6 +268,7 @@ def test_legacy_migration_backfills_guild_id():
                 await db.close()
         finally:
             del os.environ["GUILD_ID"]
+
     run(_main())
 
 
@@ -291,6 +314,7 @@ def test_member_and_team_isolation():
             assert (await repo.get_team(G2, "design"))["channel_id"] == "222"
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -315,6 +339,7 @@ def test_task_isolation():
             assert (await repo.get_task(G2, id2))["status"] == "open"
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -325,9 +350,16 @@ def test_schedule_isolation():
             repo = ScheduleRepository(db)
             for gid, sid in ((G1, "sch1"), (G2, "sch2")):
                 await repo.create_schedule(
-                    gid, schedule_id=sid, title=f"title-{sid}", description=None,
-                    place=None, target_role_id=None, deadline_iso="2099-01-01T00:00:00",
-                    created_by="u1", channel_id="ch")
+                    gid,
+                    schedule_id=sid,
+                    title=f"title-{sid}",
+                    description=None,
+                    place=None,
+                    target_role_id=None,
+                    deadline_iso="2099-01-01T00:00:00",
+                    created_by="u1",
+                    channel_id="ch",
+                )
                 await repo.add_option(gid, f"opt-{sid}", sid, "候補", "2099-01-01", None, "msg")
             # 一覧はギルド別
             assert [s["schedule_id"] for s in await repo.list_open_schedules(G1)] == ["sch1"]
@@ -350,6 +382,7 @@ def test_schedule_isolation():
             assert len(await repo.list_open_schedules(G2)) == 1
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -371,6 +404,7 @@ def test_settings_isolation():
             assert await repo.set_if_absent(G2, "K", "v2") is True
         finally:
             await db.close()
+
     run(_main())
 
 
@@ -403,11 +437,13 @@ def test_section_and_layer_isolation():
             assert len(await ses.list_unsynced(G2)) == 1
         finally:
             await db.close()
+
     run(_main())
 
 
 def test_guild_bound_proxy():
     """services 互換の guild 固定プロキシが guild_id を自動注入すること。"""
+
     async def _main():
         db = await _connected_db()
         try:
@@ -423,11 +459,13 @@ def test_guild_bound_proxy():
             assert bound1.guild_id == G1
         finally:
             await db.close()
+
     run(_main())
 
 
 def test_config_for_guild_resolution():
     """ギルド別設定解決: DB（ギルド別） > env フォールバック。"""
+
     async def _main():
         db = await _connected_db()
         try:
@@ -454,6 +492,7 @@ def test_config_for_guild_resolution():
             assert (await conf.for_guild(G1, db=db)).admin_role_id == 1000
         finally:
             await db.close()
+
     run(_main())
 
 

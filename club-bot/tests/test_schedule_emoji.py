@@ -4,6 +4,7 @@ Discord へは接続せず、フェイクの guild / gconf で
 「設定あり → カスタム絵文字」「未設定 → 既定」「削除済み → 既定へ
 フォールバック」を検証する。
 """
+
 from __future__ import annotations
 
 import os
@@ -56,12 +57,11 @@ def test_unconfigured_falls_back_to_defaults():
 
 
 def test_configured_emojis_resolved_from_guild():
-    gconf = GuildConfig(guild_id=G1, schedule_emoji_ok_id=1001,
-                        schedule_emoji_ng_id=1003)
+    gconf = GuildConfig(guild_id=G1, schedule_emoji_ok_id=1001, schedule_emoji_ng_id=1003)
     guild = FakeGuild([OK_EMOJI, NG_EMOJI])
     emojis = get_schedule_emojis(gconf, guild)
     assert emojis["ok"] is OK_EMOJI
-    assert emojis["ng"] is NG_EMOJI          # アニメ絵文字もそのまま
+    assert emojis["ng"] is NG_EMOJI  # アニメ絵文字もそのまま
     assert emojis["maybe"] == DEFAULT_STATUS_TO_EMOJI["maybe"]  # 未設定は既定
 
 
@@ -94,8 +94,7 @@ def test_build_emoji_maps_keys_match_reaction_payload():
 # /schedule emoji set（オートコンプリート・入力解決）
 # ---------------------------------------------------------------------
 def _emojis(n=3, prefix="tori"):
-    return [FakeEmoji(id=2000 + i, name=f"{prefix}{i}", animated=False)
-            for i in range(n)]
+    return [FakeEmoji(id=2000 + i, name=f"{prefix}{i}", animated=False) for i in range(n)]
 
 
 def test_filter_emoji_choices_filters_by_name():
@@ -119,11 +118,11 @@ def test_filter_emoji_choices_caps_at_25():
 
 def test_resolve_emoji_input_by_id_and_name():
     guild = FakeGuild([OK_EMOJI])
-    assert resolve_emoji_input(guild, "1001") is OK_EMOJI       # ID（候補選択）
-    assert resolve_emoji_input(guild, "sanka") is OK_EMOJI      # 名前手入力
+    assert resolve_emoji_input(guild, "1001") is OK_EMOJI  # ID（候補選択）
+    assert resolve_emoji_input(guild, "sanka") is OK_EMOJI  # 名前手入力
     assert resolve_emoji_input(guild, ":sanka:") is OK_EMOJI
-    assert resolve_emoji_input(guild, "9999") is None           # 不在 ID
-    assert resolve_emoji_input(guild, "ghost") is None          # 不在名
+    assert resolve_emoji_input(guild, "9999") is None  # 不在 ID
+    assert resolve_emoji_input(guild, "ghost") is None  # 不在名
 
 
 def test_emoji_setting_keys_match_guild_config_resolution():
@@ -165,8 +164,7 @@ def test_set_and_reset_roundtrip_via_for_guild(monkeypatch, tmp_path):
             config.invalidate_guild(G1)
             gconf2 = await config.for_guild(G1, db=db, force_reload=True)
             assert gconf2.schedule_emoji_ok_id is None
-            assert (get_schedule_emojis(gconf2, FakeGuild())
-                    == DEFAULT_STATUS_TO_EMOJI)
+            assert get_schedule_emojis(gconf2, FakeGuild()) == DEFAULT_STATUS_TO_EMOJI
         finally:
             await db.close()
             config.invalidate_guild(G1)

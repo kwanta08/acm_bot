@@ -5,6 +5,7 @@ Settings コグ（マルチテナント版）
 設定はギルドごと（guild_id 単位）に保存され、他ギルドへは影響しない。
 管理者のみが設定を変更できる。
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -57,21 +58,22 @@ class Settings(commands.Cog):
                 return
 
             # 設定をカテゴリ別に整理
-            categories = {
-                "チャンネル": [],
-                "ロール": [],
-                "共通": [],
-                "その他": []
-            }
+            categories = {"チャンネル": [], "ロール": [], "共通": [], "その他": []}
 
             channel_keys = {
-                "BOT_LOG_CHANNEL_ID", "DEFAULT_ANNOUNCE_CHANNEL_ID",
-                "DEFAULT_SCHEDULE_CHANNEL_ID", "DEFAULT_PROGRESS_CHANNEL_ID",
-                "DEFAULT_TASK_CHANNEL_ID", "TODAY_LABEL_CHANNEL_ID"
+                "BOT_LOG_CHANNEL_ID",
+                "DEFAULT_ANNOUNCE_CHANNEL_ID",
+                "DEFAULT_SCHEDULE_CHANNEL_ID",
+                "DEFAULT_PROGRESS_CHANNEL_ID",
+                "DEFAULT_TASK_CHANNEL_ID",
+                "TODAY_LABEL_CHANNEL_ID",
             }
             role_keys = {
-                "EXEC_ROLE_ID", "ADMIN_ROLE_ID", "LEADER_ROLE_IDS",
-                "PRIMARY_TEAM_ROLE_IDS", "SECONDARY_TEAM_ROLE_IDS"
+                "EXEC_ROLE_ID",
+                "ADMIN_ROLE_ID",
+                "LEADER_ROLE_IDS",
+                "PRIMARY_TEAM_ROLE_IDS",
+                "SECONDARY_TEAM_ROLE_IDS",
             }
             common_keys = {"TZ", "DB_PATH"}
 
@@ -85,14 +87,18 @@ class Settings(commands.Cog):
                 elif key.startswith("TODOIST_"):
                     # レガシーの平文 Todoist 設定は表示しない
                     # （/todoist-setup での暗号化登録に置き換わった）
-                    categories["その他"].append((key, "（廃止: /todoist-setup で再登録してください）"))
+                    categories["その他"].append(
+                        (key, "（廃止: /todoist-setup で再登録してください）")
+                    )
                 elif key.startswith("SHEET_") or key in (
-                        "SPREADSHEET_ID", "LAYER_SPREADSHEET_ID",
-                        "PROGRESS_SPREADSHEET_ID", "GOOGLE_CREDENTIALS_PATH"):
+                    "SPREADSHEET_ID",
+                    "LAYER_SPREADSHEET_ID",
+                    "PROGRESS_SPREADSHEET_ID",
+                    "GOOGLE_CREDENTIALS_PATH",
+                ):
                     # 旧 Sheets 連携の設定キーは廃止（移行スクリプトでのみ使用）。
                     # CSV 出力は Web ダッシュボードと /report export-tasks へ移行
-                    categories["その他"].append(
-                        (key, "（廃止: Sheets 連携は撤去されました）"))
+                    categories["その他"].append((key, "（廃止: Sheets 連携は撤去されました）"))
                 else:
                     categories["その他"].append((key, value))
 
@@ -137,16 +143,15 @@ class Settings(commands.Cog):
                 embed = info_embed(
                     setting_key,
                     "このキーは廃止されました。`/todoist-setup` / `/todoist-status` "
-                    "を使用してください（値は表示されません）")
+                    "を使用してください（値は表示されません）",
+                )
             elif value is None:
                 # 環境変数をチェック
                 import os
+
                 env_value = os.getenv(setting_key)
                 if env_value:
-                    embed = info_embed(
-                        setting_key,
-                        f"値: `{env_value}`\n（環境変数から取得）"
-                    )
+                    embed = info_embed(setting_key, f"値: `{env_value}`\n（環境変数から取得）")
                 else:
                     embed = info_embed(setting_key, "設定されていません")
             else:
@@ -173,7 +178,7 @@ class Settings(commands.Cog):
             await self.settings_repo.set(guild_id, setting_key, value)
             embed = success_embed(
                 "設定保存完了",
-                f"**{setting_key}** = `{value}`\nをこのサーバーの設定として保存しました"
+                f"**{setting_key}** = `{value}`\nをこのサーバーの設定として保存しました",
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -199,10 +204,7 @@ class Settings(commands.Cog):
             deleted = await self.settings_repo.delete(guild_id, setting_key)
 
             if deleted:
-                embed = success_embed(
-                    "設定削除完了",
-                    f"**{setting_key}** を削除しました"
-                )
+                embed = success_embed("設定削除完了", f"**{setting_key}** を削除しました")
             else:
                 embed = info_embed("設定削除", f"**{setting_key}** は存在しませんでした")
 
@@ -219,20 +221,21 @@ class Settings(commands.Cog):
     # 便利なショートカットコマンド
 
     @app_commands.command(name="set_channel", description="チャンネルIDを設定します")
-    @app_commands.describe(
-        channel_type="チャンネルタイプ",
-        channel_id="チャンネルID"
+    @app_commands.describe(channel_type="チャンネルタイプ", channel_id="チャンネルID")
+    @app_commands.choices(
+        channel_type=[
+            app_commands.Choice(name="Botログ", value="BOT_LOG_CHANNEL_ID"),
+            app_commands.Choice(name="お知らせ", value="DEFAULT_ANNOUNCE_CHANNEL_ID"),
+            app_commands.Choice(name="スケジュール", value="DEFAULT_SCHEDULE_CHANNEL_ID"),
+            app_commands.Choice(name="進捗", value="DEFAULT_PROGRESS_CHANNEL_ID"),
+            app_commands.Choice(name="タスク", value="DEFAULT_TASK_CHANNEL_ID"),
+            app_commands.Choice(name="今日やること", value="TODAY_LABEL_CHANNEL_ID"),
+        ]
     )
-    @app_commands.choices(channel_type=[
-        app_commands.Choice(name="Botログ", value="BOT_LOG_CHANNEL_ID"),
-        app_commands.Choice(name="お知らせ", value="DEFAULT_ANNOUNCE_CHANNEL_ID"),
-        app_commands.Choice(name="スケジュール", value="DEFAULT_SCHEDULE_CHANNEL_ID"),
-        app_commands.Choice(name="進捗", value="DEFAULT_PROGRESS_CHANNEL_ID"),
-        app_commands.Choice(name="タスク", value="DEFAULT_TASK_CHANNEL_ID"),
-        app_commands.Choice(name="今日やること", value="TODAY_LABEL_CHANNEL_ID"),
-    ])
     @app_commands.check(is_admin)
-    async def set_channel(self, interaction: discord.Interaction, channel_type: str, channel_id: str):
+    async def set_channel(
+        self, interaction: discord.Interaction, channel_type: str, channel_id: str
+    ):
         """チャンネルIDを設定するショートカット"""
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
@@ -247,7 +250,7 @@ class Settings(commands.Cog):
             await self.settings_repo.set(guild_id, channel_type, channel_id)
             embed = success_embed(
                 "チャンネル設定完了",
-                f"**{channel_type}** = `{channel_id}`\nをこのサーバーの設定として保存しました"
+                f"**{channel_type}** = `{channel_id}`\nをこのサーバーの設定として保存しました",
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -260,15 +263,14 @@ class Settings(commands.Cog):
             await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="set_role", description="ロールIDを設定します")
-    @app_commands.describe(
-        role_type="ロールタイプ",
-        role_id="ロールID"
+    @app_commands.describe(role_type="ロールタイプ", role_id="ロールID")
+    @app_commands.choices(
+        role_type=[
+            app_commands.Choice(name="実行役", value="EXEC_ROLE_ID"),
+            app_commands.Choice(name="管理者", value="ADMIN_ROLE_ID"),
+            app_commands.Choice(name="リーダー", value="LEADER_ROLE_IDS"),
+        ]
     )
-    @app_commands.choices(role_type=[
-        app_commands.Choice(name="実行役", value="EXEC_ROLE_ID"),
-        app_commands.Choice(name="管理者", value="ADMIN_ROLE_ID"),
-        app_commands.Choice(name="リーダー", value="LEADER_ROLE_IDS"),
-    ])
     @app_commands.check(is_admin)
     async def set_role(self, interaction: discord.Interaction, role_type: str, role_id: str):
         """ロールIDを設定するショートカット"""
@@ -295,7 +297,7 @@ class Settings(commands.Cog):
             await self.settings_repo.set(guild_id, role_type, value)
             embed = success_embed(
                 "ロール設定完了",
-                f"**{role_type}** = `{value}`\nをこのサーバーの設定として保存しました"
+                f"**{role_type}** = `{value}`\nをこのサーバーの設定として保存しました",
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -308,14 +310,13 @@ class Settings(commands.Cog):
             await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="set_common", description="共通設定をします")
-    @app_commands.describe(
-        setting_type="設定タイプ",
-        value="設定値"
+    @app_commands.describe(setting_type="設定タイプ", value="設定値")
+    @app_commands.choices(
+        setting_type=[
+            app_commands.Choice(name="タイムゾーン", value="TZ"),
+            app_commands.Choice(name="データベースパス", value="DB_PATH"),
+        ]
     )
-    @app_commands.choices(setting_type=[
-        app_commands.Choice(name="タイムゾーン", value="TZ"),
-        app_commands.Choice(name="データベースパス", value="DB_PATH"),
-    ])
     @app_commands.check(is_admin)
     async def set_common(self, interaction: discord.Interaction, setting_type: str, value: str):
         """共通設定をするショートカット"""
@@ -326,10 +327,7 @@ class Settings(commands.Cog):
 
         try:
             await self.settings_repo.set(guild_id, setting_type, value)
-            embed = success_embed(
-                "共通設定完了",
-                f"**{setting_type}** = `{value}`\nを保存しました"
-            )
+            embed = success_embed("共通設定完了", f"**{setting_type}** = `{value}`\nを保存しました")
             await interaction.followup.send(embed=embed, ephemeral=True)
 
             # 設定を更新
@@ -340,8 +338,10 @@ class Settings(commands.Cog):
             embed = error_embed(f"共通設定 `{setting_type}` に失敗しました")
             await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @set_channel.autocomplete('channel_id')
-    async def channel_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    @set_channel.autocomplete("channel_id")
+    async def channel_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
         """チャンネルIDのオートコンプリート"""
         # 現在のギルドのチャンネルを取得
         if interaction.guild is None:
@@ -352,15 +352,18 @@ class Settings(commands.Cog):
 
         for channel in channels:
             if current.lower() in channel.name.lower() or current in str(channel.id):
-                choices.append(app_commands.Choice(
-                    name=f"#{channel.name} ({channel.id})",
-                    value=str(channel.id)
-                ))
+                choices.append(
+                    app_commands.Choice(
+                        name=f"#{channel.name} ({channel.id})", value=str(channel.id)
+                    )
+                )
 
         return choices[:25]  # 最大25件
 
-    @set_role.autocomplete('role_id')
-    async def role_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+    @set_role.autocomplete("role_id")
+    async def role_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
         """ロールIDのオートコンプリート"""
         if interaction.guild is None:
             return []
@@ -370,10 +373,9 @@ class Settings(commands.Cog):
 
         for role in roles:
             if current.lower() in role.name.lower() or current in str(role.id):
-                choices.append(app_commands.Choice(
-                    name=f"{role.name} ({role.id})",
-                    value=str(role.id)
-                ))
+                choices.append(
+                    app_commands.Choice(name=f"{role.name} ({role.id})", value=str(role.id))
+                )
 
         return choices[:25]  # 最大25件
 

@@ -8,6 +8,7 @@
 「現役の年度」は ended_at IS NULL のうち最も新しいもの。
 年度名に既定値は持たない（「2026年度」も「第30代」もサークル次第）。
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -24,9 +25,9 @@ class SeasonRepository(BaseRepository):
     async def list_all(self, guild_id: int) -> list[dict[str, Any]]:
         """新しい順に年度を返す。"""
         rows = await self.db.fetchall(
-            "SELECT * FROM seasons WHERE guild_id = ?"
-            " ORDER BY started_at DESC, season_id DESC",
-            (guild_id,))
+            "SELECT * FROM seasons WHERE guild_id = ? ORDER BY started_at DESC, season_id DESC",
+            (guild_id,),
+        )
         return [dict(r) for r in rows]
 
     async def current(self, guild_id: int) -> dict[str, Any] | None:
@@ -34,18 +35,17 @@ class SeasonRepository(BaseRepository):
         row = await self.db.fetchone(
             "SELECT * FROM seasons WHERE guild_id = ? AND ended_at IS NULL"
             " ORDER BY started_at DESC, season_id DESC LIMIT 1",
-            (guild_id,))
+            (guild_id,),
+        )
         return dict(row) if row else None
 
-    async def get_by_name(self, guild_id: int,
-                          name: str) -> dict[str, Any] | None:
+    async def get_by_name(self, guild_id: int, name: str) -> dict[str, Any] | None:
         row = await self.db.fetchone(
-            "SELECT * FROM seasons WHERE guild_id = ? AND name = ?",
-            (guild_id, name))
+            "SELECT * FROM seasons WHERE guild_id = ? AND name = ?", (guild_id, name)
+        )
         return dict(row) if row else None
 
-    async def end_current(self, guild_id: int,
-                          ended_at: str | None = None) -> str | None:
+    async def end_current(self, guild_id: int, ended_at: str | None = None) -> str | None:
         """現役の年度に終了日を打つ。終了した年度名を返す（無ければ None）。"""
         season = await self.current(guild_id)
         if season is None:
@@ -56,8 +56,7 @@ class SeasonRepository(BaseRepository):
         )
         return str(season["name"])
 
-    async def create(self, guild_id: int, name: str,
-                     started_at: str | None = None) -> int:
+    async def create(self, guild_id: int, name: str, started_at: str | None = None) -> int:
         """新しい年度を作る。同名が既にあれば ValueError。"""
         if await self.get_by_name(guild_id, name) is not None:
             raise ValueError(name)
@@ -71,8 +70,9 @@ class SeasonRepository(BaseRepository):
         )
         return cur.lastrowid
 
-    async def start_new(self, guild_id: int, name: str,
-                        at: str | None = None) -> tuple[str | None, int]:
+    async def start_new(
+        self, guild_id: int, name: str, at: str | None = None
+    ) -> tuple[str | None, int]:
         """現役の年度を終わらせてから新しい年度を始める。
 
         戻り値は (終了した年度名, 新しい season_id)。

@@ -8,6 +8,7 @@
   07-03 19:00      （年は当年補完）
   07/03 19:00
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -23,7 +24,7 @@ DATETIME_FORMATS = [
     "%Y-%m-%dT%H:%M",
     "%Y-%m-%d %H:%M:%S",
     "%Y/%m/%d %H:%M:%S",
-    "%Y-%m-%d"
+    "%Y-%m-%d",
 ]
 SHORT_FORMATS = [
     "%m-%d %H:%M",
@@ -49,7 +50,7 @@ def parse_datetime(text: str) -> datetime:
     ]
     if not text:
         raise InvalidDatetimeError()
-    
+
     # naive な datetime として parse してから直後にローカル TZ を付与する設計のため、
     # strptime には %z を含めない（各箇所の noqa: DTZ007 は意図的）
     for pattern in patterns:

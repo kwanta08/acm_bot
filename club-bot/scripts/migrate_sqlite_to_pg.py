@@ -28,6 +28,7 @@
       pg_dump "$DATABASE_URL" > backup_$(date +%Y%m%d).sql
     リストアは psql "$DATABASE_URL" < backup_YYYYMMDD.sql
 """
+
 from __future__ import annotations
 
 import argparse
@@ -41,10 +42,22 @@ from utils.db import Database
 
 # コピー順（FK 参照が壊れない順序。guilds → schedules → options → votes）
 COPY_ORDER = [
-    "guilds", "settings", "teams", "skill_tags", "members",
-    "schedules", "schedule_options", "schedule_votes",
-    "tasks", "reminders_log", "todoist_sections", "todoist_configs",
-    "layer_keta", "layer_sessions", "layer_records", "audit_log",
+    "guilds",
+    "settings",
+    "teams",
+    "skill_tags",
+    "members",
+    "schedules",
+    "schedule_options",
+    "schedule_votes",
+    "tasks",
+    "reminders_log",
+    "todoist_sections",
+    "todoist_configs",
+    "layer_keta",
+    "layer_sessions",
+    "layer_records",
+    "audit_log",
 ]
 
 
@@ -79,8 +92,9 @@ async def main(args: argparse.Namespace) -> None:
         non_empty = [t for t in COPY_ORDER if counts[t][1] > 0]
         if non_empty and not args.force:
             print(f"\nERROR: 対象にデータがあります: {', '.join(non_empty)}")
-            print("上書きする場合は --force を付けてください"
-                  "（事前に pg_dump でバックアップを推奨）。")
+            print(
+                "上書きする場合は --force を付けてください（事前に pg_dump でバックアップを推奨）。"
+            )
             sys.exit(1)
 
         if not args.apply:
@@ -88,8 +102,7 @@ async def main(args: argparse.Namespace) -> None:
             return
 
         if non_empty:
-            await dst.execute(
-                "TRUNCATE TABLE " + ", ".join(reversed(COPY_ORDER)) + " CASCADE")
+            await dst.execute("TRUNCATE TABLE " + ", ".join(reversed(COPY_ORDER)) + " CASCADE")
             print("対象テーブルを TRUNCATE しました。")
 
         # コピー（FK 安全な順序で全行転送）
@@ -103,7 +116,8 @@ async def main(args: argparse.Namespace) -> None:
             for row in rows:
                 await dst.execute(
                     f"INSERT INTO {table} ({col_list}) VALUES ({placeholders})",
-                    tuple(row[c] for c in cols))
+                    tuple(row[c] for c in cols),
+                )
                 copied += 1
             print(f"  {table}: {copied} 行をコピーしました。")
 
@@ -131,8 +145,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sqlite", default=None, help="SQLite ファイルのパス")
     parser.add_argument("--dsn", default=None, help="PostgreSQL 接続 URL")
-    parser.add_argument("--apply", action="store_true",
-                        help="実際に移行を実行する（既定は dry-run）")
-    parser.add_argument("--force", action="store_true",
-                        help="対象が空でなくても TRUNCATE して上書きする")
+    parser.add_argument(
+        "--apply", action="store_true", help="実際に移行を実行する（既定は dry-run）"
+    )
+    parser.add_argument(
+        "--force", action="store_true", help="対象が空でなくても TRUNCATE して上書きする"
+    )
     asyncio.run(main(parser.parse_args()))

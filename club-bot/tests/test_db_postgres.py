@@ -7,6 +7,7 @@
 実行: venv/bin/python -m pytest tests/
 ライブ PG: CLUB_TEST_PG_DSN=postgresql://user:pass@host:5432/clubbot_test pytest tests/test_db_postgres.py
 """
+
 import asyncio
 import os
 import re
@@ -42,6 +43,7 @@ def run(coro):
 async def _current_db_name(dsn: str) -> str:
     """接続先のデータベース名を返す（スキーマ作成より前の安全確認用）。"""
     import asyncpg
+
     con = await asyncpg.connect(dsn)
     try:
         return await con.fetchval("SELECT current_database()")
@@ -63,7 +65,8 @@ def _guarded_dsn() -> str:
     if "test" not in db_name.lower():
         pytest.skip(
             "安全のためライブテストはテスト専用 DB でのみ実行します"
-            f"（接続先: {db_name}。clubbot_test など test を含む DB を指定してください）")
+            f"（接続先: {db_name}。clubbot_test など test を含む DB を指定してください）"
+        )
     return dsn
 
 
@@ -141,22 +144,22 @@ def test_sqlite_view_init_idempotent():
             await db._executescript(SQLITE_VIEW_DDL)
             for v in ("v_todoist_status", "v_attendance", "v_team_summary"):
                 rows = await db.fetchall(
-                    "SELECT name FROM sqlite_master WHERE type='view' AND name = ?",
-                    (v,))
+                    "SELECT name FROM sqlite_master WHERE type='view' AND name = ?", (v,)
+                )
                 assert rows, f"{v} がありません"
             # ビューが実際に読めること
             await db.fetchall("SELECT * FROM v_attendance LIMIT 0")
             await db.fetchall("SELECT * FROM v_team_summary LIMIT 0")
         finally:
             await db.close()
+
     run(_main())
 
 
 def test_pg_ddl_no_unsupported_constructs():
     """PostgreSQL へ送信する全 DDL（テーブル・メタ・インデックス・ビュー）に
     PG 非対応の構文が残っていないことを検証する。"""
-    all_pg_ddl = list(TABLE_DDL_PG.values()) + [SCHEMA_META_DDL, INDEX_DDL,
-                                                POSTGRES_VIEW_DDL]
+    all_pg_ddl = list(TABLE_DDL_PG.values()) + [SCHEMA_META_DDL, INDEX_DDL, POSTGRES_VIEW_DDL]
     for ddl in all_pg_ddl:
         assert "AUTOINCREMENT" not in ddl
         assert "datetime(" not in ddl
@@ -171,9 +174,11 @@ def test_prepare_converts_placeholders():
     db = Database("./dummy.db", database_url="postgresql://u:p@localhost/d")
     stmt, args = db._prepare(
         "SELECT * FROM tasks WHERE guild_id = ? AND status = ? AND local_task_id = ?",
-        (1, "open", 42))
-    assert stmt == ("SELECT * FROM tasks WHERE guild_id = $1"
-                    " AND status = $2 AND local_task_id = $3")
+        (1, "open", 42),
+    )
+    assert stmt == (
+        "SELECT * FROM tasks WHERE guild_id = $1 AND status = $2 AND local_task_id = $3"
+    )
     assert args == [1, "open", 42]
 
 
@@ -253,14 +258,14 @@ def test_pg_indexes_are_created_after_migrations(monkeypatch):
 
 def test_index_ddl_columns_exist_in_table_ddl():
     """INDEX_DDL が参照する列は最新スキーマ（TABLE_DDL）に存在すること。"""
-    pattern = re.compile(
-        r"CREATE INDEX IF NOT EXISTS \w+\s+ON\s+(\w+)\s*\(([^)]*)\)")
+    pattern = re.compile(r"CREATE INDEX IF NOT EXISTS \w+\s+ON\s+(\w+)\s*\(([^)]*)\)")
     for table, columns in pattern.findall(INDEX_DDL):
         ddl = TABLE_DDL.get(table)
         assert ddl, f"INDEX_DDL が未知のテーブル {table} を参照している"
         for column in (c.strip() for c in columns.split(",")):
             assert re.search(rf"^\s*{re.escape(column)}\b", ddl, re.MULTILINE), (
-                f"{table}.{column} が TABLE_DDL に無い")
+                f"{table}.{column} が TABLE_DDL に無い"
+            )
 
 
 # ---------------------------------------------------------------------
@@ -272,6 +277,7 @@ def test_pg_live_schema_and_crud():
     async def _main():
         from repositories.member_repository import MemberRepository
         from repositories.task_repository import TaskRepository
+
         db = Database("./unused.db", database_url=dsn)
         await db.connect()
         try:
@@ -297,13 +303,15 @@ def test_pg_live_schema_and_crud():
             await db._executescript(POSTGRES_VIEW_DDL)
             views = await db.fetchall(
                 "SELECT table_name FROM information_schema.views"
-                " WHERE table_name IN ('v_todoist_status', 'v_attendance', 'v_team_summary')")
+                " WHERE table_name IN ('v_todoist_status', 'v_attendance', 'v_team_summary')"
+            )
             assert len(views) == 3
         finally:
             # 後片付け（テストデータ削除）
             await db.execute("DELETE FROM tasks WHERE guild_id IN (?, ?)", (G1, G2))
             await db.execute("DELETE FROM teams WHERE guild_id IN (?, ?)", (G1, G2))
             await db.close()
+
     run(_main())
 
 
@@ -319,17 +327,21 @@ def test_pg_live_sequence_fix():
             await db.execute(
                 "INSERT INTO tasks (local_task_id, guild_id, title, status,"
                 " created_by, created_at) VALUES (900001, ?, '明示ID', 'open', 'u1', '2026-01-01')",
-                (G1,))
+                (G1,),
+            )
             # シーケンス修復（connect 時にも走るが明示的に再実行）
             await db._pg_fix_sequences()
             # 次の自動採番が衝突しない
             cur = await db.execute(
                 "INSERT INTO tasks (guild_id, title, status, created_by, created_at)"
-                " VALUES (?, '自動採番', 'open', 'u1', '2026-01-01')", (G1,))
+                " VALUES (?, '自動採番', 'open', 'u1', '2026-01-01')",
+                (G1,),
+            )
             assert cur.lastrowid > 900001
         finally:
             await db.execute("DELETE FROM tasks WHERE guild_id IN (?, ?)", (G1, G2))
             await db.close()
+
     run(_main())
 
 
@@ -346,6 +358,7 @@ def test_pg_live_big_snowflake_crud():
         from repositories.member_repository import MemberRepository
         from repositories.task_repository import TaskRepository
         from repositories.todoist_config_repository import TodoistConfigRepository
+
         big_user = str(BIG_SNOWFLAKE)
         big_role = str(BIG_SNOWFLAKE + 1)
         big_channel = str(BIG_SNOWFLAKE + 2)
@@ -377,8 +390,7 @@ def test_pg_live_big_snowflake_crud():
             assert await db.get_setting(BIG_SNOWFLAKE, "DEFAULT_TASK_CHANNEL_ID") == big_channel
 
             tasks = TaskRepository(db)
-            tid = await tasks.create_task(BIG_SNOWFLAKE, "大きなIDのタスク",
-                                          created_by=big_user)
+            tid = await tasks.create_task(BIG_SNOWFLAKE, "大きなIDのタスク", created_by=big_user)
             assert (await tasks.get_task(BIG_SNOWFLAKE, tid))["created_by"] == big_user
             await tasks.complete_task(BIG_SNOWFLAKE, tid)
             assert (await tasks.get_task(BIG_SNOWFLAKE, tid))["status"] == "done"
@@ -387,13 +399,13 @@ def test_pg_live_big_snowflake_crud():
             assert await todoist.get(G1) is None
             assert await members.get_member(G1, big_user) is None
         finally:
-            await db.execute("DELETE FROM todoist_configs WHERE guild_id = ?",
-                             (BIG_SNOWFLAKE,))
+            await db.execute("DELETE FROM todoist_configs WHERE guild_id = ?", (BIG_SNOWFLAKE,))
             await db.execute("DELETE FROM tasks WHERE guild_id = ?", (BIG_SNOWFLAKE,))
             await db.execute("DELETE FROM members WHERE guild_id = ?", (BIG_SNOWFLAKE,))
             await db.execute("DELETE FROM teams WHERE guild_id = ?", (BIG_SNOWFLAKE,))
             await db.execute("DELETE FROM settings WHERE guild_id = ?", (BIG_SNOWFLAKE,))
             await db.close()
+
     run(_main())
 
 
@@ -424,19 +436,22 @@ CREATE TABLE IF NOT EXISTS {mig_table} (
     updated_at          TEXT NOT NULL
 )""")
             await db.execute(
-                f"CREATE OR REPLACE VIEW mig_v AS"
-                f" SELECT guild_id, project_id FROM {mig_table}")
+                f"CREATE OR REPLACE VIEW mig_v AS SELECT guild_id, project_id FROM {mig_table}"
+            )
 
             # 小さい ID は入るが、2^31 超は int4 のため失敗するはず
             await db.execute(
                 f"INSERT INTO {mig_table} (guild_id, api_token_encrypted,"
-                f" created_by, created_at, updated_at) VALUES (1, 'c', 'a', 't', 't')")
+                f" created_by, created_at, updated_at) VALUES (1, 'c', 'a', 't', 't')"
+            )
             failed = False
             try:
                 await db.execute(
                     f"INSERT INTO {mig_table} (guild_id, api_token_encrypted,"
                     f" created_by, created_at, updated_at)"
-                    f" VALUES (?, 'c', 'a', 't', 't')", (BIG_SNOWFLAKE,))
+                    f" VALUES (?, 'c', 'a', 't', 't')",
+                    (BIG_SNOWFLAKE,),
+                )
             # int4 範囲外で何らかの例外が出ること自体を検証するため例外種別は問わない
             except Exception:  # noqa: BLE001
                 failed = True
@@ -444,11 +459,10 @@ CREATE TABLE IF NOT EXISTS {mig_table} (
 
             # 005 と同等の手順（依存ビュー DROP → ALTER → ビュー再作成）
             await db.execute("DROP VIEW IF EXISTS mig_v")
+            await db.execute(f"ALTER TABLE {mig_table} ALTER COLUMN guild_id TYPE BIGINT")
             await db.execute(
-                f"ALTER TABLE {mig_table} ALTER COLUMN guild_id TYPE BIGINT")
-            await db.execute(
-                f"CREATE OR REPLACE VIEW mig_v AS"
-                f" SELECT guild_id, project_id FROM {mig_table}")
+                f"CREATE OR REPLACE VIEW mig_v AS SELECT guild_id, project_id FROM {mig_table}"
+            )
         finally:
             await db.close()
 
@@ -462,19 +476,21 @@ CREATE TABLE IF NOT EXISTS {mig_table} (
             await db2.execute(
                 f"INSERT INTO {mig_table} (guild_id, api_token_encrypted,"
                 f" created_by, created_at, updated_at)"
-                f" VALUES (?, 'c', 'a', 't', 't')", (BIG_SNOWFLAKE,))
+                f" VALUES (?, 'c', 'a', 't', 't')",
+                (BIG_SNOWFLAKE,),
+            )
             row = await db2.fetchone(
-                f"SELECT guild_id FROM {mig_table} WHERE guild_id = ?",
-                (BIG_SNOWFLAKE,))
+                f"SELECT guild_id FROM {mig_table} WHERE guild_id = ?", (BIG_SNOWFLAKE,)
+            )
             assert row["guild_id"] == BIG_SNOWFLAKE
             rows = await db2.fetchall("SELECT guild_id FROM mig_v")
             assert BIG_SNOWFLAKE in {r["guild_id"] for r in rows}
-            await db2.execute(
-                f"DELETE FROM {mig_table} WHERE guild_id = ?", (BIG_SNOWFLAKE,))
+            await db2.execute(f"DELETE FROM {mig_table} WHERE guild_id = ?", (BIG_SNOWFLAKE,))
         finally:
             await db2.execute("DROP VIEW IF EXISTS mig_v")
             await db2.execute(f"DROP TABLE IF EXISTS {mig_table}")
             await db2.close()
+
     run(_main())
 
 

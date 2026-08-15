@@ -11,6 +11,7 @@
 権限が足りないコマンドも一覧からは消さず、「L3 以上」のバッジを付けて見せる。
 何ができる Bot なのかは全員に分かる必要があるため。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -146,8 +147,9 @@ def _join_within(lines: list[str], limit: int) -> str:
     return "\n".join(out)
 
 
-def category_embed(category: str, commands_: list[app_commands.Command],
-                   viewer_level: Level | None) -> discord.Embed:
+def category_embed(
+    category: str, commands_: list[app_commands.Command], viewer_level: Level | None
+) -> discord.Embed:
     """カテゴリ内のコマンド一覧の Embed。
 
     field ではなく description に列挙する（コマンドが増えても
@@ -164,12 +166,10 @@ def category_embed(category: str, commands_: list[app_commands.Command],
 
     header = f"{len(commands_)} 件　🔒 は実行に必要な権限が足りないものです。\n\n"
     body = _join_within(lines, MAX_DESCRIPTION - len(header) - 200)
-    return info_embed(f"コマンド一覧 — {category}",
-                      header + (body or "コマンドがありません。"))
+    return info_embed(f"コマンド一覧 — {category}", header + (body or "コマンドがありません。"))
 
 
-def command_embed(command: app_commands.Command,
-                  viewer_level: Level | None) -> discord.Embed:
+def command_embed(command: app_commands.Command, viewer_level: Level | None) -> discord.Embed:
     """個別コマンドの説明・引数・必要権限の Embed。"""
     desc = (command.description or "").strip() or "（説明なし）"
     embed = info_embed(f"/{command.qualified_name}", _clip(desc, MAX_DESCRIPTION))
@@ -181,9 +181,7 @@ def command_embed(command: app_commands.Command,
             kind = "必須" if p.required else "任意"
             pdesc = (p.description or "").strip()
             lines.append(f"`{p.name}`（{kind}）{pdesc}".rstrip())
-        embed.add_field(name="引数",
-                        value=_clip("\n".join(lines), MAX_FIELD_VALUE),
-                        inline=False)
+        embed.add_field(name="引数", value=_clip("\n".join(lines), MAX_FIELD_VALUE), inline=False)
 
     required = command_required_level(command)
     if required is None:
@@ -222,12 +220,15 @@ async def collect_setup_status(db, gconf: GuildConfig) -> list[SetupItem]:
     teams = await MemberRepository(db).list_teams(guild_id)
     ketas = await LayerKetaRepository(db).list_active(guild_id)
     return [
-        SetupItem("通知チャンネル", gconf.default_announce_channel_id is not None,
-                  "`/setup` で設定してください"),
-        SetupItem("ログチャンネル", gconf.bot_log_channel_id is not None,
-                  "`/setup` で設定してください"),
-        SetupItem("管理者ロール", gconf.admin_role_id is not None,
-                  "`/setup` で設定してください"),
+        SetupItem(
+            "通知チャンネル",
+            gconf.default_announce_channel_id is not None,
+            "`/setup` で設定してください",
+        ),
+        SetupItem(
+            "ログチャンネル", gconf.bot_log_channel_id is not None, "`/setup` で設定してください"
+        ),
+        SetupItem("管理者ロール", gconf.admin_role_id is not None, "`/setup` で設定してください"),
         SetupItem("班", len(teams) > 0, "`/team-add` で登録してください"),
         SetupItem("桁", len(ketas) > 0, "`/layer keta-add` で登録してください"),
     ]
@@ -249,21 +250,18 @@ def setup_status_embed(items: list[SetupItem]) -> discord.Embed:
 # カテゴリ選択メニュー
 # ---------------------------------------------------------------------
 class _CategorySelect(discord.ui.Select):
-    def __init__(self, catalog: dict[str, list[app_commands.Command]],
-                 viewer_level: Level | None):
+    def __init__(self, catalog: dict[str, list[app_commands.Command]], viewer_level: Level | None):
         self._catalog = catalog
         self._viewer_level = viewer_level
         options = [
             discord.SelectOption(label=name, description=f"{len(cmds)} コマンド")
             for name, cmds in list(catalog.items())[:MAX_SELECT_OPTIONS]
         ]
-        super().__init__(placeholder="カテゴリを選ぶ", options=options,
-                         min_values=1, max_values=1)
+        super().__init__(placeholder="カテゴリを選ぶ", options=options, min_values=1, max_values=1)
 
     async def callback(self, interaction: discord.Interaction) -> None:
         category = self.values[0]
-        embed = category_embed(category, self._catalog.get(category, []),
-                               self._viewer_level)
+        embed = category_embed(category, self._catalog.get(category, []), self._viewer_level)
         try:
             await interaction.response.edit_message(embed=embed, view=self.view)
         except discord.HTTPException as e:
@@ -273,14 +271,14 @@ class _CategorySelect(discord.ui.Select):
 class HelpView(discord.ui.View):
     """カテゴリ選択メニュー付きのビュー（ephemeral 応答に付ける）。"""
 
-    def __init__(self, catalog: dict[str, list[app_commands.Command]],
-                 viewer_level: Level | None):
+    def __init__(self, catalog: dict[str, list[app_commands.Command]], viewer_level: Level | None):
         super().__init__(timeout=_VIEW_TIMEOUT)
         self.add_item(_CategorySelect(catalog, viewer_level))
 
 
-def overview_embed(catalog: dict[str, list[app_commands.Command]],
-                   viewer_level: Level | None) -> discord.Embed:
+def overview_embed(
+    catalog: dict[str, list[app_commands.Command]], viewer_level: Level | None
+) -> discord.Embed:
     """最初に出す全体像の Embed。"""
     total = sum(len(c) for c in catalog.values())
     lines = [f"**{name}** — {len(cmds)} コマンド" for name, cmds in catalog.items()]
@@ -289,8 +287,7 @@ def overview_embed(catalog: dict[str, list[app_commands.Command]],
         "下のメニューからカテゴリを選ぶと一覧が表示されます。\n"
         "個別の説明は `/help command:<コマンド名>`、\n"
         "初期設定の進み具合は `/setup-status` で確認できます。\n"
-        "🔒 が付くコマンドは、あなたの権限では実行できません。\n\n"
-        + "\n".join(lines)
+        "🔒 が付くコマンドは、あなたの権限では実行できません。\n\n" + "\n".join(lines)
     )
     return info_embed("コマンドヘルプ", _clip(body, MAX_DESCRIPTION))
 
@@ -315,15 +312,11 @@ class Help(commands.Cog):
         return get_level(member, gconf)
 
     def _all_commands(self) -> list[app_commands.Command]:
-        return [c for c in self.bot.tree.walk_commands()
-                if isinstance(c, app_commands.Command)]
+        return [c for c in self.bot.tree.walk_commands() if isinstance(c, app_commands.Command)]
 
-    @app_commands.command(
-        name="help",
-        description="使えるコマンドの一覧と説明を表示します。")
+    @app_commands.command(name="help", description="使えるコマンドの一覧と説明を表示します。")
     @app_commands.describe(command="個別に説明を見たいコマンド名（省略時は一覧）")
-    async def help_command(self, interaction: discord.Interaction,
-                           command: str | None = None):
+    async def help_command(self, interaction: discord.Interaction, command: str | None = None):
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
             return
@@ -336,19 +329,21 @@ class Help(commands.Cog):
                 embed = info_embed(
                     "コマンドが見つかりません",
                     f"`{_clip(command, 100)}` に一致するコマンドはありません。\n"
-                    "`/help` でカテゴリから探せます。")
+                    "`/help` でカテゴリから探せます。",
+                )
                 await self._send(interaction, embed)
                 return
             await self._send(interaction, command_embed(target, viewer_level))
             return
 
         catalog = build_catalog(self.bot.tree)
-        await self._send(interaction, overview_embed(catalog, viewer_level),
-                         view=HelpView(catalog, viewer_level))
+        await self._send(
+            interaction, overview_embed(catalog, viewer_level), view=HelpView(catalog, viewer_level)
+        )
 
     @app_commands.command(
-        name="setup-status",
-        description="このサーバーの初期設定で未完了の項目を表示します。")
+        name="setup-status", description="このサーバーの初期設定で未完了の項目を表示します。"
+    )
     async def setup_status(self, interaction: discord.Interaction):
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -365,16 +360,20 @@ class Help(commands.Cog):
         return None
 
     @help_command.autocomplete("command")
-    async def _command_autocomplete(self, interaction: discord.Interaction,
-                                    current: str) -> list[app_commands.Choice[str]]:
+    async def _command_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
         current = (current or "").strip().lstrip("/").lower()
         names = sorted(c.qualified_name for c in self._all_commands())
         hits = [n for n in names if current in n.lower()] if current else names
-        return [app_commands.Choice(name=f"/{n}", value=n)
-                for n in hits[:MAX_SELECT_OPTIONS]]
+        return [app_commands.Choice(name=f"/{n}", value=n) for n in hits[:MAX_SELECT_OPTIONS]]
 
-    async def _send(self, interaction: discord.Interaction, embed: discord.Embed,
-                    view: discord.ui.View | None = None) -> None:
+    async def _send(
+        self,
+        interaction: discord.Interaction,
+        embed: discord.Embed,
+        view: discord.ui.View | None = None,
+    ) -> None:
         """ephemeral で応答する（チャンネルを汚さない）。"""
         kwargs = {"embed": embed, "ephemeral": True}
         if view is not None:

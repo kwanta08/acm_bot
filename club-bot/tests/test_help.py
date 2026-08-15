@@ -7,6 +7,7 @@ Discord へは接続せず、実際に全 Cog を読み込んだコマンドツ�
 - 権限バッジが utils.permissions の宣言と一致すること
 - Embed が Discord の 6000 文字 / 25 field 制限に収まること
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -77,8 +78,7 @@ async def _unload_all(bot: _FakeBot) -> None:
 
 
 def _walk(bot: _FakeBot) -> list[app_commands.Command]:
-    return [c for c in bot.tree.walk_commands()
-            if isinstance(c, app_commands.Command)]
+    return [c for c in bot.tree.walk_commands() if isinstance(c, app_commands.Command)]
 
 
 # ---------------------------------------------------------------------
@@ -101,6 +101,7 @@ def test_all_commands_appear_in_some_category():
 
 def test_no_uncategorized_command_remains():
     """カテゴリ未登録の Cog を足すとここで落ちる。"""
+
     async def _main():
         bot = await _load_all()
         try:
@@ -108,7 +109,8 @@ def test_no_uncategorized_command_remains():
             orphans = [c.qualified_name for c in catalog.get(UNCATEGORIZED, [])]
             assert not orphans, (
                 "カテゴリ未登録のコマンドがあります。cogs/help.py の "
-                f"CATEGORY_BY_COG に Cog を追加してください: {orphans}")
+                f"CATEGORY_BY_COG に Cog を追加してください: {orphans}"
+            )
         finally:
             await _unload_all(bot)
 
@@ -142,12 +144,12 @@ def test_declared_levels_are_readable():
     代表的なコマンドで実際の宣言と一致することを確かめる。
     """
     expected = {
-        "task list": Level.L1,          # @require(Level.L1)
-        "layer keta-add": Level.L2,     # @require(Level.L2)
-        "schedule delete": Level.L3,    # @require(Level.L3)
-        "task sync": Level.L4,          # @require(Level.L4)
-        "progress sync": Level.L4,      # @app_commands.check(is_admin)
-        "team-add": Level.L4,           # @app_commands.check(is_admin)
+        "task list": Level.L1,  # @require(Level.L1)
+        "layer keta-add": Level.L2,  # @require(Level.L2)
+        "schedule delete": Level.L3,  # @require(Level.L3)
+        "task sync": Level.L4,  # @require(Level.L4)
+        "progress sync": Level.L4,  # @app_commands.check(is_admin)
+        "team-add": Level.L4,  # @app_commands.check(is_admin)
     }
 
     async def _main():
@@ -157,7 +159,8 @@ def test_declared_levels_are_readable():
             for name, level in expected.items():
                 assert name in by_name, f"コマンドが見つからない: /{name}"
                 assert command_required_level(by_name[name]) == level, (
-                    f"/{name} の必要レベルが宣言と一致しない")
+                    f"/{name} の必要レベルが宣言と一致しない"
+                )
             # 権限チェックを持たないコマンドは None
             assert command_required_level(by_name["ping"]) is None
         finally:
@@ -168,13 +171,14 @@ def test_declared_levels_are_readable():
 
 def test_badge_shown_only_above_viewer_level():
     """実行者より上のレベルにだけバッジを付ける（非表示にはしない）。"""
+
     async def _main():
         bot = await _load_all()
         try:
             by_name = {c.qualified_name: c for c in _walk(bot)}
-            l3_cmd = by_name["schedule delete"]      # L3
-            l1_cmd = by_name["task list"]            # L1
-            no_check = by_name["ping"]               # 制限なし
+            l3_cmd = by_name["schedule delete"]  # L3
+            l1_cmd = by_name["task list"]  # L1
+            no_check = by_name["ping"]  # 制限なし
 
             assert level_badge(l3_cmd, Level.L1) == "L3 以上"
             assert level_badge(l3_cmd, Level.L2) == "L3 以上"
@@ -192,12 +196,13 @@ def test_badge_shown_only_above_viewer_level():
 
 def test_commands_are_never_hidden_from_lower_levels():
     """権限が足りなくても一覧からは消さない（何ができる bot かは全員に見せる）。"""
+
     async def _main():
         bot = await _load_all()
         try:
             catalog = build_catalog(bot.tree)
             listed = {c.qualified_name for cmds in catalog.values() for c in cmds}
-            assert "progress sync" in listed   # L4 のコマンドも一覧に出る
+            assert "progress sync" in listed  # L4 のコマンドも一覧に出る
             assert "team-add" in listed
         finally:
             await _unload_all(bot)
@@ -242,6 +247,7 @@ def test_command_embeds_fit_discord_limits():
 
 def test_embeds_keep_update_timestamp_footer():
     """utils.embeds が付ける更新時刻フッターを上書きしないこと（仕様 13.1）。"""
+
     async def _main():
         bot = await _load_all()
         try:
@@ -265,8 +271,7 @@ def test_setup_status_embed_keeps_footer():
     async def _main():
         db = await _fresh_db()
         try:
-            embed = setup_status_embed(
-                await collect_setup_status(db, GuildConfig(guild_id=G1)))
+            embed = setup_status_embed(await collect_setup_status(db, GuildConfig(guild_id=G1)))
             assert embed.footer.text and "更新:" in embed.footer.text
         finally:
             await db.close()
@@ -301,13 +306,13 @@ async def _fresh_db() -> Database:
 
 def test_setup_status_reports_all_unset_on_empty_guild():
     """空のサーバーでは全項目が未設定で、対応するコマンドが案内される。"""
+
     async def _main():
         db = await _fresh_db()
         try:
             items = await collect_setup_status(db, GuildConfig(guild_id=G1))
             assert items, "判定項目が空"
-            assert all(not i.done for i in items), \
-                [i.name for i in items if i.done]
+            assert all(not i.done for i in items), [i.name for i in items if i.done]
             hints = " ".join(i.hint for i in items)
             assert "/setup" in hints
             assert "/team-add" in hints
@@ -331,8 +336,7 @@ def test_setup_status_all_done_after_configuration():
                 admin_role_id=2001,
             )
             items = await collect_setup_status(db, gconf)
-            assert all(i.done for i in items), \
-                [i.name for i in items if not i.done]
+            assert all(i.done for i in items), [i.name for i in items if not i.done]
         finally:
             await db.close()
 
@@ -341,6 +345,7 @@ def test_setup_status_all_done_after_configuration():
 
 def test_setup_status_is_guild_scoped():
     """他サーバーの班・桁を自サーバーの完了扱いにしない。"""
+
     async def _main():
         db = await _fresh_db()
         try:
@@ -365,6 +370,7 @@ def test_setup_status_is_guild_scoped():
 
 def test_setup_status_partial_configuration():
     """一部だけ設定済みのとき、未設定のものだけが未完了になる。"""
+
     async def _main():
         db = await _fresh_db()
         try:
@@ -386,11 +392,15 @@ def test_setup_status_embed_fits_limits():
     async def _main():
         db = await _fresh_db()
         try:
-            for gconf in (GuildConfig(guild_id=G1),
-                          GuildConfig(guild_id=G1,
-                                      default_announce_channel_id=1,
-                                      bot_log_channel_id=2,
-                                      admin_role_id=3)):
+            for gconf in (
+                GuildConfig(guild_id=G1),
+                GuildConfig(
+                    guild_id=G1,
+                    default_announce_channel_id=1,
+                    bot_log_channel_id=2,
+                    admin_role_id=3,
+                ),
+            ):
                 embed = setup_status_embed(await collect_setup_status(db, gconf))
                 assert len(embed) <= 6000
                 assert len(embed.fields) <= 25
@@ -402,13 +412,13 @@ def test_setup_status_embed_fits_limits():
 
 def test_setup_status_command_is_registered():
     """/setup-status がコマンドツリーに登録され、カタログにも現れること。"""
+
     async def _main():
         bot = await _load_all()
         try:
             names = {c.qualified_name for c in _walk(bot)}
             assert "setup-status" in names
-            listed = {c.qualified_name
-                      for cmds in build_catalog(bot.tree).values() for c in cmds}
+            listed = {c.qualified_name for cmds in build_catalog(bot.tree).values() for c in cmds}
             assert "setup-status" in listed
         finally:
             await _unload_all(bot)

@@ -4,6 +4,7 @@ Discord へは接続せず、フェイクの bot / チャンネル / Todoist サ
 実際の SQLite DB で「一部の送信先が使えなくても他への通知と bot 全体の
 処理が止まらない」ことを検証する（bot が特定サーバーから削除された場合等）。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -104,14 +105,11 @@ class FakeBot:
 
 
 def _forbidden() -> discord.Forbidden:
-    return discord.Forbidden(
-        SimpleNamespace(status=403, reason="Forbidden"), "Missing Access")
+    return discord.Forbidden(SimpleNamespace(status=403, reason="Forbidden"), "Missing Access")
 
 
 def _due_task(task_id: str, content: str) -> FakeTask:
-    return FakeTask(
-        task_id, content,
-        due=SimpleNamespace(date=now().date() + timedelta(days=1)))
+    return FakeTask(task_id, content, due=SimpleNamespace(date=now().date() + timedelta(days=1)))
 
 
 async def _make_cog(monkeypatch, bot, links: list[tuple[str, str, str]]):
@@ -122,8 +120,7 @@ async def _make_cog(monkeypatch, bot, links: list[tuple[str, str, str]]):
     repo = ProgressRepository(db)
     for project_name, node_id, channel_id in links:
         await repo.upsert_node(G1, node_id, name=node_id, now_text=NOW)
-        await repo.upsert_todoist_link(G1, project_name, node_id, NOW,
-                                       notify_channel_id=channel_id)
+        await repo.upsert_todoist_link(G1, project_name, node_id, NOW, notify_channel_id=channel_id)
 
     async def _gconf(guild_id):
         return GuildConfig(guild_id=guild_id)
@@ -134,18 +131,17 @@ async def _make_cog(monkeypatch, bot, links: list[tuple[str, str, str]]):
 
 def test_send_failure_does_not_stop_other_projects(monkeypatch):
     """1つ目の送信先が Forbidden でも 2つ目のプロジェクトへは通知される。"""
+
     async def _main():
-        bot = FakeBot(channels={100: FakeChannel(fail=_forbidden()),
-                                200: FakeChannel()})
+        bot = FakeBot(channels={100: FakeChannel(fail=_forbidden()), 200: FakeChannel()})
         bot.todoist = FakeTodoist(
             [FakeProject("1", "A班"), FakeProject("2", "B班")],
-            {"1": [_due_task("t1", "リブ切り出し")],
-             "2": [_due_task("t2", "桁巻き")]})
-        cog, db = await _make_cog(monkeypatch, bot,
-                                  [("A班", "a", "100"), ("B班", "b", "200")])
+            {"1": [_due_task("t1", "リブ切り出し")], "2": [_due_task("t2", "桁巻き")]},
+        )
+        cog, db = await _make_cog(monkeypatch, bot, [("A班", "a", "100"), ("B班", "b", "200")])
         try:
             sent = await cog.push_project_tasks(G1)
-            assert sent == 1                       # B班のみ成功
+            assert sent == 1  # B班のみ成功
             assert len(bot.channels[200].sent) == 1
             assert any("送信失敗" in m for m in bot.logged)
         finally:
@@ -156,15 +152,21 @@ def test_send_failure_does_not_stop_other_projects(monkeypatch):
 
 def test_missing_channel_does_not_stop_other_projects(monkeypatch):
     """送信先チャンネルが存在しなくても（削除・bot追放）他は継続する。"""
+
     async def _main():
         bot = FakeBot(channels={200: FakeChannel()})
         bot.todoist = FakeTodoist(
             [FakeProject("1", "A班"), FakeProject("2", "B班")],
-            {"1": [_due_task("t1", "リブ切り出し")],
-             "2": [_due_task("t2", "桁巻き")]})
-        cog, db = await _make_cog(monkeypatch, bot,
-                                  [("A班", "a", "999"),  # 存在しないチャンネル
-                                   ("B班", "b", "200")])
+            {"1": [_due_task("t1", "リブ切り出し")], "2": [_due_task("t2", "桁巻き")]},
+        )
+        cog, db = await _make_cog(
+            monkeypatch,
+            bot,
+            [
+                ("A班", "a", "999"),  # 存在しないチャンネル
+                ("B班", "b", "200"),
+            ],
+        )
         try:
             sent = await cog.push_project_tasks(G1)
             assert sent == 1
@@ -177,6 +179,7 @@ def test_missing_channel_does_not_stop_other_projects(monkeypatch):
 
 def test_no_links_sends_nothing(monkeypatch):
     """紐付けが無いギルドでは Todoist を呼ばずに 0 件で終わる。"""
+
     async def _main():
         bot = FakeBot()
         bot.todoist = FakeTodoist([], {})

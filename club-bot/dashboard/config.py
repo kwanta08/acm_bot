@@ -6,6 +6,7 @@ bot 本体の config.py とは独立している。ダッシュボードは bot 
 
 DB は bot と同じものを共有する（DATABASE_URL / DB_PATH）。
 """
+
 from __future__ import annotations
 
 import os
@@ -79,9 +80,11 @@ class DashboardConfig:
         if not self.secret_key:
             missing.append("DASHBOARD_SECRET_KEY")
         if not self.oauth_ready:
-            for name, value in (("DISCORD_CLIENT_ID", self.client_id),
-                                ("DISCORD_CLIENT_SECRET", self.client_secret),
-                                ("DASHBOARD_REDIRECT_URI", self.redirect_uri)):
+            for name, value in (
+                ("DISCORD_CLIENT_ID", self.client_id),
+                ("DISCORD_CLIENT_SECRET", self.client_secret),
+                ("DASHBOARD_REDIRECT_URI", self.redirect_uri),
+            ):
                 if not value:
                     missing.append(name)
         return missing
@@ -96,8 +99,7 @@ def load_config(env: dict[str, str] | None = None) -> DashboardConfig:
         client_secret=_clean(src.get("DISCORD_CLIENT_SECRET")),
         redirect_uri=_clean(src.get("DASHBOARD_REDIRECT_URI")),
         secret_key=_clean(src.get("DASHBOARD_SECRET_KEY")),
-        session_max_age=_int(src.get("DASHBOARD_SESSION_MAX_AGE"),
-                             DEFAULT_SESSION_MAX_AGE),
+        session_max_age=_int(src.get("DASHBOARD_SESSION_MAX_AGE"), DEFAULT_SESSION_MAX_AGE),
         db_path=_clean(src.get("DB_PATH")) or "./data/club.db",
         database_url=database_url,
         # ダッシュボード側のプールは bot と独立に調整できる

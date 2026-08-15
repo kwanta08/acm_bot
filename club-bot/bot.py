@@ -11,6 +11,7 @@
 班（teams）・技能タグ（skill_tags）は固定の初期値を投入せず、
 新規ギルドは空の状態で開始する。管理者が /team-add /skill-add で登録する。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -35,20 +36,21 @@ log = get_logger("bot")
 
 COGS = [
     "cogs.core",
-    "cogs.help",           # /help コマンドカタログ
-    "cogs.data",           # /data エクスポート・削除
-    "cogs.season",         # /season 年度替わり
+    "cogs.name_cache",  # 表示名キャッシュ（ダッシュボードの名前解決用）
+    "cogs.help",  # /help コマンドカタログ
+    "cogs.data",  # /data エクスポート・削除
+    "cogs.season",  # /season 年度替わり
     "cogs.schedule",
     "cogs.tasks",
     "cogs.members",
     "cogs.reminders",
     "cogs.reports",
     "cogs.layer_tracking",
-    "cogs.settings",      # 設定管理コグを追加
+    "cogs.settings",  # 設定管理コグを追加
     "cogs.setup_wizard",  # /setup 設定ウィザードコグ
-    "cogs.teams",         # 班・技能タグ管理コグ
+    "cogs.teams",  # 班・技能タグ管理コグ
     "cogs.todoist_admin",  # Todoist トークン管理コグ
-    "cogs.progress",      # 機体進捗管理コグ（DB 正本）
+    "cogs.progress",  # 機体進捗管理コグ（DB 正本）
 ]
 
 # on_guild_join / 起動時の自動セットアップで投入するギルド別デフォルト設定
@@ -95,10 +97,10 @@ def build_intents() -> discord.Intents:
     """
     intents = discord.Intents.default()
     intents.guilds = True
-    intents.members = True            # Guild Members（特権。班・メンバー管理で使用）
-    intents.messages = True           # Guild Messages（本文は含まない）
-    intents.reactions = True          # Guild Message Reactions（日程調整の投票）
-    intents.dm_messages = True        # Direct Messages
+    intents.members = True  # Guild Members（特権。班・メンバー管理で使用）
+    intents.messages = True  # Guild Messages（本文は含まない）
+    intents.reactions = True  # Guild Message Reactions（日程調整の投票）
+    intents.dm_messages = True  # Direct Messages
     return intents
 
 
@@ -106,8 +108,7 @@ class ClubBot(commands.Bot):
     def __init__(self):
         # command_prefix は commands.Bot の必須引数だが prefix コマンドは
         # 一切定義していない（message_content を持たないため機能もしない）。
-        super().__init__(command_prefix="!club ", intents=build_intents(),
-                         help_command=None)
+        super().__init__(command_prefix="!club ", intents=build_intents(), help_command=None)
 
         # プールサイズは環境変数 DB_POOL_MIN_SIZE / DB_POOL_MAX_SIZE で調整できる
         self.db = Database(config.db_path, database_url=config.database_url)
@@ -126,8 +127,7 @@ class ClubBot(commands.Bot):
         # ギルド別設定のキャッシュを無効化する（PostgreSQL 構成のみ）。
         # SQLite 構成では何もしない（単一プロセス運用が前提）。
         if await self.db.start_settings_listener(config.invalidate_guild):
-            log.info("ダッシュボードからの設定変更を反映します"
-                     "（LISTEN/NOTIFY 有効）")
+            log.info("ダッシュボードからの設定変更を反映します（LISTEN/NOTIFY 有効）")
 
         # 暗号鍵チェック（Todoist トークン管理の前提）。
         # 未設定/不正でも Bot 自体は動作を継続するが、トークンの登録・利用は
@@ -139,8 +139,9 @@ class ClubBot(commands.Bot):
                 "ENCRYPTION_KEY が未設定または不正です。"
                 "Todoist トークンの登録・利用はできません。"
                 ".env に Fernet 鍵を設定してください（生成: "
-                "python -c \"from cryptography.fernet import Fernet; "
-                "print(Fernet.generate_key().decode())\"）")
+                'python -c "from cryptography.fernet import Fernet; '
+                'print(Fernet.generate_key().decode())"）'
+            )
 
         # Cog 読み込み
         for cog in COGS:
@@ -215,8 +216,10 @@ class ClubBot(commands.Bot):
             if perms.manage_channels:
                 await self._auto_create_log_channel(guild, repo)
             else:
-                log.warning("ログチャンネル自動作成をスキップ（manage_channels 権限なし, guild=%s）",
-                            guild.id)
+                log.warning(
+                    "ログチャンネル自動作成をスキップ（manage_channels 権限なし, guild=%s）",
+                    guild.id,
+                )
 
         try:
             await repo.set(guild.id, AUTO_SETUP_DONE_KEY, to_iso(now()))
@@ -225,17 +228,18 @@ class ClubBot(commands.Bot):
         config.invalidate_guild(guild.id)
         log.info("ギルド自動セットアップが完了しました: %s (id=%s)", guild.name, guild.id)
 
-    async def _auto_create_roles(self, guild: discord.Guild,
-                                 repo: SettingsRepository) -> None:
+    async def _auto_create_roles(self, guild: discord.Guild, repo: SettingsRepository) -> None:
         """幹部/Bot管理者ロールを作成し ID を settings に保存する。
 
         班ロールは自動作成しない（班は管理者が /team-add で登録し、
         既存ロールとの紐付けは /team-role で行う）。
         """
+
         async def create_role(name: str) -> discord.Role | None:
             try:
-                role = await guild.create_role(name=name, mentionable=True,
-                                               reason="club-bot 自動セットアップ")
+                role = await guild.create_role(
+                    name=name, mentionable=True, reason="club-bot 自動セットアップ"
+                )
                 log.info("ロール作成: %s (%s) [guild=%s]", role.name, role.id, guild.id)
                 return role
             except (discord.Forbidden, discord.HTTPException) as e:
@@ -250,12 +254,14 @@ class ClubBot(commands.Bot):
         if role is not None:
             await repo.set_if_absent(guild.id, "ADMIN_ROLE_ID", str(role.id))
 
-    async def _auto_create_log_channel(self, guild: discord.Guild,
-                                       repo: SettingsRepository) -> None:
+    async def _auto_create_log_channel(
+        self, guild: discord.Guild, repo: SettingsRepository
+    ) -> None:
         """bot-log チャンネルを作成し ID を settings に保存する。"""
         try:
             channel = await guild.create_text_channel(
-                BOT_LOG_CHANNEL_NAME, reason="club-bot 自動セットアップ")
+                BOT_LOG_CHANNEL_NAME, reason="club-bot 自動セットアップ"
+            )
         except (discord.Forbidden, discord.HTTPException) as e:
             log.warning("ログチャンネル作成失敗 [guild=%s]: %s", guild.id, e)
             return
@@ -308,8 +314,7 @@ class ClubBot(commands.Bot):
                 try:
                     await self._ensure_guild_setup(guild)
                 except Exception:
-                    log.exception("ギルドセットアップ失敗 %s (id=%s)",
-                                  guild.name, guild.id)
+                    log.exception("ギルドセットアップ失敗 %s (id=%s)", guild.name, guild.id)
                 await self._clear_legacy_guild_commands(guild)
 
         # 起動ログをチャンネルへ
@@ -327,7 +332,8 @@ class ClubBot(commands.Bot):
             f"新規ギルドに参加し、自動セットアップを実行しました: {guild.name} (id={guild.id})\n"
             "次のステップ: 管理者が `/setup` を実行し、通知チャンネル・ロールの設定と"
             "班の作成を行ってください（班は自動作成されません）。",
-            guild_id=guild.id)
+            guild_id=guild.id,
+        )
 
     async def on_guild_remove(self, guild: discord.Guild) -> None:
         """サーバーから外れたとき。
@@ -340,12 +346,12 @@ class ClubBot(commands.Bot):
         try:
             gconf = await config.for_guild(guild.id)
             _, purge_after = await GuildRepository(self.db).mark_left(
-                guild.id, gconf.data_retention_days)
+                guild.id, gconf.data_retention_days
+            )
         except Exception:
             log.exception("退出の記録に失敗しました (guild=%s)", guild.id)
             return
-        log.info("データの削除予定を記録しました (guild=%s, purge_after=%s)",
-                 guild.id, purge_after)
+        log.info("データの削除予定を記録しました (guild=%s, purge_after=%s)", guild.id, purge_after)
 
     async def log_to_channel(self, message: str, guild_id: int | None = None) -> None:
         """
@@ -388,8 +394,9 @@ class ClubBot(commands.Bot):
             except Exception as e:  # noqa: BLE001
                 log.warning("bot-log への投稿失敗: %s", e)
 
-    async def on_app_command_error(self, interaction: discord.Interaction,
-                                   error: app_commands.AppCommandError) -> None:
+    async def on_app_command_error(
+        self, interaction: discord.Interaction, error: app_commands.AppCommandError
+    ) -> None:
         """
         全スラッシュコマンドのエラーを集約（改訂版 14）
         """
@@ -411,7 +418,8 @@ class ClubBot(commands.Bot):
             log.error("未処理のコマンドエラー: %s", original, exc_info=original)
             await self.log_to_channel(
                 f"[ERROR] {interaction.command}: {original!r}",
-                guild_id=interaction.guild.id if interaction.guild else None)
+                guild_id=interaction.guild.id if interaction.guild else None,
+            )
 
         try:
             if interaction.response.is_done():
@@ -451,8 +459,10 @@ async def main() -> None:
         sys.exit(1)
 
     if not config.guild_id:
-        log.info("GUILD_ID 未指定: マルチテナントモードで起動します"
-                 "（参加中の全ギルドで独立して動作します）")
+        log.info(
+            "GUILD_ID 未指定: マルチテナントモードで起動します"
+            "（参加中の全ギルドで独立して動作します）"
+        )
 
     bot = ClubBot()
     async with bot:

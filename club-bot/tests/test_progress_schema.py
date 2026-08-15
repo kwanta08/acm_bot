@@ -8,6 +8,7 @@
   独立に使えること（マルチテナント分離）
 - PostgreSQL 用 DDL への機械変換が正しいこと（REAL → DOUBLE PRECISION 等）
 """
+
 import asyncio
 import os
 import sqlite3
@@ -23,8 +24,7 @@ from utils.db import SCHEMA_VERSION, TABLE_DDL, TABLE_DDL_PG, Database
 G1 = 100000000000000001
 G2 = 200000000000000002
 
-PROGRESS_TABLES = ("progress_nodes", "progress_todoist_links",
-                   "progress_spar_links")
+PROGRESS_TABLES = ("progress_nodes", "progress_todoist_links", "progress_spar_links")
 
 # v9 相当（機体進捗テーブル導入前）のテーブル群
 V9_TABLES = [t for t in TABLE_DDL if t not in PROGRESS_TABLES]
@@ -59,19 +59,45 @@ def test_fresh_schema_creates_progress_tables():
         db = await _connected_db()
         try:
             cols = await _columns(db, "progress_nodes")
-            assert {"progress_node_id", "guild_id", "node_id", "parent_id",
-                    "sort_order", "name", "assignee", "status",
-                    "manual_progress", "source", "todoist_task_id", "weight",
-                    "created_at", "updated_at"} <= cols
+            assert {
+                "progress_node_id",
+                "guild_id",
+                "node_id",
+                "parent_id",
+                "sort_order",
+                "name",
+                "assignee",
+                "status",
+                "manual_progress",
+                "source",
+                "todoist_task_id",
+                "weight",
+                "created_at",
+                "updated_at",
+            } <= cols
 
             cols = await _columns(db, "progress_todoist_links")
-            assert {"link_id", "guild_id", "project_name", "node_id",
-                    "notify_channel_id", "created_by", "created_at",
-                    "updated_at"} <= cols
+            assert {
+                "link_id",
+                "guild_id",
+                "project_name",
+                "node_id",
+                "notify_channel_id",
+                "created_by",
+                "created_at",
+                "updated_at",
+            } <= cols
 
             cols = await _columns(db, "progress_spar_links")
-            assert {"spar_link_id", "guild_id", "keta_name", "node_id",
-                    "target_layers", "created_at", "updated_at"} <= cols
+            assert {
+                "spar_link_id",
+                "guild_id",
+                "keta_name",
+                "node_id",
+                "target_layers",
+                "created_at",
+                "updated_at",
+            } <= cols
         finally:
             await db.close()
 
@@ -94,8 +120,7 @@ def test_progress_indexes_exist():
     async def _main():
         db = await _connected_db()
         try:
-            rows = await db.fetchall(
-                "SELECT name FROM sqlite_master WHERE type = 'index'")
+            rows = await db.fetchall("SELECT name FROM sqlite_master WHERE type = 'index'")
             names = {r["name"] for r in rows}
             assert "idx_progress_nodes_guild_parent" in names
             assert "idx_progress_nodes_guild_source" in names
@@ -108,29 +133,30 @@ def test_progress_indexes_exist():
 # ---------------------------------------------------------------------
 # guild_id スコープ
 # ---------------------------------------------------------------------
-async def _insert_node(db: Database, guild_id: int, node_id: str,
-                       parent_id: str | None = None, name: str = "主翼"):
+async def _insert_node(
+    db: Database, guild_id: int, node_id: str, parent_id: str | None = None, name: str = "主翼"
+):
     await db.execute(
         "INSERT INTO progress_nodes"
         " (guild_id, node_id, parent_id, sort_order, name, source,"
         "  created_at, updated_at)"
         " VALUES (?, ?, ?, 0, ?, 'manual', '2026-01-01', '2026-01-01')",
-        (guild_id, node_id, parent_id, name))
+        (guild_id, node_id, parent_id, name),
+    )
 
 
 def test_same_node_id_allowed_in_different_guilds():
     """同じ node_id を別ギルドで独立に持てる（テナント分離）。"""
+
     async def _main():
         db = await _connected_db()
         try:
             await _insert_node(db, G1, "airframe", name="1号機")
             await _insert_node(db, G2, "airframe", name="別大学の機体")
 
-            rows = await db.fetchall(
-                "SELECT name FROM progress_nodes WHERE guild_id = ?", (G1,))
+            rows = await db.fetchall("SELECT name FROM progress_nodes WHERE guild_id = ?", (G1,))
             assert [r["name"] for r in rows] == ["1号機"]
-            rows = await db.fetchall(
-                "SELECT name FROM progress_nodes WHERE guild_id = ?", (G2,))
+            rows = await db.fetchall("SELECT name FROM progress_nodes WHERE guild_id = ?", (G2,))
             assert [r["name"] for r in rows] == ["別大学の機体"]
         finally:
             await db.close()
@@ -164,13 +190,15 @@ def test_links_are_unique_per_guild():
                     "INSERT INTO progress_todoist_links"
                     " (guild_id, project_name, node_id, created_at, updated_at)"
                     " VALUES (?, '主翼班', 'wing', '2026-01-01', '2026-01-01')",
-                    (guild_id,))
+                    (guild_id,),
+                )
                 await db.execute(
                     "INSERT INTO progress_spar_links"
                     " (guild_id, keta_name, node_id, target_layers,"
                     "  created_at, updated_at)"
                     " VALUES (?, '主桁1', 'spar1', 12, '2026-01-01', '2026-01-01')",
-                    (guild_id,))
+                    (guild_id,),
+                )
             rows = await db.fetchall("SELECT guild_id FROM progress_todoist_links")
             assert len(rows) == 2  # ギルドごとに1行ずつ共存できる
 
@@ -179,7 +207,8 @@ def test_links_are_unique_per_guild():
                     "INSERT INTO progress_todoist_links"
                     " (guild_id, project_name, node_id, created_at, updated_at)"
                     " VALUES (?, '主翼班', 'other', '2026-01-01', '2026-01-01')",
-                    (G1,))
+                    (G1,),
+                )
             except sqlite3.IntegrityError as e:
                 assert "UNIQUE" in str(e).upper()
             else:
@@ -200,7 +229,8 @@ def test_spar_link_rejects_non_positive_target():
                     " (guild_id, keta_name, node_id, target_layers,"
                     "  created_at, updated_at)"
                     " VALUES (?, '主桁1', 'spar1', 0, '2026-01-01', '2026-01-01')",
-                    (G1,))
+                    (G1,),
+                )
             except sqlite3.IntegrityError as e:
                 assert "CHECK" in str(e).upper()
             else:
@@ -216,6 +246,7 @@ def test_spar_link_rejects_non_positive_target():
 # ---------------------------------------------------------------------
 def test_migrates_v9_database():
     """進捗テーブルが無い v9 相当 DB に、テーブルが追加されること。"""
+
     async def _main():
         path = _tmp_db_path()
         # v9 相当の DB を手で作る（進捗テーブルなし・user_version=9）
@@ -224,7 +255,9 @@ def test_migrates_v9_database():
                 await conn.executescript(TABLE_DDL[name])
             await conn.execute(
                 "INSERT INTO guilds (guild_id, guild_name, joined_at)"
-                " VALUES (?, '既存サークル', '2026-01-01')", (G1,))
+                " VALUES (?, '既存サークル', '2026-01-01')",
+                (G1,),
+            )
             await conn.execute("PRAGMA user_version = 9")
             await conn.commit()
 
@@ -235,8 +268,7 @@ def test_migrates_v9_database():
             for table in PROGRESS_TABLES:
                 assert await _columns(db, table), f"{table} が作成されていない"
             # 既存データは保持される
-            row = await db.fetchone(
-                "SELECT guild_name FROM guilds WHERE guild_id = ?", (G1,))
+            row = await db.fetchone("SELECT guild_name FROM guilds WHERE guild_id = ?", (G1,))
             assert row["guild_name"] == "既存サークル"
         finally:
             await db.close()
@@ -246,6 +278,7 @@ def test_migrates_v9_database():
 
 def test_migration_is_idempotent():
     """2回接続しても失敗せず、行が消えないこと。"""
+
     async def _main():
         path = _tmp_db_path()
         db = Database(path)
@@ -256,8 +289,7 @@ def test_migration_is_idempotent():
         db = Database(path)
         await db.connect()
         try:
-            rows = await db.fetchall(
-                "SELECT node_id FROM progress_nodes WHERE guild_id = ?", (G1,))
+            rows = await db.fetchall("SELECT node_id FROM progress_nodes WHERE guild_id = ?", (G1,))
             assert [r["node_id"] for r in rows] == ["airframe"]
             assert await db._user_version() == SCHEMA_VERSION
         finally:

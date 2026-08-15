@@ -4,6 +4,7 @@ bot とダッシュボードは別プロセスで独立したプールを持つ�
 max_size=5 では、20分ごとの同期ジョブとダッシュボードの同時読み取りが
 重なると枯渇しうるため既定値を引き上げ、環境変数で調整できるようにした。
 """
+
 from __future__ import annotations
 
 import os
@@ -25,24 +26,26 @@ from utils.db import (
 def test_defaults_are_larger_than_legacy_five():
     """旧既定（5）より大きいこと。"""
     assert DEFAULT_POOL_MAX_SIZE > 5
-    assert resolve_pool_size(None, None, env={}) == (
-        DEFAULT_POOL_MIN_SIZE, DEFAULT_POOL_MAX_SIZE)
+    assert resolve_pool_size(None, None, env={}) == (DEFAULT_POOL_MIN_SIZE, DEFAULT_POOL_MAX_SIZE)
 
 
 def test_env_overrides_defaults():
-    assert resolve_pool_size(None, None, env={
-        "DB_POOL_MIN_SIZE": "2", "DB_POOL_MAX_SIZE": "20"}) == (2, 20)
+    assert resolve_pool_size(
+        None, None, env={"DB_POOL_MIN_SIZE": "2", "DB_POOL_MAX_SIZE": "20"}
+    ) == (2, 20)
 
 
 def test_arguments_take_precedence_over_env():
-    assert resolve_pool_size(3, 7, env={
-        "DB_POOL_MIN_SIZE": "2", "DB_POOL_MAX_SIZE": "20"}) == (3, 7)
+    assert resolve_pool_size(3, 7, env={"DB_POOL_MIN_SIZE": "2", "DB_POOL_MAX_SIZE": "20"}) == (
+        3,
+        7,
+    )
 
 
 def test_invalid_env_falls_back_to_defaults():
-    assert resolve_pool_size(None, None, env={
-        "DB_POOL_MIN_SIZE": "たくさん", "DB_POOL_MAX_SIZE": ""}) == (
-        DEFAULT_POOL_MIN_SIZE, DEFAULT_POOL_MAX_SIZE)
+    assert resolve_pool_size(
+        None, None, env={"DB_POOL_MIN_SIZE": "たくさん", "DB_POOL_MAX_SIZE": ""}
+    ) == (DEFAULT_POOL_MIN_SIZE, DEFAULT_POOL_MAX_SIZE)
 
 
 def test_sizes_are_normalized():
@@ -53,8 +56,9 @@ def test_sizes_are_normalized():
 
 
 def test_database_exposes_resolved_sizes():
-    db = Database("./ignored.db", database_url="postgresql://x/y",
-                  pool_min_size=2, pool_max_size=12)
+    db = Database(
+        "./ignored.db", database_url="postgresql://x/y", pool_min_size=2, pool_max_size=12
+    )
     assert (db.pool_min_size, db.pool_max_size) == (2, 12)
 
 
@@ -70,8 +74,7 @@ def test_pool_stats_reports_usage():
         def get_idle_size(self):
             return 1
 
-    db = Database("./ignored.db", database_url="postgresql://x/y",
-                  pool_max_size=10)
+    db = Database("./ignored.db", database_url="postgresql://x/y", pool_max_size=10)
     db._pool = _FakePool()
     stats = db.pool_stats()
     assert stats["max_size"] == 10
@@ -90,13 +93,11 @@ def test_command_timeout_is_bounded():
 @pytest.mark.parametrize("dashboard_max", ["8", "16"])
 def test_dashboard_pool_is_independent(dashboard_max):
     """ダッシュボードは bot と別の値を設定できる。"""
-    fastapi = pytest.importorskip(
-        "fastapi", reason="dashboard/requirements.txt が未インストール")
+    fastapi = pytest.importorskip("fastapi", reason="dashboard/requirements.txt が未インストール")
     assert fastapi is not None
     from dashboard.config import load_config
 
-    config = load_config({"DASHBOARD_DB_POOL_MAX_SIZE": dashboard_max,
-                          "DB_POOL_MAX_SIZE": "10"})
+    config = load_config({"DASHBOARD_DB_POOL_MAX_SIZE": dashboard_max, "DB_POOL_MAX_SIZE": "10"})
     assert config.db_pool_max_size == int(dashboard_max)
     # 未指定なら None（utils/db.py 側の既定・環境変数にフォールバック）
     assert load_config({}).db_pool_max_size is None

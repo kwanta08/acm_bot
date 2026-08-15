@@ -4,6 +4,7 @@
 導入サークルは新機能に気づけない。AGENTS.md も「実装とドキュメントが
 矛盾したら両方直す」と定めているので、機械的に検出する。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -39,8 +40,11 @@ async def _command_names() -> list[str]:
     for cog in COGS:
         await bot.load_extension(cog)
     try:
-        return sorted(c.qualified_name for c in bot.tree.walk_commands()
-                      if isinstance(c, app_commands.Command))
+        return sorted(
+            c.qualified_name
+            for c in bot.tree.walk_commands()
+            if isinstance(c, app_commands.Command)
+        )
     finally:
         for name in list(bot.extensions):
             await bot.unload_extension(name)
@@ -66,9 +70,9 @@ def test_every_command_is_documented():
     assert names, "コマンドが1件も収集できていない（テストが空振りしている）"
 
     missing = [name for name in names if not _is_documented(doc, name)]
-    assert not missing, (
-        "docs/OPERATION.md に載っていないコマンドがあります:\n"
-        + "\n".join(f"  /{name}" for name in missing))
+    assert not missing, "docs/OPERATION.md に載っていないコマンドがあります:\n" + "\n".join(
+        f"  /{name}" for name in missing
+    )
 
 
 def _match_command(body: str, names: set[str]) -> str | None:
@@ -97,6 +101,6 @@ def test_documented_commands_still_exist():
             continue
         if _match_command(body, names) is None:
             stale.append(body)
-    assert not stale, (
-        "docs/OPERATION.md に、実装に存在しないコマンドが載っています:\n"
-        + "\n".join(f"  /{name}" for name in sorted(set(stale))))
+    assert not stale, "docs/OPERATION.md に、実装に存在しないコマンドが載っています:\n" + "\n".join(
+        f"  /{name}" for name in sorted(set(stale))
+    )

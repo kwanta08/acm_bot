@@ -9,6 +9,7 @@ Teams / Skills 管理モジュール。
 サーバーオーナーまたは Discord の管理者権限（Administrator）で実行できる
 （utils/permissions.is_admin の既存仕様）。
 """
+
 from __future__ import annotations
 
 import re
@@ -41,14 +42,16 @@ class Teams(commands.Cog):
         self.audit_repo = AuditLogRepository(bot.db)
 
     # ---------- autocomplete ----------
-    async def _team_ac(self, interaction: discord.Interaction,
-                       current: str) -> list[app_commands.Choice[str]]:
+    async def _team_ac(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
         if interaction.guild is None:
             return []
         return await team_service.team_choices(self.bot.db, interaction.guild.id, current)
 
-    async def _skill_ac(self, interaction: discord.Interaction,
-                        current: str) -> list[app_commands.Choice[str]]:
+    async def _skill_ac(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
         if interaction.guild is None:
             return []
         return await team_service.skill_choices(self.bot.db, interaction.guild.id, current)
@@ -57,8 +60,9 @@ class Teams(commands.Cog):
     # 班管理
     # ==================================================================
     @app_commands.command(name="team-add", description="班を追加します（管理者）。")
-    @app_commands.describe(slug="班の識別子（半角英小文字・数字・-・_、32文字以内）",
-                           name="班の表示名")
+    @app_commands.describe(
+        slug="班の識別子（半角英小文字・数字・-・_、32文字以内）", name="班の表示名"
+    )
     @app_commands.check(is_admin)
     async def team_add(self, interaction: discord.Interaction, slug: str, name: str):
         await interaction.response.defer(ephemeral=True)
@@ -71,19 +75,23 @@ class Teams(commands.Cog):
             await interaction.followup.send(
                 embed=error_embed(
                     "識別子は半角英小文字または数字で始まり、"
-                    "英小文字・数字・`-`・`_` のみ（32文字以内）で指定してください。"),
-                ephemeral=True)
+                    "英小文字・数字・`-`・`_` のみ（32文字以内）で指定してください。"
+                ),
+                ephemeral=True,
+            )
             return
         if not name or len(name) > MAX_NAME_LENGTH:
             await interaction.followup.send(
                 embed=error_embed(f"表示名は1〜{MAX_NAME_LENGTH}文字で指定してください。"),
-                ephemeral=True)
+                ephemeral=True,
+            )
             return
 
         existing = await self.repo.get_team(guild_id, slug)
         await self.repo.upsert_team(guild_id, slug, name)
-        await self.audit_repo.record(guild_id, str(interaction.user.id), "team.add",
-                                     target=slug, detail=f"表示名: {name}")
+        await self.audit_repo.record(
+            guild_id, str(interaction.user.id), "team.add", target=slug, detail=f"表示名: {name}"
+        )
 
         if existing and not existing["active_flag"]:
             desc = f"無効化されていた班 **{name}**（`{slug}`）を再有効化しました"
@@ -92,18 +100,17 @@ class Teams(commands.Cog):
         else:
             desc = f"班 **{name}**（`{slug}`）を追加しました"
         await interaction.followup.send(
-            embed=success_embed("班を登録しました", desc,
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed("班を登録しました", desc, executor=interaction.user.display_name),
+            ephemeral=True,
+        )
 
-    @app_commands.command(name="team-remove",
-                          description="班を無効化します（論理削除。管理者）。")
-    @app_commands.describe(slug="無効化する班の識別子",
-                           confirm="所属メンバーがいても無効化する場合は True")
+    @app_commands.command(name="team-remove", description="班を無効化します（論理削除。管理者）。")
+    @app_commands.describe(
+        slug="無効化する班の識別子", confirm="所属メンバーがいても無効化する場合は True"
+    )
     @app_commands.autocomplete(slug=_team_ac)
     @app_commands.check(is_admin)
-    async def team_remove(self, interaction: discord.Interaction, slug: str,
-                          confirm: bool = False):
+    async def team_remove(self, interaction: discord.Interaction, slug: str, confirm: bool = False):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -111,7 +118,8 @@ class Teams(commands.Cog):
         team = await self.repo.get_team(guild_id, slug)
         if not team or not team["active_flag"]:
             await interaction.followup.send(
-                embed=error_embed(f"班 `{slug}` は登録されていません。"), ephemeral=True)
+                embed=error_embed(f"班 `{slug}` は登録されていません。"), ephemeral=True
+            )
             return
 
         count = await self.repo.count_primary_members(guild_id, slug)
@@ -121,20 +129,29 @@ class Teams(commands.Cog):
                     f"**{team['team_name']}** には主所属メンバーが **{count} 名**います。\n"
                     "無効化してもメンバーの所属情報は保持されますが、"
                     "選択肢には表示されなくなります。\n"
-                    "実行する場合は `confirm:True` を指定して再度実行してください。"),
-                ephemeral=True)
+                    "実行する場合は `confirm:True` を指定して再度実行してください。"
+                ),
+                ephemeral=True,
+            )
             return
 
         await self.repo.deactivate_team(guild_id, slug)
-        await self.audit_repo.record(guild_id, str(interaction.user.id), "team.remove",
-                                     target=slug,
-                                     detail=f"主所属メンバー {count} 名のまま無効化")
+        await self.audit_repo.record(
+            guild_id,
+            str(interaction.user.id),
+            "team.remove",
+            target=slug,
+            detail=f"主所属メンバー {count} 名のまま無効化",
+        )
         await interaction.followup.send(
-            embed=success_embed("班を無効化しました",
-                                f"**{team['team_name']}**（`{slug}`）\n"
-                                "再有効化する場合は `/team-add` で同じ識別子を登録してください。",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed(
+                "班を無効化しました",
+                f"**{team['team_name']}**（`{slug}`）\n"
+                "再有効化する場合は `/team-add` で同じ識別子を登録してください。",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     @app_commands.command(name="team-list", description="班の一覧を表示します（管理者）。")
     @app_commands.check(is_admin)
@@ -146,10 +163,11 @@ class Teams(commands.Cog):
         teams = await self.repo.list_teams(guild_id, active_only=False)
         if not teams:
             await interaction.followup.send(
-                embed=info_embed("班一覧",
-                                 "登録されている班はありません。\n"
-                                 "`/team-add` で追加してください。"),
-                ephemeral=True)
+                embed=info_embed(
+                    "班一覧", "登録されている班はありません。\n`/team-add` で追加してください。"
+                ),
+                ephemeral=True,
+            )
             return
 
         members = await self.repo.list_members(guild_id)
@@ -162,7 +180,9 @@ class Teams(commands.Cog):
         embed = info_embed("班一覧")
         for t in teams[:25]:
             status = "✅ 有効" if t["active_flag"] else "⛔ 無効"
-            lines = [f"slug: `{t['team_key']}` / {status} / 主所属: {counts.get(t['team_key'], 0)}名"]
+            lines = [
+                f"slug: `{t['team_key']}` / {status} / 主所属: {counts.get(t['team_key'], 0)}名"
+            ]
             if t.get("member_role_id"):
                 lines.append(f"班ロール: <@&{t['member_role_id']}>")
             if t.get("secondary_role_id"):
@@ -174,19 +194,29 @@ class Teams(commands.Cog):
             embed.add_field(name=t["team_name"], value="\n".join(lines), inline=False)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="team-role",
-                          description="班と Discord ロールを紐付けます（管理者）。")
-    @app_commands.describe(team="班の識別子",
-                           role="紐付ける Discord ロール",
-                           role_type="primary=主所属ロール / secondary=副所属ロール（既定: primary）")
+    @app_commands.command(
+        name="team-role", description="班と Discord ロールを紐付けます（管理者）。"
+    )
+    @app_commands.describe(
+        team="班の識別子",
+        role="紐付ける Discord ロール",
+        role_type="primary=主所属ロール / secondary=副所属ロール（既定: primary）",
+    )
     @app_commands.autocomplete(team=_team_ac)
-    @app_commands.choices(role_type=[
-        app_commands.Choice(name="primary（主所属）", value="primary"),
-        app_commands.Choice(name="secondary（副所属）", value="secondary"),
-    ])
+    @app_commands.choices(
+        role_type=[
+            app_commands.Choice(name="primary（主所属）", value="primary"),
+            app_commands.Choice(name="secondary（副所属）", value="secondary"),
+        ]
+    )
     @app_commands.check(is_admin)
-    async def team_role(self, interaction: discord.Interaction, team: str,
-                        role: discord.Role, role_type: str = "primary"):
+    async def team_role(
+        self,
+        interaction: discord.Interaction,
+        team: str,
+        role: discord.Role,
+        role_type: str = "primary",
+    ):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -195,8 +225,10 @@ class Teams(commands.Cog):
         if not t:
             await interaction.followup.send(
                 embed=error_embed(
-                    f"班 `{team}` は登録されていません。先に `/team-add` で追加してください。"),
-                ephemeral=True)
+                    f"班 `{team}` は登録されていません。先に `/team-add` で追加してください。"
+                ),
+                ephemeral=True,
+            )
             return
 
         if role_type == "primary":
@@ -205,17 +237,24 @@ class Teams(commands.Cog):
         else:
             await self.repo.set_team_roles(guild_id, team, secondary_role_id=str(role.id))
             label = "副所属ロール"
-        await self.audit_repo.record(guild_id, str(interaction.user.id), "team.role",
-                                     target=team,
-                                     detail=f"{label} を {role.name} ({role.id}) に設定")
+        await self.audit_repo.record(
+            guild_id,
+            str(interaction.user.id),
+            "team.role",
+            target=team,
+            detail=f"{label} を {role.name} ({role.id}) に設定",
+        )
         # ロール関連のギルド別設定キャッシュを破棄
         config.invalidate_guild(guild_id)
         await interaction.followup.send(
-            embed=success_embed("班ロールを設定しました",
-                                f"**{t['team_name']}** の{label} → {role.mention}\n"
-                                "以降、所属変更時にこのロールが自動で付与・剥奪されます。",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed(
+                "班ロールを設定しました",
+                f"**{t['team_name']}** の{label} → {role.mention}\n"
+                "以降、所属変更時にこのロールが自動で付与・剥奪されます。",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     # ==================================================================
     # 技能タグ管理
@@ -232,28 +271,34 @@ class Teams(commands.Cog):
         if not name or len(name) > MAX_NAME_LENGTH:
             await interaction.followup.send(
                 embed=error_embed(f"タグ名は1〜{MAX_NAME_LENGTH}文字で指定してください。"),
-                ephemeral=True)
+                ephemeral=True,
+            )
             return
 
         existing = await self.skill_repo.get(guild_id, name)
         if existing and existing["active_flag"]:
             await interaction.followup.send(
-                embed=info_embed("技能タグ", f"「{name}」は既に登録されています。"),
-                ephemeral=True)
+                embed=info_embed("技能タグ", f"「{name}」は既に登録されています。"), ephemeral=True
+            )
             return
 
         await self.skill_repo.add(guild_id, name, str(interaction.user.id))
-        await self.audit_repo.record(guild_id, str(interaction.user.id), "skill.add",
-                                     target=name)
-        desc = (f"無効化されていた技能タグ「**{name}**」を再有効化しました"
-                if existing else f"技能タグ「**{name}**」を追加しました")
+        await self.audit_repo.record(guild_id, str(interaction.user.id), "skill.add", target=name)
+        desc = (
+            f"無効化されていた技能タグ「**{name}**」を再有効化しました"
+            if existing
+            else f"技能タグ「**{name}**」を追加しました"
+        )
         await interaction.followup.send(
-            embed=success_embed("技能タグを登録しました", desc,
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed(
+                "技能タグを登録しました", desc, executor=interaction.user.display_name
+            ),
+            ephemeral=True,
+        )
 
-    @app_commands.command(name="skill-remove",
-                          description="技能タグを無効化します（論理削除。管理者）。")
+    @app_commands.command(
+        name="skill-remove", description="技能タグを無効化します（論理削除。管理者）。"
+    )
     @app_commands.describe(name="無効化する技能タグ名")
     @app_commands.autocomplete(name=_skill_ac)
     @app_commands.check(is_admin)
@@ -265,17 +310,20 @@ class Teams(commands.Cog):
         ok = await self.skill_repo.deactivate(guild_id, name)
         if not ok:
             await interaction.followup.send(
-                embed=error_embed(f"技能タグ「{name}」は登録されていません。"),
-                ephemeral=True)
+                embed=error_embed(f"技能タグ「{name}」は登録されていません。"), ephemeral=True
+            )
             return
-        await self.audit_repo.record(guild_id, str(interaction.user.id), "skill.remove",
-                                     target=name)
+        await self.audit_repo.record(
+            guild_id, str(interaction.user.id), "skill.remove", target=name
+        )
         await interaction.followup.send(
-            embed=success_embed("技能タグを無効化しました",
-                                f"「**{name}**」\n"
-                                "既に付与されたメンバーの技能表示は保持されます。",
-                                executor=interaction.user.display_name),
-            ephemeral=True)
+            embed=success_embed(
+                "技能タグを無効化しました",
+                f"「**{name}**」\n既に付与されたメンバーの技能表示は保持されます。",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
 
     @app_commands.command(name="skill-list", description="技能タグの一覧を表示します（管理者）。")
     @app_commands.check(is_admin)
@@ -287,10 +335,12 @@ class Teams(commands.Cog):
         rows = await self.skill_repo.list_all(guild_id)
         if not rows:
             await interaction.followup.send(
-                embed=info_embed("技能タグ一覧",
-                                 "登録されている技能タグはありません。\n"
-                                 "`/skill-add` で追加してください。"),
-                ephemeral=True)
+                embed=info_embed(
+                    "技能タグ一覧",
+                    "登録されている技能タグはありません。\n`/skill-add` で追加してください。",
+                ),
+                ephemeral=True,
+            )
             return
 
         members = await self.repo.list_members(guild_id)
@@ -304,7 +354,8 @@ class Teams(commands.Cog):
             for r in rows
         ]
         await interaction.followup.send(
-            embed=info_embed("技能タグ一覧", "\n".join(lines)), ephemeral=True)
+            embed=info_embed("技能タグ一覧", "\n".join(lines)), ephemeral=True
+        )
 
 
 async def setup(bot: commands.Bot):

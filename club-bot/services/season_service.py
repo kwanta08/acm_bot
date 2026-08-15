@@ -9,6 +9,7 @@ status を alumni に動かすだけにして、既定の一覧・検索から�
 
 DB 操作をここへ集約し、cogs からは呼ぶだけにしてテストしやすくする。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -43,9 +44,9 @@ class RolloverResult:
         return " / ".join(parts)
 
 
-async def perform_rollover(db, guild_id: int, new_season_name: str,
-                           alumni_user_ids: list[str], *,
-                           at: str | None = None) -> RolloverResult:
+async def perform_rollover(
+    db, guild_id: int, new_season_name: str, alumni_user_ids: list[str], *, at: str | None = None
+) -> RolloverResult:
     """年度を切り替える。
 
     1. 現年度に終了日を打ち、新しい年度を開始する
@@ -64,10 +65,10 @@ async def perform_rollover(db, guild_id: int, new_season_name: str,
 
     moved: list[str] = []
     for user_id in alumni_user_ids:
-        if await member_repo.set_status(guild_id, user_id, STATUS_ALUMNI,
-                                        left_season=left_season):
+        if await member_repo.set_status(guild_id, user_id, STATUS_ALUMNI, left_season=left_season):
             moved.append(user_id)
 
     leaders_reset = await member_repo.reset_leaders(guild_id)
-    return RolloverResult(new_season=new_season_name, ended_season=ended,
-                          alumni=moved, leaders_reset=leaders_reset)
+    return RolloverResult(
+        new_season=new_season_name, ended_season=ended, alumni=moved, leaders_reset=leaders_reset
+    )

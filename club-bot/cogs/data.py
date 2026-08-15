@@ -8,6 +8,7 @@
 `guild_id` 列と Todoist トークンのような機密列はホワイトリストに
 含まれていないため、構造的に出力されない。
 """
+
 from __future__ import annotations
 
 import io
@@ -60,8 +61,8 @@ async def build_export_zip(db, guild_id: int) -> tuple[bytes, dict[str, int]]:
             counts[key] = len(rows)
             zf.writestr(f"{key}.csv", rows_to_csv(spec, rows))
         listing = "\n".join(
-            f"  {key}.csv — {spec.label}（{counts[key]} 行）"
-            for key, spec in TABLES.items())
+            f"  {key}.csv — {spec.label}（{counts[key]} 行）" for key, spec in TABLES.items()
+        )
         zf.writestr("README.txt", EXPORT_README.format(files=listing))
     return buf.getvalue(), counts
 
@@ -98,19 +99,19 @@ class DeleteConfirmModal(discord.ui.Modal):
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
         await self._cog.handle_delete_confirm(
-            interaction, self._guild_id, self._guild_name, self.answer.value)
+            interaction, self._guild_id, self._guild_name, self.answer.value
+        )
 
 
 class Data(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    group = app_commands.Group(
-        name="data", description="サーバーデータの書き出し")
+    group = app_commands.Group(name="data", description="サーバーデータの書き出し")
 
     @group.command(
-        name="export",
-        description="このサーバーのデータを ZIP（CSV 群）で書き出します。")
+        name="export", description="このサーバーのデータを ZIP（CSV 群）で書き出します。"
+    )
     @require_manage_guild_or(Level.L4)
     async def export(self, interaction: discord.Interaction):
         guild_id = await ensure_guild(interaction)
@@ -124,35 +125,43 @@ class Data(commands.Cog):
 
         payload, counts = await build_export_zip(self.bot.db, guild_id)
         total_rows = sum(counts.values())
-        await self._audit(guild_id, interaction, "data.export",
-                          f"{len(counts)} テーブル / {total_rows} 行 "
-                          f"({len(payload)} バイト)")
+        await self._audit(
+            guild_id,
+            interaction,
+            "data.export",
+            f"{len(counts)} テーブル / {total_rows} 行 ({len(payload)} バイト)",
+        )
 
         if len(payload) > MAX_ATTACHMENT_BYTES:
-            await self._send(interaction, error_embed(
-                "データが Discord の添付上限（8MB）を超えました。\n"
-                "分割は行いません。Web ダッシュボードの CSV 出力から"
-                "テーブルごとに取得してください。"))
+            await self._send(
+                interaction,
+                error_embed(
+                    "データが Discord の添付上限（8MB）を超えました。\n"
+                    "分割は行いません。Web ダッシュボードの CSV 出力から"
+                    "テーブルごとに取得してください。"
+                ),
+            )
             return
 
-        breakdown = "\n".join(
-            f"・{spec.label}: {counts[key]} 行"
-            for key, spec in TABLES.items())
+        breakdown = "\n".join(f"・{spec.label}: {counts[key]} 行" for key, spec in TABLES.items())
         embed = success_embed(
             "データを書き出しました",
             f"{len(counts)} テーブル / 合計 {total_rows} 行\n\n{breakdown}",
-            executor=interaction.user.display_name)
+            executor=interaction.user.display_name,
+        )
         await self._send(
-            interaction, embed,
-            file=discord.File(io.BytesIO(payload),
-                              filename=export_filename(guild_id)))
+            interaction,
+            embed,
+            file=discord.File(io.BytesIO(payload), filename=export_filename(guild_id)),
+        )
 
     # ------------------------------------------------------------------
     # 削除（F2-3）。ここでは予約だけを行い、実削除は日次ジョブが担当する
     # ------------------------------------------------------------------
     @group.command(
         name="delete",
-        description="このサーバーのデータを削除します（確認のため名前の入力が必要）。")
+        description="このサーバーのデータを削除します（確認のため名前の入力が必要）。",
+    )
     @require_manage_guild_or(Level.L4)
     async def delete(self, interaction: discord.Interaction):
         guild_id = await ensure_guild(interaction)
@@ -160,18 +169,20 @@ class Data(commands.Cog):
             return
         try:
             await interaction.response.send_modal(
-                DeleteConfirmModal(self, guild_id, interaction.guild.name))
+                DeleteConfirmModal(self, guild_id, interaction.guild.name)
+            )
         except discord.HTTPException as e:
-            log.warning("/data delete のモーダル表示に失敗 (guild=%s): %s",
-                        guild_id, e)
+            log.warning("/data delete のモーダル表示に失敗 (guild=%s): %s", guild_id, e)
 
-    async def handle_delete_confirm(self, interaction: discord.Interaction,
-                                    guild_id: int, guild_name: str,
-                                    given: str) -> None:
+    async def handle_delete_confirm(
+        self, interaction: discord.Interaction, guild_id: int, guild_name: str, given: str
+    ) -> None:
         """モーダルの入力を照合し、一致していれば削除を予約する。"""
         if not confirmation_matches(guild_name, given):
-            await self._respond(interaction, error_embed(
-                "サーバー名が一致しませんでした。**削除は行っていません。**"))
+            await self._respond(
+                interaction,
+                error_embed("サーバー名が一致しませんでした。**削除は行っていません。**"),
+            )
             return
 
         try:
@@ -184,32 +195,34 @@ class Data(commands.Cog):
         payload, counts = await build_export_zip(self.bot.db, guild_id)
         purge_at = await GuildRepository(self.bot.db).request_purge(guild_id)
         total_rows = sum(counts.values())
-        await self._audit(guild_id, interaction, "data.delete.requested",
-                          f"purge_after={purge_at} / {total_rows} 行")
-        log.info("データ削除が要求されました (guild=%s, purge_after=%s)",
-                 guild_id, purge_at)
+        await self._audit(
+            guild_id,
+            interaction,
+            "data.delete.requested",
+            f"purge_after={purge_at} / {total_rows} 行",
+        )
+        log.info("データ削除が要求されました (guild=%s, purge_after=%s)", guild_id, purge_at)
 
         embed = info_embed(
             "データの削除を受け付けました",
             f"このサーバーのデータ（{total_rows} 行）は次回の定期処理で削除されます。\n"
             "**添付の ZIP が最後のバックアップです。**必ず保存してください。\n\n"
             "取り消す場合は、削除が実行される前に `/data delete-cancel` を実行してください。",
-            executor=interaction.user.display_name)
+            executor=interaction.user.display_name,
+        )
         file = None
         if len(payload) <= MAX_ATTACHMENT_BYTES:
-            file = discord.File(io.BytesIO(payload),
-                                filename=export_filename(guild_id))
+            file = discord.File(io.BytesIO(payload), filename=export_filename(guild_id))
         else:
             embed.add_field(
                 name="バックアップを添付できませんでした",
                 value="データが 8MB を超えています。削除が実行される前に "
-                      "Web ダッシュボードから CSV を取得してください。",
-                inline=False)
+                "Web ダッシュボードから CSV を取得してください。",
+                inline=False,
+            )
         await self._send(interaction, embed, file=file)
 
-    @group.command(
-        name="delete-cancel",
-        description="予約済みのデータ削除を取り消します。")
+    @group.command(name="delete-cancel", description="予約済みのデータ削除を取り消します。")
     @require_manage_guild_or(Level.L4)
     async def delete_cancel(self, interaction: discord.Interaction):
         guild_id = await ensure_guild(interaction)
@@ -218,51 +231,59 @@ class Data(commands.Cog):
         try:
             await interaction.response.defer(ephemeral=True)
         except discord.HTTPException as e:
-            log.warning("/data delete-cancel の defer に失敗 (guild=%s): %s",
-                        guild_id, e)
+            log.warning("/data delete-cancel の defer に失敗 (guild=%s): %s", guild_id, e)
             return
 
         cancelled = await GuildRepository(self.bot.db).cancel_purge(guild_id)
         if not cancelled:
-            await self._send(interaction, info_embed(
-                "削除は予約されていません",
-                "取り消す対象がありませんでした。"))
+            await self._send(
+                interaction,
+                info_embed("削除は予約されていません", "取り消す対象がありませんでした。"),
+            )
             return
 
-        await self._audit(guild_id, interaction, "data.delete.cancelled",
-                          "削除予約を取り消した")
+        await self._audit(guild_id, interaction, "data.delete.cancelled", "削除予約を取り消した")
         log.info("データ削除の予約が取り消されました (guild=%s)", guild_id)
-        await self._send(interaction, success_embed(
-            "データ削除を取り消しました",
-            "予約されていた削除を取り消しました。データはそのまま残ります。",
-            executor=interaction.user.display_name))
+        await self._send(
+            interaction,
+            success_embed(
+                "データ削除を取り消しました",
+                "予約されていた削除を取り消しました。データはそのまま残ります。",
+                executor=interaction.user.display_name,
+            ),
+        )
 
-    async def _audit(self, guild_id: int, interaction: discord.Interaction,
-                     action: str, detail: str) -> None:
+    async def _audit(
+        self, guild_id: int, interaction: discord.Interaction, action: str, detail: str
+    ) -> None:
         """監査ログへ記録する（記録の失敗で操作自体は止めない）。"""
         try:
             await AuditLogRepository(self.bot.db).record(
-                guild_id, actor_id=str(interaction.user.id),
-                action=action, target="all", detail=detail)
+                guild_id,
+                actor_id=str(interaction.user.id),
+                action=action,
+                target="all",
+                detail=detail,
+            )
         except Exception as e:  # noqa: BLE001
-            log.warning("監査ログの記録に失敗 (guild=%s): %s", guild_id,
-                        type(e).__name__)
+            log.warning("監査ログの記録に失敗 (guild=%s): %s", guild_id, type(e).__name__)
 
-    async def _respond(self, interaction: discord.Interaction,
-                       embed: discord.Embed) -> None:
+    async def _respond(self, interaction: discord.Interaction, embed: discord.Embed) -> None:
         """まだ応答していない interaction へ ephemeral で返す。"""
         try:
             if interaction.response.is_done():
                 await interaction.followup.send(embed=embed, ephemeral=True)
             else:
-                await interaction.response.send_message(embed=embed,
-                                                        ephemeral=True)
+                await interaction.response.send_message(embed=embed, ephemeral=True)
         except discord.HTTPException as e:
             log.warning("/data の応答送信に失敗: %s", e)
 
-    async def _send(self, interaction: discord.Interaction,
-                    embed: discord.Embed,
-                    file: discord.File | None = None) -> None:
+    async def _send(
+        self,
+        interaction: discord.Interaction,
+        embed: discord.Embed,
+        file: discord.File | None = None,
+    ) -> None:
         kwargs = {"embed": embed, "ephemeral": True}
         if file is not None:
             kwargs["file"] = file

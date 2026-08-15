@@ -11,6 +11,7 @@ guild_id 条件を付ける。ノードは (guild_id, node_id) で一意。
 進捗率（manual_progress）は 0.0〜1.0 の小数で保持する。表示・集計は
 services/progress_tree.py が行い、本リポジトリは永続化だけを担当する。
 """
+
 from __future__ import annotations
 
 from typing import Any, ClassVar
@@ -46,60 +47,66 @@ class ProgressRepository(BaseRepository):
         rows = await self.db.fetchall(
             f"SELECT {NODE_COLUMNS} FROM progress_nodes"
             " WHERE guild_id = ? ORDER BY sort_order, node_id",
-            (guild_id,))
+            (guild_id,),
+        )
         return [dict(r) for r in rows]
 
-    async def get_node(self, guild_id: int,
-                       node_id: str) -> dict[str, Any] | None:
+    async def get_node(self, guild_id: int, node_id: str) -> dict[str, Any] | None:
         row = await self.db.fetchone(
-            f"SELECT {NODE_COLUMNS} FROM progress_nodes"
-            " WHERE guild_id = ? AND node_id = ?",
-            (guild_id, node_id))
+            f"SELECT {NODE_COLUMNS} FROM progress_nodes WHERE guild_id = ? AND node_id = ?",
+            (guild_id, node_id),
+        )
         return dict(row) if row else None
 
     async def exists(self, guild_id: int, node_id: str) -> bool:
         row = await self.db.fetchone(
-            "SELECT 1 FROM progress_nodes WHERE guild_id = ? AND node_id = ?",
-            (guild_id, node_id))
+            "SELECT 1 FROM progress_nodes WHERE guild_id = ? AND node_id = ?", (guild_id, node_id)
+        )
         return row is not None
 
     async def count_nodes(self, guild_id: int) -> int:
         row = await self.db.fetchone(
-            "SELECT COUNT(*) AS n FROM progress_nodes WHERE guild_id = ?",
-            (guild_id,))
+            "SELECT COUNT(*) AS n FROM progress_nodes WHERE guild_id = ?", (guild_id,)
+        )
         return int(row["n"]) if row else 0
 
-    async def list_children(self, guild_id: int,
-                            parent_id: str | None) -> list[dict[str, Any]]:
+    async def list_children(self, guild_id: int, parent_id: str | None) -> list[dict[str, Any]]:
         """直下の子ノードを表示順で返す（parent_id=None はルート＝機体）。"""
         if parent_id is None:
             rows = await self.db.fetchall(
                 f"SELECT {NODE_COLUMNS} FROM progress_nodes"
                 " WHERE guild_id = ? AND (parent_id IS NULL OR parent_id = '')"
                 " ORDER BY sort_order, node_id",
-                (guild_id,))
+                (guild_id,),
+            )
         else:
             rows = await self.db.fetchall(
                 f"SELECT {NODE_COLUMNS} FROM progress_nodes"
                 " WHERE guild_id = ? AND parent_id = ?"
                 " ORDER BY sort_order, node_id",
-                (guild_id, parent_id))
+                (guild_id, parent_id),
+            )
         return [dict(r) for r in rows]
 
     # ------------------------------------------------------------------
     # ノード: 追加・更新
     # ------------------------------------------------------------------
-    async def upsert_node(self, guild_id: int, node_id: str, *,
-                          parent_id: str | None = None,
-                          sort_order: float = 0.0,
-                          name: str = "",
-                          assignee: str | None = None,
-                          status: str | None = None,
-                          manual_progress: float | None = None,
-                          source: str = SOURCE_MANUAL,
-                          todoist_task_id: str | None = None,
-                          weight: float = 1.0,
-                          now_text: str = "") -> None:
+    async def upsert_node(
+        self,
+        guild_id: int,
+        node_id: str,
+        *,
+        parent_id: str | None = None,
+        sort_order: float = 0.0,
+        name: str = "",
+        assignee: str | None = None,
+        status: str | None = None,
+        manual_progress: float | None = None,
+        source: str = SOURCE_MANUAL,
+        todoist_task_id: str | None = None,
+        weight: float = 1.0,
+        now_text: str = "",
+    ) -> None:
         """ノードを追加、既存なら全項目を更新する（同期・移行用）。
 
         部分更新は update_node() を使う。created_at は初回のみ設定され、
@@ -124,21 +131,41 @@ class ProgressRepository(BaseRepository):
                 weight = excluded.weight,
                 updated_at = excluded.updated_at
             """,
-            (guild_id, node_id, parent_id, sort_order, name, assignee,
-             status, manual_progress, source, todoist_task_id, weight,
-             now_text, now_text))
+            (
+                guild_id,
+                node_id,
+                parent_id,
+                sort_order,
+                name,
+                assignee,
+                status,
+                manual_progress,
+                source,
+                todoist_task_id,
+                weight,
+                now_text,
+                now_text,
+            ),
+        )
 
     # 部分更新を許可する列（呼び出し側の文字列をそのまま SQL に入れない）。
     # guild_id / node_id は update_node() の位置引数と同名のため、
     # そもそもキーワードとして渡せない（テナント越境の更新を構造的に防ぐ）。
     _UPDATABLE: ClassVar[set[str]] = {
-        "parent_id", "sort_order", "name", "assignee", "status",
-        "manual_progress", "source", "todoist_task_id", "weight",
-        "target_weight_g", "actual_weight_g",
+        "parent_id",
+        "sort_order",
+        "name",
+        "assignee",
+        "status",
+        "manual_progress",
+        "source",
+        "todoist_task_id",
+        "weight",
+        "target_weight_g",
+        "actual_weight_g",
     }
 
-    async def update_node(self, guild_id: int, node_id: str,
-                          now_text: str, **fields: Any) -> bool:
+    async def update_node(self, guild_id: int, node_id: str, now_text: str, **fields: Any) -> bool:
         """指定した列だけを更新する。更新した行があれば True。
 
         未知の列名は ValueError（呼び出し側の打ち間違いを早期に検出する）。
@@ -153,13 +180,20 @@ class ProgressRepository(BaseRepository):
         cur = await self.db.execute(
             f"UPDATE progress_nodes SET {assignments}, updated_at = ?"
             " WHERE guild_id = ? AND node_id = ?",
-            params)
+            params,
+        )
         return cur.rowcount > 0
 
-    async def set_progress(self, guild_id: int, node_id: str,
-                           progress: float | None, now_text: str, *,
-                           status: str | None = None,
-                           source: str | None = None) -> bool:
+    async def set_progress(
+        self,
+        guild_id: int,
+        node_id: str,
+        progress: float | None,
+        now_text: str,
+        *,
+        status: str | None = None,
+        source: str | None = None,
+    ) -> bool:
         """進捗率（と任意で状態・ソース）を更新する。"""
         fields: dict[str, Any] = {"manual_progress": progress}
         if status is not None:
@@ -174,8 +208,8 @@ class ProgressRepository(BaseRepository):
     async def delete_node(self, guild_id: int, node_id: str) -> bool:
         """1ノードを削除する（子は孤児になるため呼び出し側で扱う）。"""
         cur = await self.db.execute(
-            "DELETE FROM progress_nodes WHERE guild_id = ? AND node_id = ?",
-            (guild_id, node_id))
+            "DELETE FROM progress_nodes WHERE guild_id = ? AND node_id = ?", (guild_id, node_id)
+        )
         return cur.rowcount > 0
 
     async def delete_subtree(self, guild_id: int, node_id: str) -> int:
@@ -209,8 +243,7 @@ class ProgressRepository(BaseRepository):
 
     async def delete_all_nodes(self, guild_id: int) -> int:
         """ギルドの全ノードを削除する（移行スクリプトの洗い替え用）。"""
-        cur = await self.db.execute(
-            "DELETE FROM progress_nodes WHERE guild_id = ?", (guild_id,))
+        cur = await self.db.execute("DELETE FROM progress_nodes WHERE guild_id = ?", (guild_id,))
         return cur.rowcount
 
     # ------------------------------------------------------------------
@@ -221,13 +254,20 @@ class ProgressRepository(BaseRepository):
             "SELECT project_name, node_id, notify_channel_id, created_by,"
             " created_at, updated_at FROM progress_todoist_links"
             " WHERE guild_id = ? ORDER BY project_name",
-            (guild_id,))
+            (guild_id,),
+        )
         return [dict(r) for r in rows]
 
-    async def upsert_todoist_link(self, guild_id: int, project_name: str,
-                                  node_id: str, now_text: str, *,
-                                  notify_channel_id: str = "",
-                                  created_by: str = "") -> None:
+    async def upsert_todoist_link(
+        self,
+        guild_id: int,
+        project_name: str,
+        node_id: str,
+        now_text: str,
+        *,
+        notify_channel_id: str = "",
+        created_by: str = "",
+    ) -> None:
         await self.db.execute(
             """
             INSERT INTO progress_todoist_links
@@ -239,15 +279,14 @@ class ProgressRepository(BaseRepository):
                 notify_channel_id = excluded.notify_channel_id,
                 updated_at = excluded.updated_at
             """,
-            (guild_id, project_name, node_id, notify_channel_id,
-             created_by, now_text, now_text))
+            (guild_id, project_name, node_id, notify_channel_id, created_by, now_text, now_text),
+        )
 
-    async def delete_todoist_link(self, guild_id: int,
-                                  project_name: str) -> bool:
+    async def delete_todoist_link(self, guild_id: int, project_name: str) -> bool:
         cur = await self.db.execute(
-            "DELETE FROM progress_todoist_links"
-            " WHERE guild_id = ? AND project_name = ?",
-            (guild_id, project_name))
+            "DELETE FROM progress_todoist_links WHERE guild_id = ? AND project_name = ?",
+            (guild_id, project_name),
+        )
         return cur.rowcount > 0
 
     # ------------------------------------------------------------------
@@ -256,8 +295,9 @@ class ProgressRepository(BaseRepository):
     # ------------------------------------------------------------------
     # マイルストーン（大会からの逆算アラート）
     # ------------------------------------------------------------------
-    async def add_milestone(self, guild_id: int, node_id: str, name: str,
-                            due_date: str, now_text: str) -> None:
+    async def add_milestone(
+        self, guild_id: int, node_id: str, name: str, due_date: str, now_text: str
+    ) -> None:
         """マイルストーンを登録する（同じ node_id + 名前なら期限を更新）。"""
         await self.db.execute(
             """
@@ -271,11 +311,9 @@ class ProgressRepository(BaseRepository):
             (guild_id, node_id, name, due_date, now_text, now_text),
         )
 
-    async def remove_milestone(self, guild_id: int, node_id: str,
-                               name: str) -> bool:
+    async def remove_milestone(self, guild_id: int, node_id: str, name: str) -> bool:
         cur = await self.db.execute(
-            "DELETE FROM progress_milestones"
-            " WHERE guild_id = ? AND node_id = ? AND name = ?",
+            "DELETE FROM progress_milestones WHERE guild_id = ? AND node_id = ? AND name = ?",
             (guild_id, node_id, name),
         )
         return cur.rowcount > 0
@@ -286,19 +324,21 @@ class ProgressRepository(BaseRepository):
             "SELECT milestone_id, node_id, name, due_date, created_at,"
             " updated_at FROM progress_milestones"
             " WHERE guild_id = ? ORDER BY due_date, name",
-            (guild_id,))
+            (guild_id,),
+        )
         return [dict(r) for r in rows]
 
     async def list_spar_links(self, guild_id: int) -> list[dict[str, Any]]:
         rows = await self.db.fetchall(
             "SELECT keta_name, node_id, target_layers, created_at, updated_at"
             " FROM progress_spar_links WHERE guild_id = ? ORDER BY keta_name",
-            (guild_id,))
+            (guild_id,),
+        )
         return [dict(r) for r in rows]
 
-    async def upsert_spar_link(self, guild_id: int, keta_name: str,
-                               node_id: str, target_layers: int,
-                               now_text: str) -> None:
+    async def upsert_spar_link(
+        self, guild_id: int, keta_name: str, node_id: str, target_layers: int, now_text: str
+    ) -> None:
         if target_layers <= 0:
             raise ValueError("目標層数は 1 以上を指定してください。")
         await self.db.execute(
@@ -312,13 +352,14 @@ class ProgressRepository(BaseRepository):
                 target_layers = excluded.target_layers,
                 updated_at = excluded.updated_at
             """,
-            (guild_id, keta_name, node_id, target_layers, now_text, now_text))
+            (guild_id, keta_name, node_id, target_layers, now_text, now_text),
+        )
 
     async def delete_spar_link(self, guild_id: int, keta_name: str) -> bool:
         cur = await self.db.execute(
-            "DELETE FROM progress_spar_links"
-            " WHERE guild_id = ? AND keta_name = ?",
-            (guild_id, keta_name))
+            "DELETE FROM progress_spar_links WHERE guild_id = ? AND keta_name = ?",
+            (guild_id, keta_name),
+        )
         return cur.rowcount > 0
 
     # ------------------------------------------------------------------
@@ -333,7 +374,8 @@ class ProgressRepository(BaseRepository):
         rows = await self.db.fetchall(
             "SELECT keta, COUNT(DISTINCT layer_num) AS layers"
             " FROM layer_records WHERE guild_id = ? GROUP BY keta",
-            (guild_id,))
+            (guild_id,),
+        )
         return {r["keta"]: int(r["layers"]) for r in rows}
 
     async def list_layer_dates(self, guild_id: int) -> dict[str, list[str]]:
@@ -347,7 +389,8 @@ class ProgressRepository(BaseRepository):
             "SELECT keta, layer_num, MIN(ended_at) AS ended_at"
             " FROM layer_records WHERE guild_id = ?"
             " GROUP BY keta, layer_num ORDER BY keta, ended_at",
-            (guild_id,))
+            (guild_id,),
+        )
         out: dict[str, list[str]] = {}
         for row in rows:
             out.setdefault(row["keta"], []).append(row["ended_at"])

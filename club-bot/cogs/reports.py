@@ -5,6 +5,7 @@ Reports モジュール（仕様 11.6）。
 出力例: 期限超過タスク一覧、月次出欠率、支援依頼頻度（11.6.2）。
 マルチテナント版: 全集計を interaction.guild.id でスコープする。
 """
+
 from __future__ import annotations
 
 import csv
@@ -84,11 +85,11 @@ class Reports(commands.Cog):
         repo = ProgressRepository(self.bot.db)
         try:
             rows = await repo.list_milestones(guild_id)
-            statuses = (evaluate_all(await load_tree(repo, guild_id), rows,
-                                     today=today) if rows else [])
+            statuses = (
+                evaluate_all(await load_tree(repo, guild_id), rows, today=today) if rows else []
+            )
         except Exception as e:  # noqa: BLE001  (週次サマリー全体は止めない)
-            log.warning("マイルストーンの集計に失敗 (guild=%s): %s",
-                        guild_id, type(e).__name__)
+            log.warning("マイルストーンの集計に失敗 (guild=%s): %s", guild_id, type(e).__name__)
             return ""
 
         if left is None and not statuses:
@@ -120,32 +121,56 @@ class Reports(commands.Cog):
         guild = interaction.guild
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(["local_task_id", "todoist_task_id", "title", "assignee", "team",
-                         "due_date", "priority", "status", "created_by", "created_at",
-                         "completed_at"])
+        writer.writerow(
+            [
+                "local_task_id",
+                "todoist_task_id",
+                "title",
+                "assignee",
+                "team",
+                "due_date",
+                "priority",
+                "status",
+                "created_by",
+                "created_at",
+                "completed_at",
+            ]
+        )
         for t in tasks:
             assignee = ""
             if t.get("assignee_id") and guild:
                 m = guild.get_member(int(t["assignee_id"]))
                 assignee = m.display_name if m else t["assignee_id"]
-            writer.writerow([
-                t["local_task_id"], t.get("todoist_task_id") or "", t["title"], assignee,
-                team_names.get(t.get("team_key"), t.get("team_key") or ""),
-                t.get("due_date") or "", t.get("priority") or "", t["status"],
-                t["created_by"], t["created_at"], t.get("completed_at") or "",
-            ])
+            writer.writerow(
+                [
+                    t["local_task_id"],
+                    t.get("todoist_task_id") or "",
+                    t["title"],
+                    assignee,
+                    team_names.get(t.get("team_key"), t.get("team_key") or ""),
+                    t.get("due_date") or "",
+                    t.get("priority") or "",
+                    t["status"],
+                    t["created_by"],
+                    t["created_at"],
+                    t.get("completed_at") or "",
+                ]
+            )
         data = buf.getvalue().encode("utf-8-sig")
         file = discord.File(io.BytesIO(data), filename=f"tasks_{now().strftime('%Y%m%d')}.csv")
         await interaction.followup.send(
             embed=success_embed("タスク CSV を出力しました", f"{len(tasks)} 件"),
-            file=file, ephemeral=True)
+            file=file,
+            ephemeral=True,
+        )
 
     # ---------- audit (監査ログ) ----------
     @group.command(name="audit", description="直近の通知・監査ログを表示します。")
     @app_commands.describe(limit="表示件数（最大25）")
     @require(Level.L3)
-    async def audit(self, interaction: discord.Interaction,
-                    limit: app_commands.Range[int, 1, 25] = 10):
+    async def audit(
+        self, interaction: discord.Interaction, limit: app_commands.Range[int, 1, 25] = 10
+    ):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
@@ -159,8 +184,9 @@ class Reports(commands.Cog):
             embed.add_field(
                 name=f"{d['reminder_type']} [{d['status']}]",
                 value=f"対象: {d['target_id']} / {fmt_jp(from_iso(d['sent_at']))}"
-                      + (f"\nエラー: {d['error_message']}" if d.get("error_message") else ""),
-                inline=False)
+                + (f"\nエラー: {d['error_message']}" if d.get("error_message") else ""),
+                inline=False,
+            )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ---------- attendance rate ----------
@@ -189,7 +215,8 @@ class Reports(commands.Cog):
             embed.add_field(
                 name=s["title"],
                 value=f"参加率(ok/総票): {rate}（ok {total_ok} / 票 {total_votes}）",
-                inline=False)
+                inline=False,
+            )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
