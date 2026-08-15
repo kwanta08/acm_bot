@@ -29,7 +29,7 @@
 
 ## スキーマバージョンの割り当て（衝突防止）
 
-現行は `SCHEMA_VERSION = 10`（`migrations/009_progress_nodes.sql` まで）。
+現行は `SCHEMA_VERSION = 15`（`migrations/014_discord_name_cache.sql` まで）。
 
 | 版 | migration | フェーズ |
 |---|---|---|
@@ -37,6 +37,7 @@
 | v12 | `011_progress_weight.sql` | F3（重量管理） |
 | v13 | `012_progress_milestones.sql` | F4（大会逆算） |
 | v14 | `013_seasons.sql` | F5（年度替わり） |
+| v15 | `014_discord_name_cache.sql` | F6（ダッシュボード改修） |
 
 ---
 
@@ -296,6 +297,38 @@
 
 ---
 
+## Phase F6: ダッシュボード改修（シートタブ・ID 表示廃止・JST 秒表示）
+
+**背景**: 表グリッドは全予定の出欠・全桁の記録が1枚に混ざり、人物・チャンネルは
+Discord の ID が生のまま、日時は ISO 文字列のまま表示されていた。
+
+- [x] **F6-1** ダッシュボードのシート切替と表示解決を実装する。
+      - **変更ファイル**: `dashboard/display.py`(新規), `dashboard/routers/tables.py`,
+        `dashboard/static/app.js` / `style.css`, `repositories/table_repository.py`,
+        `repositories/schedule_repository.py`, `repositories/name_cache_repository.py`(新規),
+        `cogs/name_cache.py`(新規), `bot.py`, `migrations/014_discord_name_cache.sql`,
+        `utils/db.py`(v15), `tests/test_dashboard_display.py` /
+        `test_dashboard_views.py` / `test_name_cache.py`(すべて新規)
+      - **受入**:
+        - 出欠回答はタブ1つ = 予定1件、桁巻き記録はタブ1つ = 桁1つ。
+          タブは共通コンポーネント（`renderSheetTabs` / `.sheetbar`）で、
+          リロード無しで切り替わり、開催日時の降順・横スクロール・
+          選択中の明示・0 件時の空状態を備える
+        - 人物は「名前キャッシュ（ニックネーム → グローバル表示名 →
+          ユーザー名）→ members 台帳 → ID フォールバック」で解決し、
+          チャンネルは `#名前`（削除済みはフォールバック）で表示する。
+          DB は従来どおり ID を保持し、解決は表示層（`_display`）で行う
+        - すべての日時は Asia/Tokyo・秒単位で表示（naive な既存値は
+          保存規約どおりローカル TZ として解釈。DB の書き換えはしない）
+        - 名前の解決はギルド単位の一括読みで N+1 を作らない。
+          キャッシュは bot がギルドイベントから同期する（スキーマ v15）
+      - **検証**: `tests/test_dashboard_views.py`（シート絞り込み・
+        ギルドスコープ・空状態・表示解決・CSV・PATCH 応答）、
+        `tests/test_dashboard_display.py`（JST 秒・日付跨ぎ・フォールバック）、
+        `tests/test_name_cache.py`（同期・優先順位・guild_id スコープ）
+
+---
+
 ## 実施順の理由
 
 1. **F0** — 検証ループを速くしてから始める（以降の全タスクの周回コストが下がる）
@@ -335,3 +368,4 @@
 | F5-1 | スキーマ v14。`seasons` と `members.status` / `left_season`（migrations/013）。**後方互換がこのフェーズの主眼**: `status` は `NOT NULL DEFAULT 'active'` で追加するため、**既存メンバーは全員そのまま active** になり、移行で誰も勝手に卒業扱いにならない（`test_existing_members_all_become_active` と、他の全列が保持されることを `test_existing_member_columns_are_preserved` で固定）。表の設計判断どおり全テーブルに `season_id` は張っていない |
 | F5-2 | `/season list\|new\|rollover` と在籍状態の反映。**設計判断**: (1) `list_members()` に `include_alumni`（既定 False）を足し、既定の一覧・検索から卒業者を外した。`search_support()` はこれを経由するので自動的に効く。既存テスト（`test_teams_skills` / `test_multi_tenant` 含む）が全て通ることを確認済み。(2) rollover の確定処理は `services/season_service.perform_rollover()` に切り出して Discord なしでテストできるようにした。(3) **選ばれなかったメンバーの status には触れない**（`test_rollover_does_not_touch_unselected_members`）。(4) 卒業者選択は `discord.ui.UserSelect`（上限25名）。**申し送り**: 一度に26名以上を卒業させる場合はコマンドを複数回実行する必要がある |
 | F5-3 | 年度スナップショットとドキュメント更新。`/season rollover` の完了時に `cogs/data.build_export_zip()` を**共有**して ZIP を添付する（エクスポートを再実装しない）。`docs/GUIDE.md` の年度替わりの章を `/season rollover` 前提へ全面的に書き換え、`README.md` の機能表に `/help` `/weight` `/countdown` `/season` `/data` を追加、`docs/OPERATION.md` に不足していた **26 コマンド**を追記した（新機能15件のほか、`/set_*` `/settings_*` `/member setup` `/schedule edit-deadline` など既存の記載漏れ11件も含む）。**回帰テスト**: `tests/test_docs_commands.py` が `bot.tree` の全89コマンドと `OPERATION.md` を突き合わせ、記載漏れと逆に実装から消えたコマンドの両方を検出する |
+| F6-1 | ダッシュボードのシートタブ・ID 表示廃止・JST 秒表示（スキーマ v15）。**設計判断**: (1) ダッシュボードは設計上 Bot トークンを持たないため、名前解決は Discord API ではなく **bot が同期する `discord_name_cache` テーブル**で行う（`cogs/name_cache.py` が起動時全同期＋イベント差分。ユーザー行は退会後も残し「最後に知られた名前」を出す。チャンネル行は削除で消しフォールバック表示に落とす）。(2) シート切替は新規 API を作らず既存 `/tables/{key}` に `?sheet=` を足し、絞り込み条件はリポジトリ側で固定（votes は options 経由の副問い合わせ、桁は `keta = ?`。編集 PATCH・CSV・監査は既存の仕組みへ相乗り）。(3) 行の生値（ID・ISO）は変えず `_display` を添える方式にし、編集入力は従来どおり生値で行う。(4) 予定タブの「開催日時」は最初の候補日（無ければ締切）。(5) naive な既存日時は保存規約（utils/parser.TZ）の壁時計として解釈し、**DB の書き換えマイグレーションはしない**。(6) ダッシュボード CSV は画面と同じ表示値で出す（生値の完全バックアップは `/data export` が担当）。**申し送り**: ロール ID（班長ロール等）は未解決のまま（キャッシュ対象は user/channel のみ）。設定画面 API（settings ルーター）はフロント未実装のため対象外。キャッシュが空の期間（v15 適用直後〜bot 初回同期まで）は members 台帳名で表示される |

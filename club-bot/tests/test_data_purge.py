@@ -8,6 +8,7 @@
 
 加えて、1ギルドの削除失敗が他ギルドの処理を止めないことを確認する。
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -53,125 +54,171 @@ async def _connected_db() -> Database:
 # test_seed_covers_every_purge_target が落ち、削除処理への追随を促す。
 _SEED_SQL: dict[str, tuple[str, tuple[str, ...]]] = {
     "guilds": (
-        ("INSERT INTO guilds (guild_id, guild_name, joined_at)"
-         " VALUES (?, 'サークル', '2026-01-01')"),
+        (
+            "INSERT INTO guilds (guild_id, guild_name, joined_at)"
+            " VALUES (?, 'サークル', '2026-01-01')"
+        ),
         (),
     ),
     "settings": (
-        ("INSERT INTO settings (guild_id, setting_key, setting_value)"
-         " VALUES (?, 'K', 'V')"),
+        ("INSERT INTO settings (guild_id, setting_key, setting_value) VALUES (?, 'K', 'V')"),
         (),
     ),
     "teams": (
-        ("INSERT INTO teams (guild_id, team_key, team_name)"
-         " VALUES (?, 'struct', '構造')"),
+        ("INSERT INTO teams (guild_id, team_key, team_name) VALUES (?, 'struct', '構造')"),
         (),
     ),
     "members": (
-        ("INSERT INTO members (guild_id, user_id, display_name, joined_at)"
-         " VALUES (?, 'u1', '山田', '2026-01-01')"),
+        (
+            "INSERT INTO members (guild_id, user_id, display_name, joined_at)"
+            " VALUES (?, 'u1', '山田', '2026-01-01')"
+        ),
         (),
     ),
     "schedules": (
-        ("INSERT INTO schedules (guild_id, schedule_id, title, deadline,"
-         " created_by, channel_id)"
-         " VALUES (?, ?, '練習', '2026-02-01', 'u1', 'c1')"),
+        (
+            "INSERT INTO schedules (guild_id, schedule_id, title, deadline,"
+            " created_by, channel_id)"
+            " VALUES (?, ?, '練習', '2026-02-01', 'u1', 'c1')"
+        ),
         ("sched",),
     ),
     # schedule_options → schedules、schedule_votes → schedule_options の
     # 外部キーがあるため、参照先と同じ suffix 付き ID を使う
     "schedule_options": (
-        ("INSERT INTO schedule_options (guild_id, option_id, schedule_id,"
-         " label, start_at) VALUES (?, ?, ?, '候補1', '2026-02-01')"),
+        (
+            "INSERT INTO schedule_options (guild_id, option_id, schedule_id,"
+            " label, start_at) VALUES (?, ?, ?, '候補1', '2026-02-01')"
+        ),
         ("opt", "sched"),
     ),
     "schedule_votes": (
-        ("INSERT INTO schedule_votes (guild_id, option_id, user_id, status,"
-         " updated_at) VALUES (?, ?, 'u1', 'ok', '2026-01-01')"),
+        (
+            "INSERT INTO schedule_votes (guild_id, option_id, user_id, status,"
+            " updated_at) VALUES (?, ?, 'u1', 'ok', '2026-01-01')"
+        ),
         ("opt",),
     ),
     "tasks": (
-        ("INSERT INTO tasks (guild_id, title, created_by, created_at)"
-         " VALUES (?, 'タスク', 'u1', '2026-01-01')"),
+        (
+            "INSERT INTO tasks (guild_id, title, created_by, created_at)"
+            " VALUES (?, 'タスク', 'u1', '2026-01-01')"
+        ),
         (),
     ),
     "reminders_log": (
-        ("INSERT INTO reminders_log (guild_id, reminder_type, target_id,"
-         " sent_at, status) VALUES (?, 'task', 't1', '2026-01-01', 'ok')"),
+        (
+            "INSERT INTO reminders_log (guild_id, reminder_type, target_id,"
+            " sent_at, status) VALUES (?, 'task', 't1', '2026-01-01', 'ok')"
+        ),
         (),
     ),
     "todoist_sections": (
-        ("INSERT INTO todoist_sections (guild_id, section_id, team_key,"
-         " updated_at) VALUES (?, 's1', 'struct', '2026-01-01')"),
+        (
+            "INSERT INTO todoist_sections (guild_id, section_id, team_key,"
+            " updated_at) VALUES (?, 's1', 'struct', '2026-01-01')"
+        ),
         (),
     ),
     "layer_sessions": (
-        ("INSERT INTO layer_sessions (guild_id, user_id, keta, layer_num,"
-         " started_at) VALUES (?, 'u1', '主桁', '1', '2026-01-01')"),
+        (
+            "INSERT INTO layer_sessions (guild_id, user_id, keta, layer_num,"
+            " started_at) VALUES (?, 'u1', '主桁', '1', '2026-01-01')"
+        ),
         (),
     ),
     "layer_records": (
-        ("INSERT INTO layer_records (guild_id, user_id, keta, layer_num,"
-         " started_at, ended_at, minutes)"
-         " VALUES (?, 'u1', '主桁', '1', '2026-01-01', '2026-01-01', 30)"),
+        (
+            "INSERT INTO layer_records (guild_id, user_id, keta, layer_num,"
+            " started_at, ended_at, minutes)"
+            " VALUES (?, 'u1', '主桁', '1', '2026-01-01', '2026-01-01', 30)"
+        ),
         (),
     ),
     "layer_keta": (
-        ("INSERT INTO layer_keta (guild_id, keta_name, created_by, created_at)"
-         " VALUES (?, '主桁', 'u1', '2026-01-01')"),
+        (
+            "INSERT INTO layer_keta (guild_id, keta_name, created_by, created_at)"
+            " VALUES (?, '主桁', 'u1', '2026-01-01')"
+        ),
         (),
     ),
     "audit_log": (
-        ("INSERT INTO audit_log (guild_id, actor_id, action, created_at)"
-         " VALUES (?, 'u1', 'test', '2026-01-01')"),
+        (
+            "INSERT INTO audit_log (guild_id, actor_id, action, created_at)"
+            " VALUES (?, 'u1', 'test', '2026-01-01')"
+        ),
         (),
     ),
     "skill_tags": (
-        ("INSERT INTO skill_tags (guild_id, skill_name, created_by, created_at)"
-         " VALUES (?, '溶接', 'u1', '2026-01-01')"),
+        (
+            "INSERT INTO skill_tags (guild_id, skill_name, created_by, created_at)"
+            " VALUES (?, '溶接', 'u1', '2026-01-01')"
+        ),
         (),
     ),
     "todoist_configs": (
-        ("INSERT INTO todoist_configs (guild_id, api_token_encrypted,"
-         " created_by, created_at, updated_at)"
-         " VALUES (?, 'tok', 'u1', '2026-01-01', '2026-01-01')"),
+        (
+            "INSERT INTO todoist_configs (guild_id, api_token_encrypted,"
+            " created_by, created_at, updated_at)"
+            " VALUES (?, 'tok', 'u1', '2026-01-01', '2026-01-01')"
+        ),
         (),
     ),
     "guild_directus_access": (
-        ("INSERT INTO guild_directus_access (guild_id, directus_user_id,"
-         " email, created_by, created_at, updated_at)"
-         " VALUES (?, 'd1', 'a@example.com', 'u1', '2026-01-01',"
-         " '2026-01-01')"),
+        (
+            "INSERT INTO guild_directus_access (guild_id, directus_user_id,"
+            " email, created_by, created_at, updated_at)"
+            " VALUES (?, 'd1', 'a@example.com', 'u1', '2026-01-01',"
+            " '2026-01-01')"
+        ),
         (),
     ),
     "progress_nodes": (
-        ("INSERT INTO progress_nodes (guild_id, node_id, name, created_at,"
-         " updated_at)"
-         " VALUES (?, 'n1', '主翼', '2026-01-01', '2026-01-01')"),
+        (
+            "INSERT INTO progress_nodes (guild_id, node_id, name, created_at,"
+            " updated_at)"
+            " VALUES (?, 'n1', '主翼', '2026-01-01', '2026-01-01')"
+        ),
         (),
     ),
     "progress_todoist_links": (
-        ("INSERT INTO progress_todoist_links (guild_id, project_name, node_id,"
-         " created_at, updated_at)"
-         " VALUES (?, 'p1', 'n1', '2026-01-01', '2026-01-01')"),
+        (
+            "INSERT INTO progress_todoist_links (guild_id, project_name, node_id,"
+            " created_at, updated_at)"
+            " VALUES (?, 'p1', 'n1', '2026-01-01', '2026-01-01')"
+        ),
         (),
     ),
     "progress_spar_links": (
-        ("INSERT INTO progress_spar_links (guild_id, keta_name, node_id,"
-         " target_layers, created_at, updated_at)"
-         " VALUES (?, '主桁', 'n1', 5, '2026-01-01', '2026-01-01')"),
+        (
+            "INSERT INTO progress_spar_links (guild_id, keta_name, node_id,"
+            " target_layers, created_at, updated_at)"
+            " VALUES (?, '主桁', 'n1', 5, '2026-01-01', '2026-01-01')"
+        ),
         (),
     ),
     "progress_milestones": (
-        ("INSERT INTO progress_milestones (guild_id, node_id, name, due_date,"
-         " created_at, updated_at)"
-         " VALUES (?, 'n1', '接着完了', '2026-09-01', '2026-01-01',"
-         " '2026-01-01')"),
+        (
+            "INSERT INTO progress_milestones (guild_id, node_id, name, due_date,"
+            " created_at, updated_at)"
+            " VALUES (?, 'n1', '接着完了', '2026-09-01', '2026-01-01',"
+            " '2026-01-01')"
+        ),
         (),
     ),
     "seasons": (
-        ("INSERT INTO seasons (guild_id, name, started_at, created_at)"
-         " VALUES (?, '2026年度', '2026-04-01', '2026-01-01')"),
+        (
+            "INSERT INTO seasons (guild_id, name, started_at, created_at)"
+            " VALUES (?, '2026年度', '2026-04-01', '2026-01-01')"
+        ),
+        (),
+    ),
+    "discord_name_cache": (
+        (
+            "INSERT INTO discord_name_cache (guild_id, entity_type, entity_id,"
+            " name, updated_at)"
+            " VALUES (?, 'user', '42', '山田太郎', '2026-01-01')"
+        ),
         (),
     ),
 }
@@ -184,8 +231,7 @@ async def _seed_all_tables(db: Database, guild_id: int, suffix: str) -> None:
 
 
 async def _count(db: Database, table: str, guild_id: int) -> int:
-    row = await db.fetchone(
-        f"SELECT COUNT(*) AS n FROM {table} WHERE guild_id = ?", (guild_id,))
+    row = await db.fetchone(f"SELECT COUNT(*) AS n FROM {table} WHERE guild_id = ?", (guild_id,))
     return int(row["n"])
 
 
@@ -251,8 +297,9 @@ def test_purge_does_not_touch_other_guilds():
             await GuildRepository(db).purge_guild(GA)
 
             for table in purge_target_tables():
-                assert await _count(db, table, GB) == before[table], \
+                assert await _count(db, table, GB) == before[table], (
                     f"{table} で他サーバーの行が減った"
+                )
         finally:
             await db.close()
 
@@ -296,14 +343,15 @@ def test_guild_without_purge_after_is_never_due():
 
 def test_broken_purge_after_is_not_deleted():
     """壊れた日時が入っていても削除対象にしない（消さない側に倒す）。"""
+
     async def _main():
         db = await _connected_db()
         try:
             repo = GuildRepository(db)
             await repo.ensure(GA, "A大学")
             await db.execute(
-                "UPDATE guilds SET purge_after = 'not-a-date' WHERE guild_id = ?",
-                (GA,))
+                "UPDATE guilds SET purge_after = 'not-a-date' WHERE guild_id = ?", (GA,)
+            )
             assert await repo.list_purge_due() == []
         finally:
             await db.close()
@@ -343,7 +391,7 @@ class _FakeBot:
 
 
 def _cog(db) -> Reminders:
-    cog = Reminders.__new__(Reminders)   # ループを起動せずに組み立てる
+    cog = Reminders.__new__(Reminders)  # ループを起動せずに組み立てる
     cog.bot = _FakeBot(db)
     return cog
 
@@ -370,6 +418,7 @@ def test_run_purge_deletes_due_guilds():
 
 def test_one_guild_failure_does_not_stop_others():
     """1ギルドの削除が例外を投げても、他ギルドの削除は続行する。"""
+
     async def _main():
         db = await _connected_db()
         try:
