@@ -20,10 +20,14 @@ from dashboard.display import (
     NameMaps,
     attach_display,
     attach_display_row,
+    build_attendance_pivot,
     build_sheets,
     channel_label,
     export_rows,
     fmt_jst,
+    fmt_jst_date,
+    fmt_option_at,
+    has_time_hint,
     user_label,
 )
 from repositories.table_repository import TABLES
@@ -72,6 +76,83 @@ def test_fmt_jst_handles_empty_and_garbage():
     assert fmt_jst("") is None
     # 解釈できない文字列は例外にせずそのまま返す
     assert fmt_jst("未定") == "未定"
+
+
+# ---------------------------------------------------------------------
+# 候補日時: 時刻未指定の候補は日付だけを出す（00:00:00 を出さない）
+#
+# schedule_options.start_at は "%Y-%m-%d" 入力でも 00:00:00 付きの ISO に
+# なるため、時刻の有無はユーザーが打った生文字列（label）で判定する
+# ---------------------------------------------------------------------
+def test_has_time_hint_detects_hh_mm_in_label():
+    assert has_time_hint("2026-09-01 19:00") is True
+    assert has_time_hint("9/1 19:00") is True
+    assert has_time_hint("2026-09-01T19:00") is True
+    assert has_time_hint("2026-09-01 19:00:05") is True
+    # 0:00 を明示した場合も「時刻あり」
+    assert has_time_hint("2026-09-01 0:00") is True
+    # 日付だけの入力
+    assert has_time_hint("2026-09-01") is False
+    assert has_time_hint("9/1") is False
+    assert has_time_hint("2026/09/01") is False
+    # 空・None・数字だけはクラッシュせず False
+    assert has_time_hint("") is False
+    assert has_time_hint(None) is False
+    assert has_time_hint("未定") is False
+
+
+def test_fmt_jst_date_returns_date_only_in_jst():
+    assert fmt_jst_date("2026-09-01T00:00:00+09:00") == "2026-09-01"
+    # UTC 表記でも JST の日付になる（UTC 15:00 = JST 翌日 0:00）
+    assert fmt_jst_date("2026-08-31T15:00:00+00:00") == "2026-09-01"
+    assert fmt_jst_date(datetime(2026, 8, 31, 15, 0, 0, tzinfo=UTC)) == "2026-09-01"
+    # naive な既存値は保存規約の壁時計として扱う
+    assert fmt_jst_date("2026-09-01 00:00") == "2026-09-01"
+    # fmt_jst と同じ入力規約: 空は None、解釈できない文字列はそのまま
+    assert fmt_jst_date(None) is None
+    assert fmt_jst_date("") is None
+    assert fmt_jst_date("未定") == "未定"
+
+
+def test_fmt_option_at_uses_label_to_decide_date_only():
+    start = "2026-09-01T00:00:00+09:00"
+    # 日付だけの label → 日付だけ（00:00:00 を出さない。セルを空にはしない）
+    assert fmt_option_at(start, "2026-09-01") == "2026-09-01"
+    assert fmt_option_at(start, "9/1") == "2026-09-01"
+    # 時刻付きの label → 従来どおり秒まで
+    evening = "2026-09-01T19:00:00+09:00"
+    assert fmt_option_at(evening, "2026-09-01 19:00") == "2026-09-01 19:00:00"
+    assert fmt_option_at(evening, "9/1 19:00") == "2026-09-01 19:00:00"
+    # 0:00 を明示指定した候補は 00:00:00 を出す（日付だけの候補と区別できる）
+    assert fmt_option_at(start, "2026-09-01 0:00") == "2026-09-01 00:00:00"
+
+
+def test_fmt_option_at_keeps_current_behaviour_for_garbage():
+    # start_at が解釈できない文字列はそのまま返す（label の有無によらず）
+    assert fmt_option_at("未定", "未定") == "未定"
+    assert fmt_option_at("未定", "9/1 19:00") == "未定"
+    # start_at が空なら None（呼び出し側が label へフォールバックする）
+    assert fmt_option_at(None, "9/1") is None
+    assert fmt_option_at("", None) is None
+
+
+def test_build_attendance_pivot_date_only_option_shows_date_only():
+    options = [
+        {"option_id": "o1", "label": "2026-09-01", "start_at": "2026-09-01T00:00:00+09:00"},
+        {"option_id": "o2", "label": "9/1 19:00", "start_at": "2026-09-01T19:00:00+09:00"},
+        # 解釈できない start_at はそのまま。start_at が無ければ label を出す
+        {"option_id": "o3", "label": "未定", "start_at": "未定"},
+        {"option_id": "o4", "label": "9/2", "start_at": None},
+    ]
+    pivot = build_attendance_pivot(options, [], [], {})
+    assert [r["at"] for r in pivot["rows"]] == [
+        "2026-09-01",
+        "2026-09-01 19:00:00",
+        "未定",
+        "9/2",
+    ]
+    # ツールチップ用の生ラベルはそのまま
+    assert [r["label"] for r in pivot["rows"]] == ["2026-09-01", "9/1 19:00", "未定", "9/2"]
 
 
 # ---------------------------------------------------------------------

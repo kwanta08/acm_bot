@@ -5,7 +5,7 @@
 - 桁巻き記録: タブ1つ = 桁1つ。マスタに無い桁（記録にだけ残る）も漏れない
 - 表示名: 名前キャッシュ → members 台帳 → ID フォールバックの優先順位
 - チャンネル名: #付き表示と削除済みフォールバック
-- 日時: JST 秒単位の `_display`
+- 日時: JST 秒単位の `_display`（時刻未指定の候補日時だけは日付のみ）
 - すべて guild_id スコープ（他ギルドの予定・桁・名前が混ざらない）
 """
 
@@ -526,6 +526,67 @@ def test_attendance_pivot_with_no_options_is_empty():
         assert body["sheets"]["active"] == "sch-x"
         assert body["pivot"]["rows"] == []
         assert body["rows"] == []
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_attendance_pivot_date_only_option_omits_time():
+    """時刻未指定の候補（label が日付だけ）は 00:00:00 を出さず日付だけにする。
+
+    start_at は bot が to_iso(parse_datetime(label)) で書くため、日付だけの
+    入力でも 00:00:00 付きになる。判定は label で行う。時刻付きの候補と
+    他の datetime 列（締切・更新日時）は従来どおり秒まで出す。
+    """
+    db_path = _tmp_db_path()
+
+    async def _seed_date_only():
+        db = Database(db_path)
+        await db.connect()
+        try:
+            await GuildRepository(db).ensure(GUILD_A, "A大学")
+            await MemberRepository(db).upsert_member(GUILD_A, USER_ID, "部員")
+            schedules = ScheduleRepository(db)
+            await schedules.create_schedule(
+                GUILD_A,
+                "sch-d",
+                "終日作業",
+                None,
+                None,
+                None,
+                "2026-08-31T23:59:00+09:00",
+                USER_ID,
+                "555",
+            )
+            # 日付だけで登録した候補（bot と同じく 00:00:00 付きで保存される）
+            await schedules.add_option(
+                GUILD_A, "opt-d1", "sch-d", "2026-09-01", "2026-09-01T00:00:00+09:00", None, None
+            )
+            # 時刻付きの候補
+            await schedules.add_option(
+                GUILD_A, "opt-d2", "sch-d", "9/2 19:00", "2026-09-02T19:00:00+09:00", None, None
+            )
+            await schedules.set_vote(GUILD_A, "opt-d1", USER_ID, "ok")
+        finally:
+            await db.close()
+
+    asyncio.run(_seed_date_only())
+    client = _logged_in_client(db_path)
+    try:
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/schedule_votes").json()
+        assert [r["at"] for r in body["pivot"]["rows"]] == ["2026-09-01", "2026-09-02 19:00:00"]
+        assert "00:00:00" not in str(body["pivot"])
+        # 他の datetime 列は秒まで（更新日時・締切）
+        for row in body["rows"]:
+            assert JST_SECONDS.match(row["_display"]["updated_at"]), row
+        schedules = client.get(f"/api/guilds/{GUILD_A}/tables/schedules").json()
+        assert schedules["rows"][0]["_display"]["deadline"] == "2026-08-31 23:59:00"
+
+        # CSV の候補列も画面と同じ（ユーザーが打った日付だけの表記。00:00:00 は出ない）
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/schedule_votes/export.csv")
+        lines = res.content.decode("utf-8-sig").strip().splitlines()
+        assert lines[0] == "ID,候補,回答者,回答,更新日時"
+        assert lines[1].split(",")[1] == "2026-09-01"
+        assert "2026-09-01 00:00:00" not in res.text
     finally:
         client.__exit__(None, None, None)
 
