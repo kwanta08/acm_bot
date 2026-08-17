@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -133,6 +134,8 @@ class NameMaps:
     users: Mapping[str, str] = field(default_factory=dict)
     channels: Mapping[str, str] = field(default_factory=dict)
     options: Mapping[str, str] = field(default_factory=dict)
+    # 班キー（slug） → 班名（/team-add で登録した表示名。無効化済みも含む）
+    teams: Mapping[str, str] = field(default_factory=dict)
 
 
 def user_label(value: Any, users: Mapping[str, str]) -> str | None:
@@ -158,6 +161,52 @@ def option_label(value: Any, options: Mapping[str, str]) -> str | None:
     return options.get(str(value)) or str(value)
 
 
+def team_label(value: Any, teams: Mapping[str, str]) -> str | None:
+    """班キー（slug。例: `kouzou`）を班名（例: `構造班`）へ。
+
+    teams に無いキーは **slug のまま**返す（勝手に空にしない）。
+    """
+    if value is None or value == "":
+        return None
+    return teams.get(str(value)) or str(value)
+
+
+def _team_keys(value: Any) -> list[str] | None:
+    """副所属班の生値（JSON 配列の文字列、または list）を班キーの列へ。
+
+    解釈できない値（JSON でない文字列・配列でない JSON・その他の型）は None。
+    """
+    if isinstance(value, (list, tuple)):
+        items: Any = value
+    elif isinstance(value, str):
+        try:
+            items = json.loads(value)
+        except ValueError:
+            return None
+        if not isinstance(items, list):
+            return None
+    else:
+        return None
+    return [str(k) for k in items if k not in (None, "")]
+
+
+def team_list_label(value: Any, teams: Mapping[str, str]) -> str | None:
+    """副所属班（班キーの JSON 配列）を班名の「、」区切りへ（例: `構造班、電気班`）。
+
+    - 空・None は None（フロントは「—」を出す）
+    - 空配列は空文字（画面は「—」、CSV は空欄。生の `[]` を出さない）
+    - 解釈できない生値は None（表示変換せず生値のまま。クラッシュさせない）
+    """
+    if value is None or value == "":
+        return None
+    keys = _team_keys(value)
+    if keys is None:
+        return None
+    if not keys:
+        return ""
+    return "、".join(team_label(key, teams) or key for key in keys)
+
+
 def display_cell(column_type: str, value: Any, maps: NameMaps) -> str | None:
     """列型に応じた表示文字列を返す。表示変換が無い型は None。"""
     if column_type == "datetime":
@@ -168,11 +217,18 @@ def display_cell(column_type: str, value: Any, maps: NameMaps) -> str | None:
         return channel_label(value, maps.channels)
     if column_type == "option":
         return option_label(value, maps.options)
+    if column_type == "team":
+        return team_label(value, maps.teams)
+    if column_type == "team_list":
+        return team_list_label(value, maps.teams)
     return None
 
 
 # 表示変換の対象になる列型（この型の列があるときだけ名前辞書を引けばよい）
-RESOLVED_TYPES = ("user", "channel", "option", "datetime")
+RESOLVED_TYPES = ("user", "channel", "option", "team", "team_list", "datetime")
+
+# 班名の辞書（NameMaps.teams）が必要になる列型
+TEAM_TYPES = ("team", "team_list")
 
 
 def attach_display(

@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from dashboard.display import (
+    RESOLVED_TYPES,
     NameMaps,
     attach_display,
     attach_display_row,
@@ -28,6 +29,8 @@ from dashboard.display import (
     fmt_jst_date,
     fmt_option_at,
     has_time_hint,
+    team_label,
+    team_list_label,
     user_label,
 )
 from repositories.table_repository import TABLES
@@ -172,6 +175,93 @@ def test_channel_label_prefixes_hash_and_falls_back():
     assert channel_label("555", channels) == "#general"
     assert channel_label("777", channels) == "不明なチャンネル (777)"
     assert channel_label(None, channels) is None
+
+
+# ---------------------------------------------------------------------
+# 班の解決（members の主所属班 / 副所属班。slug → /team-add の班名）
+# ---------------------------------------------------------------------
+TEAMS = {"kouzou": "構造班", "denki": "電気班"}
+
+
+def test_team_label_resolves_slug_and_keeps_unknown_slug():
+    assert team_label("kouzou", TEAMS) == "構造班"
+    # teams に無いキーは slug のまま（勝手に空にしない）
+    assert team_label("ghost", TEAMS) == "ghost"
+    # 空・None は None（フロントは「—」を出す）
+    assert team_label(None, TEAMS) is None
+    assert team_label("", TEAMS) is None
+
+
+def test_team_list_label_joins_names_with_japanese_comma():
+    # DB の生値は JSON 配列の文字列
+    assert team_list_label('["kouzou","denki"]', TEAMS) == "構造班、電気班"
+    assert team_list_label('["kouzou"]', TEAMS) == "構造班"
+    # リポジトリ経由で既に list になっている値も受け付ける
+    assert team_list_label(["denki", "kouzou"], TEAMS) == "電気班、構造班"
+    # 無いキーは slug のまま並べる
+    assert team_list_label('["kouzou","ghost"]', TEAMS) == "構造班、ghost"
+
+
+def test_team_list_label_handles_empty_and_garbage():
+    # 空配列は空表示（画面は「—」、CSV は空欄）
+    assert team_list_label("[]", TEAMS) == ""
+    assert team_list_label([], TEAMS) == ""
+    # 空・None は None（従来どおり「—」）
+    assert team_list_label(None, TEAMS) is None
+    assert team_list_label("", TEAMS) is None
+    # JSON として解釈できない生値・配列でない JSON は表示変換しない（生値のまま）
+    assert team_list_label("kouzou, denki", TEAMS) is None
+    assert team_list_label('"kouzou"', TEAMS) is None
+    assert team_list_label('{"a": 1}', TEAMS) is None
+
+
+def test_team_types_are_resolved_types():
+    assert "team" in RESOLVED_TYPES
+    assert "team_list" in RESOLVED_TYPES
+
+
+def _member_row() -> dict:
+    return {
+        "member_id": 1,
+        "user_id": "42",
+        "display_name": "山田太郎",
+        "primary_team": "kouzou",
+        "secondary_teams": '["kouzou","denki"]',
+        "is_leader": 0,
+        "skills": "[]",
+        "notes": None,
+        "joined_at": "2026-08-15T21:03:47+09:00",
+        "active_flag": 1,
+    }
+
+
+def test_attach_display_resolves_member_teams_and_keeps_raw_values():
+    maps = NameMaps(users={"42": "山田太郎"}, teams=TEAMS)
+    row = attach_display(TABLES["members"], [_member_row()], maps)[0]
+    # 生の値（slug / JSON 文字列）はそのまま（編集入力・PATCH はこちらを使う）
+    assert row["primary_team"] == "kouzou"
+    assert row["secondary_teams"] == '["kouzou","denki"]'
+    # 表示は班名
+    assert row["_display"]["primary_team"] == "構造班"
+    assert row["_display"]["secondary_teams"] == "構造班、電気班"
+
+
+def test_attach_display_member_without_teams():
+    maps = NameMaps(teams=TEAMS)
+    row = {**_member_row(), "primary_team": None, "secondary_teams": "[]"}
+    display = attach_display(TABLES["members"], [row], maps)[0]["_display"]
+    # 主所属なしは表示変換なし（フロントが「—」）。副所属の空配列は空表示
+    assert "primary_team" not in display
+    assert display["secondary_teams"] == ""
+
+
+def test_export_rows_replaces_team_slugs_with_names():
+    maps = NameMaps(users={"42": "山田太郎"}, teams=TEAMS)
+    rows = export_rows(TABLES["members"], [_member_row()], maps)
+    assert rows[0]["primary_team"] == "構造班"
+    assert rows[0]["secondary_teams"] == "構造班、電気班"
+    # 変換対象外の列は生のまま
+    assert rows[0]["skills"] == "[]"
 
 
 # ---------------------------------------------------------------------

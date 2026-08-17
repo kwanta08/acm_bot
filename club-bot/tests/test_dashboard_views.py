@@ -6,12 +6,15 @@
 - 表示名: 名前キャッシュ → members 台帳 → ID フォールバックの優先順位
 - チャンネル名: #付き表示と削除済みフォールバック
 - 日時: JST 秒単位の `_display`（時刻未指定の候補日時だけは日付のみ）
-- すべて guild_id スコープ（他ギルドの予定・桁・名前が混ざらない）
+- 班: メンバー表の主所属班／副所属班は slug ではなく班名（無いキーは slug のまま）。
+  編集は従来どおり生値で通る
+- すべて guild_id スコープ（他ギルドの予定・桁・名前・班名が混ざらない）
 """
 
 from __future__ import annotations
 
 import asyncio
+import csv
 import os
 import re
 import sys
@@ -388,6 +391,131 @@ def test_datetimes_are_displayed_in_jst_seconds():
         assert votes["rows"][0]["_display"]["option_id"] in ("9/10(木) 9:00", "9/11(金) 9:00")
     finally:
         client.__exit__(None, None, None)
+
+
+# ---------------------------------------------------------------------
+# メンバー表の班（slug → /team-add の班名。編集は生値のまま）
+# ---------------------------------------------------------------------
+async def _seed_teams(db_path: str) -> dict[str, int]:
+    """A大学に班2つ（電気班は無効化済み）とメンバー2人、B大学に同じ slug の別名班。"""
+    db = Database(db_path)
+    await db.connect()
+    try:
+        await GuildRepository(db).ensure(GUILD_A, "A大学")
+        await GuildRepository(db).ensure(GUILD_B, "B大学")
+        members = MemberRepository(db)
+        await members.upsert_team(GUILD_A, "kouzou", "構造班")
+        await members.upsert_team(GUILD_A, "denki", "電気班")
+        await members.deactivate_team(GUILD_A, "denki")
+        # 主所属 kouzou、副所属に無効化済みの denki と teams に無い ghost
+        await members.upsert_member(GUILD_A, USER_ID, "山田", primary_team="kouzou")
+        await members.set_secondary_teams(GUILD_A, USER_ID, ["kouzou", "denki", "ghost"])
+        # 班なしのメンバー（主所属 null・副所属 []）
+        await members.upsert_member(GUILD_A, "44", "新入生")
+        # B大学: 同じ slug "kouzou" を別名で登録（A大学の表示に混ざってはいけない）
+        await members.upsert_team(GUILD_B, "kouzou", "B大学の構造班")
+        await members.upsert_team(GUILD_B, "ghost", "B大学の幽霊班")
+        rows = await db.fetchall(
+            "SELECT user_id, member_id FROM members WHERE guild_id = ?", (GUILD_A,)
+        )
+        return {str(r["user_id"]): int(r["member_id"]) for r in rows}
+    finally:
+        await db.close()
+
+
+def test_member_teams_display_names_and_keep_raw_values():
+    db_path = _tmp_db_path()
+    asyncio.run(_seed_teams(db_path))
+    client = _logged_in_client(db_path)
+    try:
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/members").json()
+        types = {c["name"]: c["type"] for c in body["columns"]}
+        assert types["primary_team"] == "team"
+        assert types["secondary_teams"] == "team_list"
+        by_uid = {r["user_id"]: r for r in body["rows"]}
+
+        yamada = by_uid[USER_ID]
+        # 生の値（slug / JSON 文字列）は残る（セルをクリックしたときの input・PATCH はこちら）
+        assert yamada["primary_team"] == "kouzou"
+        assert yamada["secondary_teams"] == '["kouzou", "denki", "ghost"]'
+        # 表示は班名。無効化済みの班も名前で出し、teams に無い slug はそのまま
+        assert yamada["_display"]["primary_team"] == "構造班"
+        assert yamada["_display"]["secondary_teams"] == "構造班、電気班、ghost"
+        # 他ギルドの班名は混ざらない
+        assert "B大学" not in str(body)
+
+        newbie = by_uid["44"]
+        assert newbie["primary_team"] is None
+        assert "primary_team" not in newbie["_display"]  # フロントは「—」を出す
+        assert newbie["_display"]["secondary_teams"] == ""  # 空配列は空表示
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_member_teams_csv_uses_names():
+    db_path = _tmp_db_path()
+    asyncio.run(_seed_teams(db_path))
+    client = _logged_in_client(db_path)
+    try:
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/members/export.csv")
+        assert res.status_code == 200
+        body = res.content.decode("utf-8-sig")
+        lines = body.strip().splitlines()
+        header = lines[0].split(",")
+        primary_idx = header.index("主所属班")
+        secondary_idx = header.index("副所属班")
+        rows = list(csv.reader(lines[1:]))
+        by_name = {r[header.index("表示名")]: r for r in rows}
+        assert by_name["山田"][primary_idx] == "構造班"
+        assert by_name["山田"][secondary_idx] == "構造班、電気班、ghost"
+        # 班なしは空欄（生の "[]" や slug を出さない）
+        assert by_name["新入生"][primary_idx] == ""
+        assert by_name["新入生"][secondary_idx] == ""
+        assert "kouzou" not in body
+        assert "B大学" not in body
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_member_teams_remain_editable_with_raw_values():
+    """主所属班／副所属班の PATCH は従来どおり生値（slug / JSON 文字列）で通る。"""
+    db_path = _tmp_db_path()
+    ids = asyncio.run(_seed_teams(db_path))
+    client = _logged_in_client(db_path)  # permissions=32 → 編集可
+    try:
+        member_id = ids[USER_ID]
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/members/{member_id}",
+            json={"primary_team": "denki", "secondary_teams": '["kouzou"]'},
+        )
+        assert res.status_code == 200
+        row = res.json()["row"]
+        # 生値はそのまま保存され、応答の表示は班名に解決される
+        assert row["primary_team"] == "denki"
+        assert row["secondary_teams"] == '["kouzou"]'
+        assert row["_display"]["primary_team"] == "電気班"
+        assert row["_display"]["secondary_teams"] == "構造班"
+
+        # 副所属を空にすると空表示（画面は「—」）
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/members/{member_id}", json={"secondary_teams": "[]"}
+        )
+        assert res.status_code == 200
+        assert res.json()["row"]["_display"]["secondary_teams"] == ""
+    finally:
+        client.__exit__(None, None, None)
+
+    async def _check():
+        db = Database(db_path)
+        await db.connect()
+        try:
+            m = await MemberRepository(db).get_member(GUILD_A, USER_ID)
+            assert m["primary_team"] == "denki"
+            assert m["secondary_teams"] == []
+        finally:
+            await db.close()
+
+    asyncio.run(_check())
 
 
 def test_csv_export_uses_display_values():

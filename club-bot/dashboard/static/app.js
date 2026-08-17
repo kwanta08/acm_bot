@@ -103,9 +103,10 @@ function renderTabs() {
 
 function formatCell(value, column, row) {
   // サーバー側の解決層（dashboard/display.py）が付けた表示があれば最優先
-  // （ユーザー/チャンネル/候補の名前解決・JST 秒表示。生の ID は出さない）
+  // （ユーザー/チャンネル/候補/班の名前解決・JST 秒表示。生の ID や slug は出さない）。
+  // 解決した表示が空文字（例: 副所属班が空の配列 `[]`）は生の値と同じく「—」にする
   const resolved = row && row._display ? row._display[column.name] : undefined;
-  if (resolved !== undefined && resolved !== null) return resolved;
+  if (resolved !== undefined && resolved !== null) return resolved === "" ? "—" : resolved;
   if (value === null || value === undefined || value === "") return "—";
   if (column.type === "bool") return value ? "はい" : "いいえ";
   if (column.type === "progress") {

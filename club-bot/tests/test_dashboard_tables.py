@@ -386,6 +386,24 @@ def test_csv_export_is_audited():
 
 
 # ---------------------------------------------------------------------
+# メンバー表の班（slug ではなく班名で表示。編集は生値のまま）
+# ---------------------------------------------------------------------
+def test_member_team_columns_are_team_typed_and_editable():
+    by_name = {c.name: c for c in TABLES["members"].columns}
+    assert by_name["primary_team"].type == "team"
+    assert by_name["secondary_teams"].type == "team_list"
+    # 主所属班・副所属班は従来どおり編集できる
+    assert by_name["primary_team"].editable is True
+    assert by_name["secondary_teams"].editable is True
+
+
+def test_teams_table_key_column_stays_text():
+    """班シートの「班キー」列は slug のままで正しい（表示解決の対象外）。"""
+    by_name = {c.name: c for c in TABLES["teams"].columns}
+    assert by_name["team_key"].type == "text"
+
+
+# ---------------------------------------------------------------------
 # 機体重量の列（F3-4）
 # ---------------------------------------------------------------------
 def test_progress_table_exposes_weight_columns():

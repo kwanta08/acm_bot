@@ -72,12 +72,16 @@ async def _name_maps(scope: GuildScope, spec: TableSpec) -> NameMaps:
     Discord のギルド表示名キャッシュ（ニックネーム → グローバル表示名 →
     ユーザー名）で上書きする。どちらにも無い ID は表示層が
     ID 付きフォールバックにする。
+
+    班は teams テーブル（無効化済みも含む）から班キー → 班名を引く。
+    teams に無いキーは表示層が slug のまま出す。
     """
     db = get_database()
     types = {c.type for c in spec.columns}
     users: dict[str, str] = {}
     channels: dict[str, str] = {}
     options: dict[str, str] = {}
+    teams: dict[str, str] = {}
     if "user" in types:
         register = {
             str(m["user_id"]): str(m["display_name"])
@@ -91,7 +95,12 @@ async def _name_maps(scope: GuildScope, spec: TableSpec) -> NameMaps:
         channels = await scope.bind(NameCacheRepository(db)).names(ENTITY_CHANNEL)
     if "option" in types:
         options = await scope.bind(ScheduleRepository(db)).list_option_labels()
-    return NameMaps(users=users, channels=channels, options=options)
+    if types.intersection(display.TEAM_TYPES):
+        teams = {
+            str(t["team_key"]): str(t["team_name"])
+            for t in await scope.bind(MemberRepository(db)).list_teams(active_only=False)
+        }
+    return NameMaps(users=users, channels=channels, options=options, teams=teams)
 
 
 @router.get("/tables")
