@@ -103,9 +103,10 @@ function renderTabs() {
 
 function formatCell(value, column, row) {
   // サーバー側の解決層（dashboard/display.py）が付けた表示があれば最優先
-  // （ユーザー/チャンネル/候補の名前解決・JST 秒表示。生の ID は出さない）
+  // （ユーザー/チャンネル/候補/班の名前解決・JST 秒表示。生の ID や slug は出さない）。
+  // 解決した表示が空文字（例: 副所属班が空の配列 `[]`）は生の値と同じく「—」にする
   const resolved = row && row._display ? row._display[column.name] : undefined;
-  if (resolved !== undefined && resolved !== null) return resolved;
+  if (resolved !== undefined && resolved !== null) return resolved === "" ? "—" : resolved;
   if (value === null || value === undefined || value === "") return "—";
   if (column.type === "bool") return value ? "はい" : "いいえ";
   if (column.type === "progress") {
@@ -238,7 +239,8 @@ function progressChart(rows, { max = 25 } = {}) {
   return chart;
 }
 
-// シートタブ（Google スプレッドシートのタブ相当。表の下に置く）。
+// シートタブ（Google スプレッドシートのタブ相当。表の**上**に置く。
+// 表タブ(#tabs) → シートタブ → ツールバー → 表 の順で並ぶ）。
 // 出欠回答（予定ごと）と桁巻き記録（桁ごと）で共通に使う。
 // タブ名はタイトルのみ（日程調整の開催日時はツールチップで確認できる）。
 function renderSheetTabs(data) {
@@ -294,28 +296,29 @@ function renderGrid(data) {
     return;
   }
 
-  // タブはスプレッドシートと同じく表の下（画面下部）に置く
+  // シートタブは表の上（表タブ #tabs のすぐ下）に置く。
+  // 以下の3分岐（ピボット表 / 行0件 / 通常の表）すべてで先頭に来る
   const sheetbar = data.sheets ? renderSheetTabs(data) : null;
   const csvHref = `/api/guilds/${state.guildId}/tables/${data.table.key}/export.csv`;
 
   // 出欠回答はピボット表（候補日時 × 参加/不参加/未定/未回答）で表示する
   if (data.pivot) {
     grid.replaceChildren(...[
+      sheetbar,
       el("div", { class: "toolbar" }, [
         el("a", { class: "button", href: csvHref, download: "", text: "CSV をダウンロード" }),
       ]),
       data.pivot.rows.length > 0
         ? attendancePivotTable(data.pivot)
         : el("p", { class: "empty", text: "候補日時がまだ登録されていません。" }),
-      sheetbar,
     ].filter(Boolean));
     return;
   }
 
   if (data.rows.length === 0) {
     grid.replaceChildren(...[
-      el("p", { class: "empty", text: "データがありません。" }),
       sheetbar,
+      el("p", { class: "empty", text: "データがありません。" }),
     ].filter(Boolean));
     return;
   }
@@ -336,6 +339,7 @@ function renderGrid(data) {
   const chart = data.table.key === "progress" ? progressChart(data.rows) : null;
 
   grid.replaceChildren(...[
+    sheetbar,
     el("div", { class: "toolbar" }, [
       el("span", { class: "empty", text: `${data.total} 件中 ${data.rows.length} 件を表示 — ${hint}` }),
       el("a", { class: "button", href: csvHref, download: "", text: "CSV をダウンロード" }),
@@ -347,7 +351,6 @@ function renderGrid(data) {
         el("tbody", {}, body),
       ]),
     ]),
-    sheetbar,
   ].filter(Boolean));
 }
 

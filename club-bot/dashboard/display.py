@@ -4,7 +4,9 @@
 - **DB は ID・ISO 文字列のまま保持し、表示はこの層で作る**。
   行データそのものは書き換えず、`_display`（列名 → 表示文字列）を添える
 - 日時は timezone-aware な UTC へ正規化してから、表示直前に
-  Asia/Tokyo (JST) へ変換し**秒まで**出す（分で丸めない）
+  Asia/Tokyo (JST) へ変換し**秒まで**出す（分で丸めない）。
+  例外は日程調整の**候補日時**だけ: 時刻を指定せず登録した候補
+  （label が日付だけ）は 00:00:00 を付けず日付だけを出す
 - 既存 DB には naive な日時文字列（`2026-08-11 10:00` 等）が混在する。
   これは bot の保存規約（utils/parser.py: naive = ローカル TZ）どおり
   `utils.parser.TZ` の壁時計として解釈する。naive を新たに増やさない
@@ -14,6 +16,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -30,6 +34,12 @@ JST = ZoneInfo("Asia/Tokyo")
 
 # 秒まで表示する（分で丸めない）
 DATETIME_DISPLAY_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+# 時刻未指定の候補日時は日付だけを出す（00:00:00 を付けない）
+DATE_DISPLAY_FORMAT = "%Y-%m-%d"
+
+# 候補ラベル（ユーザーが入力した生文字列）に時刻（HH:MM）が含まれるか
+_TIME_HINT = re.compile(r"\d{1,2}:\d{2}")
 
 # 解決できなかったときのフォールバック（ID を添えて出す。要件の最終段）
 UNKNOWN_USER_FORMAT = "不明なユーザー ({})"
@@ -75,6 +85,44 @@ def fmt_jst(value: Any) -> str | None:
     return dt.astimezone(JST).strftime(DATETIME_DISPLAY_FORMAT)
 
 
+def fmt_jst_date(value: Any) -> str | None:
+    """日時を JST（Asia/Tokyo）の日付だけの文字列（YYYY-MM-DD）にする。
+
+    入力の規約は fmt_jst と同じ（空は None、解釈できない文字列はそのまま）。
+    """
+    if value is None or value == "":
+        return None
+    dt = as_utc(value)
+    if dt is None:
+        return str(value)
+    return dt.astimezone(JST).strftime(DATE_DISPLAY_FORMAT)
+
+
+def has_time_hint(label: Any) -> bool:
+    """候補ラベル（ユーザーが入力した生文字列）に時刻（HH:MM）が含まれるか。
+
+    schedule_options.start_at は bot が `to_iso(parse_datetime(label))` で
+    書くため、`2026-09-01` のような日付だけの入力でも 00:00:00 付きの ISO に
+    なる。「時刻未指定」と「0:00 を明示指定」を区別できる唯一の情報が
+    label なので、判定はこれで行う。
+    """
+    if label is None:
+        return False
+    return _TIME_HINT.search(str(label)) is not None
+
+
+def fmt_option_at(start_at: Any, label: Any) -> str | None:
+    """日程調整の候補日時の表示文字列。
+
+    - label に時刻（HH:MM）があれば従来どおり JST 秒まで（fmt_jst）
+    - 無ければ日付だけ（fmt_jst_date）。00:00:00 を出さず、セルも空にしない
+    - start_at が空なら None、解釈できない文字列ならそのまま（クラッシュさせない）
+    """
+    if has_time_hint(label):
+        return fmt_jst(start_at)
+    return fmt_jst_date(start_at)
+
+
 @dataclass(frozen=True)
 class NameMaps:
     """ID → 表示名の辞書の束（ルーターが guild_id スコープで取得する）。
@@ -86,6 +134,8 @@ class NameMaps:
     users: Mapping[str, str] = field(default_factory=dict)
     channels: Mapping[str, str] = field(default_factory=dict)
     options: Mapping[str, str] = field(default_factory=dict)
+    # 班キー（slug） → 班名（/team-add で登録した表示名。無効化済みも含む）
+    teams: Mapping[str, str] = field(default_factory=dict)
 
 
 def user_label(value: Any, users: Mapping[str, str]) -> str | None:
@@ -111,6 +161,52 @@ def option_label(value: Any, options: Mapping[str, str]) -> str | None:
     return options.get(str(value)) or str(value)
 
 
+def team_label(value: Any, teams: Mapping[str, str]) -> str | None:
+    """班キー（slug。例: `kouzou`）を班名（例: `構造班`）へ。
+
+    teams に無いキーは **slug のまま**返す（勝手に空にしない）。
+    """
+    if value is None or value == "":
+        return None
+    return teams.get(str(value)) or str(value)
+
+
+def _team_keys(value: Any) -> list[str] | None:
+    """副所属班の生値（JSON 配列の文字列、または list）を班キーの列へ。
+
+    解釈できない値（JSON でない文字列・配列でない JSON・その他の型）は None。
+    """
+    if isinstance(value, (list, tuple)):
+        items: Any = value
+    elif isinstance(value, str):
+        try:
+            items = json.loads(value)
+        except ValueError:
+            return None
+        if not isinstance(items, list):
+            return None
+    else:
+        return None
+    return [str(k) for k in items if k not in (None, "")]
+
+
+def team_list_label(value: Any, teams: Mapping[str, str]) -> str | None:
+    """副所属班（班キーの JSON 配列）を班名の「、」区切りへ（例: `構造班、電気班`）。
+
+    - 空・None は None（フロントは「—」を出す）
+    - 空配列は空文字（画面は「—」、CSV は空欄。生の `[]` を出さない）
+    - 解釈できない生値は None（表示変換せず生値のまま。クラッシュさせない）
+    """
+    if value is None or value == "":
+        return None
+    keys = _team_keys(value)
+    if keys is None:
+        return None
+    if not keys:
+        return ""
+    return "、".join(team_label(key, teams) or key for key in keys)
+
+
 def display_cell(column_type: str, value: Any, maps: NameMaps) -> str | None:
     """列型に応じた表示文字列を返す。表示変換が無い型は None。"""
     if column_type == "datetime":
@@ -121,11 +217,18 @@ def display_cell(column_type: str, value: Any, maps: NameMaps) -> str | None:
         return channel_label(value, maps.channels)
     if column_type == "option":
         return option_label(value, maps.options)
+    if column_type == "team":
+        return team_label(value, maps.teams)
+    if column_type == "team_list":
+        return team_list_label(value, maps.teams)
     return None
 
 
 # 表示変換の対象になる列型（この型の列があるときだけ名前辞書を引けばよい）
-RESOLVED_TYPES = ("user", "channel", "option", "datetime")
+RESOLVED_TYPES = ("user", "channel", "option", "team", "team_list", "datetime")
+
+# 班名の辞書（NameMaps.teams）が必要になる列型
+TEAM_TYPES = ("team", "team_list")
 
 
 def attach_display(
@@ -214,7 +317,8 @@ def build_attendance_pivot(
 ) -> dict[str, Any]:
     """出欠回答のピボット表を組み立てる（純関数）。
 
-    - 1行 = 候補日時1つ（options の並び順 = 開始日時の昇順を保つ）
+    - 1行 = 候補日時1つ（options の並び順 = 開始日時の昇順を保つ）。
+      候補日時は JST 秒単位、時刻未指定の候補は日付だけ（fmt_option_at）
     - 各セルはその区分に該当するメンバーの表示名リスト（名前順）
     - 未回答 = 回答対象者（target_ids）のうち、**この予定のどの候補にも
       投票していない**メンバー。bot の催促（notify_unanswered）と同じ
@@ -236,8 +340,10 @@ def build_attendance_pivot(
         groups = by_option.get(str(option["option_id"]), {})
         rows.append(
             {
-                # 候補日時は JST 秒単位。解釈できない値はそのまま出す
-                "at": fmt_jst(option.get("start_at")) or str(option.get("label") or ""),
+                # 候補日時は JST 秒単位。ただし時刻を指定せず登録した候補
+                # （label が日付だけ）は日付だけを出す。解釈できない値はそのまま
+                "at": fmt_option_at(option.get("start_at"), option.get("label"))
+                or str(option.get("label") or ""),
                 "label": str(option.get("label") or ""),
                 "groups": {
                     "ok": sorted(groups.get("ok", [])),

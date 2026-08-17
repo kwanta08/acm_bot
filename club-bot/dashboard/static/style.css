@@ -82,14 +82,15 @@ button.primary, .button.primary {
   color: var(--accent-fg);
 }
 
-/* シートタブ（Google スプレッドシートのタブ相当。**表の下**に置く。
+/* シートタブ（Google スプレッドシートのタブ相当。**表の上**に置く。
+   表タブ(#tabs) → シートタブ → ツールバー → 表 の順。
    出欠回答=予定ごと / 桁巻き記録=桁ごと の共通コンポーネント） */
 .sheetbar {
   display: flex;
   align-items: stretch;
   gap: 0.25rem;
-  margin-top: 0.9rem;
-  border-top: 2px solid var(--border);
+  margin-bottom: 0.9rem;
+  border-bottom: 2px solid var(--border);
   overflow-x: auto;               /* タブが多いときは横スクロール */
   scrollbar-width: thin;
 }
@@ -99,8 +100,8 @@ button.primary, .button.primary {
   max-width: 16rem;
   padding: 0.35rem 0.85rem;
   border: 1px solid var(--border);
-  border-top: none;
-  border-radius: 0 0 6px 6px;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
   background: var(--row-alt);
   color: var(--fg);
   cursor: pointer;

@@ -38,7 +38,10 @@ class Column:
       | "user"（Discord ユーザー ID。表示層で表示名へ解決）
       | "channel"（チャンネル ID。表示層で #名前 へ解決）
       | "option"（日程調整の候補 ID。表示層で候補ラベルへ解決）
-    ID 系の列も DB には生の ID のまま保持する（解決は dashboard/display.py）。
+      | "team"（班キー slug。表示層で teams.team_name へ解決）
+      | "team_list"（班キー slug の JSON 配列。表示層で班名の「、」区切りへ解決）
+    ID 系・slug 系の列も DB には生の値のまま保持し、編集入力も生値で行う
+    （解決は dashboard/display.py）。
     """
 
     name: str
@@ -111,8 +114,9 @@ TABLES: dict[str, TableSpec] = {
             _c("member_id", "ID", "number"),
             _c("user_id", "Discordユーザー", "user"),
             _c("display_name", "表示名", "text", editable=True),
-            _c("primary_team", "主所属班", "text", editable=True),
-            _c("secondary_teams", "副所属班", "text", editable=True),
+            # 班は slug で保持し、表示だけ班名へ解決する（編集は slug / JSON 配列のまま）
+            _c("primary_team", "主所属班", "team", editable=True),
+            _c("secondary_teams", "副所属班", "team_list", editable=True),
             _c("is_leader", "班長", "bool", editable=True),
             _c("skills", "技能タグ", "text", editable=True),
             _c("notes", "メモ", "text", editable=True),
