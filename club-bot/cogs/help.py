@@ -214,23 +214,45 @@ async def collect_setup_status(db, gconf: GuildConfig) -> list[SetupItem]:
     「あるべき初期値」はコードに持たない（班の構成も桁の本数も
     サークルごとに違うため、件数が 0 かどうかだけを見る）。
 
+    **実際に Bot の挙動を左右する設定だけを見る。** 設定はできるが
+    どこからも参照されない項目を並べると、「すべて設定済み」と表示された
+    サーバーに通知が届かない、という最も追いにくい形で表面化する。
+
     Bot と連携サービスの死活は /health の責務なのでここでは扱わない。
     """
     guild_id = gconf.guild_id
     teams = await MemberRepository(db).list_teams(guild_id)
     ketas = await LayerKetaRepository(db).list_active(guild_id)
     return [
+        # 毎朝・毎晩のタスク通知と進捗通知の落とし先。ここが無いと
+        # 通知は送信先を解決できず捨てられる（利用者からは Bot が
+        # 止まっているようにしか見えない）。
         SetupItem(
-            "通知チャンネル",
-            gconf.default_announce_channel_id is not None,
+            "タスク通知チャンネル",
+            gconf.default_task_channel_id is not None,
             "`/setup` で設定してください",
         ),
         SetupItem(
             "ログチャンネル", gconf.bot_log_channel_id is not None, "`/setup` で設定してください"
         ),
         SetupItem("管理者ロール", gconf.admin_role_id is not None, "`/setup` で設定してください"),
+        # 班長（L2）の判定は LEADER_ROLE_IDS だけを見ている。
+        # members.is_leader は Web ダッシュボードの認可にしか使われないため、
+        # ここが空だと班長は Discord 上で何もできない。
+        SetupItem(
+            "班長ロール",
+            bool(gconf.leader_role_ids),
+            "`/set_role role_type:リーダー` で設定してください",
+        ),
         SetupItem("班", len(teams) > 0, "`/team-add` で登録してください"),
         SetupItem("桁", len(ketas) > 0, "`/layer keta-add` で登録してください"),
+        # 大会日は /countdown と週次のマイルストーン警告の起点。
+        # 未設定でも他機能は動くので、任意項目として最後に置く。
+        SetupItem(
+            "大会日（任意）",
+            bool(gconf.competition_date),
+            "`/settings_set setting_key:COMPETITION_DATE value:2026-07-25` の形式で設定してください",
+        ),
     ]
 
 
