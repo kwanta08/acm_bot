@@ -163,7 +163,7 @@ class Tasks(commands.Cog):
         candidates: list[dict] = []
         if team_key:
             links = await self.section_repo.list_links(guild_id)
-            candidates = [l for l in links if l["team_key"] == team_key]
+            candidates = [link for link in links if link["team_key"] == team_key]
 
         task_kwargs = {
             "guild_id": guild_id,
@@ -428,7 +428,7 @@ class Tasks(commands.Cog):
         svc = await self._todoist_svc(guild_id)
         if svc.enabled:
             links = await self.section_repo.list_links(guild_id)
-            section_ids = [l["section_id"] for l in links if l["team_key"] == team]
+            section_ids = [link["section_id"] for link in links if link["team_key"] == team]
 
             if not section_ids:
                 await interaction.followup.send(
@@ -518,7 +518,7 @@ class Tasks(commands.Cog):
             return
 
         links = await self.section_repo.list_links(guild_id)
-        link_map = {l["section_id"]: l["team_key"] for l in links}
+        link_map = {link["section_id"]: link["team_key"] for link in links}
         team_names = await team_service.team_name_map(self.bot.db, guild_id)
 
         embed = task_embed(
@@ -622,15 +622,15 @@ class Tasks(commands.Cog):
         team_names = await team_service.team_name_map(self.bot.db, guild_id)
         team_disp = team_names.get(team, team)
         links = await self.section_repo.list_links(guild_id)
-        targets = [l for l in links if l["team_key"] == team]
+        targets = [link for link in links if link["team_key"] == team]
         if not targets:
             await interaction.followup.send(
                 embed=error_embed(f"{team_disp}班に紐付けられたセクションはありません。"),
                 ephemeral=True,
             )
             return
-        for l in targets:
-            await self.section_repo.unlink(guild_id, l["section_id"])
+        for link in targets:
+            await self.section_repo.unlink(guild_id, link["section_id"])
         await interaction.followup.send(
             embed=success_embed(
                 "紐付けを一括解除しました",

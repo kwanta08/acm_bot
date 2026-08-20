@@ -430,7 +430,7 @@ class Reminders(commands.Cog):
         if not svc.enabled:
             return 0
         links = await self.section_repo.list_links(guild_id)
-        linked_section_ids: set[str] = {l["section_id"] for l in links}
+        linked_section_ids: set[str] = {link["section_id"] for link in links}
 
         team_map = await self._team_map(guild_id)
         default_channel = await self._task_channel(guild_id)
