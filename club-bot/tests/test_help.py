@@ -180,14 +180,14 @@ def test_badge_shown_only_above_viewer_level():
             l1_cmd = by_name["task list"]  # L1
             no_check = by_name["ping"]  # 制限なし
 
-            assert level_badge(l3_cmd, Level.L1) == "L3 以上"
-            assert level_badge(l3_cmd, Level.L2) == "L3 以上"
+            assert level_badge(l3_cmd, Level.L1) == "幹部以上"
+            assert level_badge(l3_cmd, Level.L2) == "幹部以上"
             assert level_badge(l3_cmd, Level.L3) == ""
             assert level_badge(l3_cmd, Level.L4) == ""
             assert level_badge(l1_cmd, Level.L1) == ""
             assert level_badge(no_check, Level.L1) == ""
             # 実行者レベルが不明なときは L1 とみなして案内する
-            assert level_badge(l3_cmd, None) == "L3 以上"
+            assert level_badge(l3_cmd, None) == "幹部以上"
         finally:
             await _unload_all(bot)
 

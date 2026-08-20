@@ -30,6 +30,7 @@ from utils.permissions import (
     command_required_level,
     ensure_guild,
     get_level,
+    level_label,
 )
 
 log = get_logger("help")
@@ -123,7 +124,7 @@ def level_badge(command: app_commands.Command, viewer_level: Level | None) -> st
     viewer = viewer_level or Level.L1
     if viewer >= required:
         return ""
-    return f"L{int(required)} 以上"
+    return f"{level_label(required)}以上"
 
 
 def _clip(text: str, limit: int) -> str:
@@ -187,7 +188,7 @@ def command_embed(command: app_commands.Command, viewer_level: Level | None) -> 
     if required is None:
         level_text = "制限なし（全員が実行できます）"
     else:
-        level_text = f"L{int(required)} 以上"
+        level_text = f"{level_label(required)}以上"
         if level_badge(command, viewer_level):
             level_text += "\n⚠️ あなたの権限では実行できません。"
     embed.add_field(name="必要な権限", value=level_text, inline=False)

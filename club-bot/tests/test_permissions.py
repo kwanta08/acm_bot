@@ -124,3 +124,88 @@ def test_progress_setup_rejects_plain_member():
     gconf = GuildConfig(guild_id=G1, leader_role_ids=[500])
     with pytest.raises(PermissionDenied):
         asyncio.run(_run_setup_check(_discord_member(), gconf))
+
+
+# ---------------------------------------------------------------------
+# 権限エラーの文面
+#
+# 「この操作には L2 以上の権限が必要です」だけでは、L2 が何を指すのか、
+# 自分のサーバーで誰が L2 なのか、どうすれば実行してもらえるのかが
+# 一切分からない。gconf にはロール ID が揃っているので、
+# ラベルと依頼先まで書けるはずだった。
+# ---------------------------------------------------------------------
+def test_level_label_is_japanese():
+    from utils.permissions import level_label
+
+    assert level_label(Level.L1) == "一般メンバー"
+    assert level_label(Level.L2) == "班長"
+    assert level_label(Level.L3) == "幹部"
+    assert level_label(Level.L4) == "Bot管理者"
+    assert level_label(None) == "全員"
+
+
+def test_roles_for_level_includes_higher_roles():
+    """上位ロールも依頼先として出す（班長が不在でも幹部に頼める）。"""
+    from utils.permissions import roles_for_level
+
+    gconf = GuildConfig(
+        guild_id=G1, leader_role_ids=[501, 502], exec_role_id=600, admin_role_id=700
+    )
+    assert roles_for_level(gconf, Level.L2) == [501, 502, 600, 700]
+    assert roles_for_level(gconf, Level.L3) == [600, 700]
+    assert roles_for_level(gconf, Level.L4) == [700]
+
+
+def test_denial_message_names_the_level_and_contacts():
+    from utils.permissions import denial_message
+
+    gconf = GuildConfig(guild_id=G1, leader_role_ids=[501], admin_role_id=700)
+    msg = denial_message(Level.L2, current=Level.L1, gconf=gconf)
+
+    assert "班長" in msg
+    assert "一般メンバー" in msg
+    assert "<@&501>" in msg
+    assert "<@&700>" in msg
+    assert "L2" not in msg  # 内部表記を利用者に見せない
+
+
+def test_denial_message_when_no_role_is_configured():
+    """ロール未設定なら「実行できる人がいない」ことと直し方を書く。"""
+    from utils.permissions import denial_message
+
+    msg = denial_message(Level.L2, current=Level.L1, gconf=GuildConfig(guild_id=G1))
+
+    assert "設定されていない" in msg
+    assert "/setup" in msg
+
+
+def test_denial_message_mentions_manage_guild_when_allowed():
+    from utils.permissions import denial_message
+
+    msg = denial_message(
+        Level.L2, current=Level.L1, gconf=GuildConfig(guild_id=G1), manage_guild_ok=True
+    )
+    assert "サーバー管理" in msg
+
+
+def test_permission_denied_uses_denial_message():
+    from utils.permissions import PermissionDenied
+
+    gconf = GuildConfig(guild_id=G1, leader_role_ids=[501])
+    err = PermissionDenied(Level.L2, current=Level.L1, gconf=gconf)
+    assert "班長" in str(err)
+    assert "<@&501>" in str(err)
+    assert err.required is Level.L2
+
+
+def test_progress_setup_denial_tells_who_to_ask():
+    """実際のコマンドの拒否メッセージにも依頼先が出る。"""
+    from utils.permissions import PermissionDenied
+
+    gconf = GuildConfig(guild_id=G1, leader_role_ids=[500], exec_role_id=600)
+    with pytest.raises(PermissionDenied) as excinfo:
+        asyncio.run(_run_setup_check(_discord_member(), gconf))
+    message = str(excinfo.value)
+    assert "班長" in message
+    assert "<@&500>" in message
+    assert "サーバー管理" in message
