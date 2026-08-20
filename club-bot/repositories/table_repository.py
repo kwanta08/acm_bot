@@ -467,7 +467,9 @@ class TableRepository(BaseRepository):
         )
         return [dict(r) for r in rows]
 
-    async def list_all_rows(self, guild_id: int, table_key: str) -> list[dict[str, Any]]:
+    async def list_all_rows(
+        self, guild_id: int, table_key: str, *, sheet_id: str | None = None
+    ) -> list[dict[str, Any]]:
         """指定テーブルの全行を返す（エクスポート用）。
 
         list_rows は画面表示用に MAX_LIMIT の上限を持つため、
@@ -476,7 +478,9 @@ class TableRepository(BaseRepository):
         out: list[dict[str, Any]] = []
         offset = 0
         while True:
-            chunk = await self.list_rows(guild_id, table_key, limit=MAX_LIMIT, offset=offset)
+            chunk = await self.list_rows(
+                guild_id, table_key, limit=MAX_LIMIT, offset=offset, sheet_id=sheet_id
+            )
             out.extend(chunk)
             if len(chunk) < MAX_LIMIT:
                 return out

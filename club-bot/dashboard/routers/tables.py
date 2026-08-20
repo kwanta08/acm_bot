@@ -193,24 +193,37 @@ async def read_table(
 # 一覧 API と紛れないよう独立したパスにする
 # （/tables/{table_key} が "members.csv" を拾ってしまうため）
 @router.get("/tables/{table_key}/export.csv")
-async def export_table_csv(scope: ScopedGuild, table_key: str):
+async def export_table_csv(
+    scope: ScopedGuild,
+    table_key: str,
+    sheet: Annotated[str | None, Query(max_length=SHEET_ID_MAX)] = None,
+):
     """表を CSV でダウンロードする（このサーバーの行のみ）。
 
     Google Sheets へのエクスポート連携（旧 /sheet_sync）の置き換え。
     人が Excel で読むための出力なので、画面と同じく ID は表示名へ、
     日時は JST（秒まで）へ変換して出す。生値のままの完全バックアップは
     bot 側の `/data export` が担う。
+
+    **全件を出す。** 画面の上限（MAX_LIMIT）で切ると、数年運用したサーバーが
+    引き継ぎ用に落とした CSV から古い行が黙って欠ける。
+    監査ログには正常終了として残るため、欠落に気づく手段が無い。
     """
     try:
         spec = get_spec(table_key)
     except UnknownTableError:
         raise HTTPException(status_code=404, detail="その表は存在しません。") from None
+    if sheet is not None and table_key not in SHEET_TABLES:
+        raise HTTPException(status_code=400, detail="この表はシート切替に対応していません。")
 
     repo = scope.bind(TableRepository(get_database()))
-    rows = await repo.list_rows(table_key, limit=MAX_LIMIT)
+    rows = await repo.list_all_rows(table_key, sheet_id=sheet)
     maps = await _name_maps(scope, spec)
 
-    await _audit(scope, "dashboard.export", spec.table, f"{len(rows)} 行を CSV 出力")
+    detail = f"{len(rows)} 行を CSV 出力"
+    if sheet is not None:
+        detail += f"（シート: {sheet}）"
+    await _audit(scope, "dashboard.export", spec.table, detail)
     # ファイル名にサーバー名を入れない（他者へ共有されたときの情報漏れを避ける）
     filename = f"{spec.key}_{scope.guild_id}.csv"
     return Response(

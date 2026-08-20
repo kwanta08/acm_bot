@@ -299,7 +299,12 @@ function renderGrid(data) {
   // シートタブは表の上（表タブ #tabs のすぐ下）に置く。
   // 以下の3分岐（ピボット表 / 行0件 / 通常の表）すべてで先頭に来る
   const sheetbar = data.sheets ? renderSheetTabs(data) : null;
-  const csvHref = `/api/guilds/${state.guildId}/tables/${data.table.key}/export.csv`;
+  // シート表示中は、画面と同じシートだけを CSV に出す
+  // （出欠回答で全予定が混ざった CSV が落ちてくるのを防ぐ）
+  const csvSheet = data.sheets && data.sheets.active
+    ? `?sheet=${encodeURIComponent(data.sheets.active)}`
+    : "";
+  const csvHref = `/api/guilds/${state.guildId}/tables/${data.table.key}/export.csv${csvSheet}`;
 
   // 出欠回答はピボット表（候補日時 × 参加/不参加/未定/未回答）で表示する
   if (data.pivot) {
