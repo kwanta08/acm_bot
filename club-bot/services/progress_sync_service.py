@@ -50,6 +50,19 @@ TODOIST_ID_PREFIX = "td_"
 # 旧「設定」タブのデフォルト通知チャンネルに相当する settings キー。
 SETTINGS_DEFAULT_CHANNEL_KEY = "PROGRESS_DEFAULT_CHANNEL_ID"
 
+# 進捗の通知先を解決する順序。
+#
+# 綴りの違う2つのキーが並んでいるのは歴史的な事情による。移行スクリプトと
+# ダッシュボードは PROGRESS_DEFAULT_CHANNEL_ID を書き、/setup ウィザードと
+# /settings は DEFAULT_PROGRESS_CHANNEL_ID を書く。片方しか見ていなかったため、
+# /setup しかしていないサーバーには週次のマイルストーン警告が一度も届かず、
+# しかもログにも残らなかった。両方を見てからタスクチャンネルへ落とす。
+DEFAULT_CHANNEL_KEYS = (
+    SETTINGS_DEFAULT_CHANNEL_KEY,
+    "DEFAULT_PROGRESS_CHANNEL_ID",
+    "DEFAULT_TASK_CHANNEL_ID",
+)
+
 
 def _now_text() -> str:
     """progress_nodes の created_at / updated_at に入れる時刻文字列。"""
@@ -193,9 +206,16 @@ async def apply_todoist_plan(repo: Any, guild_id: int, plan: DbSyncPlan, now_tex
 
 
 async def resolve_default_channel_id(db: Database, guild_id: int) -> int | None:
-    """ギルドの既定通知チャンネル（settings）を返す。未設定なら None。"""
-    raw = (await SettingsRepository(db).get(guild_id, SETTINGS_DEFAULT_CHANNEL_KEY) or "").strip()
-    return int(raw) if raw.isdigit() else None
+    """ギルドの既定通知チャンネル（settings）を返す。どれも未設定なら None。
+
+    DEFAULT_CHANNEL_KEYS の順に見て、最初に見つかった数値を採用する。
+    """
+    repo = SettingsRepository(db)
+    for key in DEFAULT_CHANNEL_KEYS:
+        raw = (await repo.get(guild_id, key) or "").strip()
+        if raw.isdigit():
+            return int(raw)
+    return None
 
 
 def resolve_link_channel_id(link: dict[str, Any], default_channel_id: int | None) -> int | None:

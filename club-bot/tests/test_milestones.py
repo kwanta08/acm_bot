@@ -784,3 +784,109 @@ def test_alert_runs_on_monday_only():
     """月曜以外は何もしない（週次のため）。"""
     assert MILESTONE_ALERT_WEEKDAY == 0
     assert _dt(2026, 8, 12).weekday() == 2  # このテストの基準日は水曜
+
+
+# ---------------------------------------------------------------------
+# 通知先チャンネルの解決順（ADR 0023 の「紐付け → 進捗チャンネル → ギルド既定」）
+#
+# 進捗の通知先には綴りの違う2つの settings キーが並んでいる。
+# /setup ウィザードが書くのは DEFAULT_PROGRESS_CHANNEL_ID、移行スクリプトと
+# ダッシュボードが書くのは PROGRESS_DEFAULT_CHANNEL_ID。片方しか見ていなかった
+# ため、/setup しかしていないサーバーには週次警告が一度も届かなかった。
+# ---------------------------------------------------------------------
+async def _seed_behind_only(db, guild_id: int) -> None:
+    """通知先を設定せずに、遅延しているマイルストーンだけを作る。"""
+    repo = ProgressRepository(db)
+    await repo.upsert_node(
+        guild_id, "wing", name="主翼", manual_progress=0.1, now_text="2026-07-13 10:00"
+    )
+    await db.execute(
+        "UPDATE progress_nodes SET created_at = '2026-07-13 10:00',"
+        " updated_at = '2026-08-12 10:00' WHERE guild_id = ?",
+        (guild_id,),
+    )
+    await repo.add_milestone(guild_id, "wing", "接着完了", "2026-08-22", NOW)
+
+
+def test_alert_reaches_guild_that_only_ran_setup_wizard():
+    """/setup だけのサーバー（DEFAULT_PROGRESS_CHANNEL_ID）にも届く。"""
+
+    async def _main():
+        db = await _connected_db()
+        try:
+            channel = _Channel(9001)
+            await _seed_behind_only(db, G1)
+            await SettingsRepository(db).set(G1, "DEFAULT_PROGRESS_CHANNEL_ID", "9001")
+
+            cog = _alert_cog(db, {G1: channel})
+            sent = await cog.run_milestone_alerts(_dt(2026, 8, 12, 8, 30))
+
+            assert set(sent) == {G1}
+            assert len(channel.sent) == 1
+        finally:
+            await db.close()
+
+    run(_main())
+
+
+def test_alert_falls_back_to_task_channel():
+    """進捗チャンネルが無ければタスク通知チャンネルへ落とす。"""
+
+    async def _main():
+        db = await _connected_db()
+        try:
+            channel = _Channel(9001)
+            await _seed_behind_only(db, G1)
+            await SettingsRepository(db).set(G1, "DEFAULT_TASK_CHANNEL_ID", "9001")
+
+            cog = _alert_cog(db, {G1: channel})
+            sent = await cog.run_milestone_alerts(_dt(2026, 8, 12, 8, 30))
+
+            assert set(sent) == {G1}
+            assert len(channel.sent) == 1
+        finally:
+            await db.close()
+
+    run(_main())
+
+
+def test_progress_key_wins_over_setup_key():
+    """両方あるときは PROGRESS_DEFAULT_CHANNEL_ID（紐付けに近い方）を優先する。"""
+
+    async def _main():
+        db = await _connected_db()
+        try:
+            preferred, other = _Channel(9001), _Channel(9002)
+            await _seed_behind_only(db, G1)
+            await SettingsRepository(db).set(G1, "PROGRESS_DEFAULT_CHANNEL_ID", "9001")
+            await SettingsRepository(db).set(G1, "DEFAULT_PROGRESS_CHANNEL_ID", "9002")
+
+            cog = _alert_cog(db, {G1: preferred})
+            cog.bot._channels[G2] = other
+            await cog.run_milestone_alerts(_dt(2026, 8, 12, 8, 30))
+
+            assert len(preferred.sent) == 1
+            assert len(other.sent) == 0
+        finally:
+            await db.close()
+
+    run(_main())
+
+
+def test_missing_channel_is_reported_to_bot_log():
+    """送信先が無いギルドは沈黙するが、理由は #bot-log に残す。"""
+
+    async def _main():
+        db = await _connected_db()
+        try:
+            await _seed_behind_only(db, G1)  # 通知先を一切設定しない
+
+            cog = _alert_cog(db, {G1: _Channel(9001)})
+            sent = await cog.run_milestone_alerts(_dt(2026, 8, 12, 8, 30))
+
+            assert sent == {}
+            assert any("通知先チャンネル" in m for m in cog.bot.logged)
+        finally:
+            await db.close()
+
+    run(_main())
