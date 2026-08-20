@@ -229,10 +229,8 @@ class _EditInteraction:
 async def _seed_chain(repo: ProgressRepository) -> None:
     """本機 > 主翼 > 主桁 の3階層を作る。"""
     await repo.upsert_node(G1, "airframe", name="本機", now_text=NOW)
-    await repo.upsert_node(G1, "wing", parent_id="airframe", name="主翼",
-                           now_text=NOW)
-    await repo.upsert_node(G1, "spar", parent_id="wing", name="主桁",
-                           now_text=NOW)
+    await repo.upsert_node(G1, "wing", parent_id="airframe", name="主翼", now_text=NOW)
+    await repo.upsert_node(G1, "spar", parent_id="wing", name="主桁", now_text=NOW)
 
 
 def test_progress_edit_rejects_descendant_as_parent():
@@ -242,8 +240,7 @@ def test_progress_edit_rejects_descendant_as_parent():
             await _seed_chain(repo)
             interaction = _EditInteraction()
             # 本機の親に、その配下の主桁を指定する（循環になる）
-            await Progress.progress_edit.callback(
-                cog, interaction, node="airframe", parent="spar")
+            await Progress.progress_edit.callback(cog, interaction, node="airframe", parent="spar")
 
             assert "循環参照" in interaction.last_description
             # DB は変わっていない
@@ -264,8 +261,7 @@ def test_progress_edit_rejects_self_as_parent():
         try:
             await _seed_chain(repo)
             interaction = _EditInteraction()
-            await Progress.progress_edit.callback(
-                cog, interaction, node="wing", parent="wing")
+            await Progress.progress_edit.callback(cog, interaction, node="wing", parent="wing")
 
             assert "自分自身" in interaction.last_description
             assert (await repo.get_node(G1, "wing"))["parent_id"] == "airframe"
@@ -277,20 +273,19 @@ def test_progress_edit_rejects_self_as_parent():
 
 def test_progress_edit_allows_valid_reparent():
     """循環にならない付け替えは従来どおり通る。"""
+
     async def _main():
         cog, db, repo = await _make_cog()
         try:
             await _seed_chain(repo)
             interaction = _EditInteraction()
             # 主桁を本機の直下へ移す（主翼の配下から外に出す）
-            await Progress.progress_edit.callback(
-                cog, interaction, node="spar", parent="airframe")
+            await Progress.progress_edit.callback(cog, interaction, node="spar", parent="airframe")
 
             assert (await repo.get_node(G1, "spar"))["parent_id"] == "airframe"
             tree = await cog.load_tree(G1)
             assert tree.errors == []
-            assert {c.node_id for c in tree.by_id["airframe"].children} == {
-                "wing", "spar"}
+            assert {c.node_id for c in tree.by_id["airframe"].children} == {"wing", "spar"}
         finally:
             await db.close()
 

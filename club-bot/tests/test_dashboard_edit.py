@@ -292,7 +292,8 @@ def test_progress_value_is_normalised_like_the_bot():
     try:
         res = client.patch(
             f"/api/guilds/{GUILD_A}/tables/progress/{ids['node'][GUILD_A]}",
-            json={"manual_progress": "50%"})
+            json={"manual_progress": "50%"},
+        )
         assert res.status_code == 200
         assert res.json()["row"]["manual_progress"] == 0.5
     finally:
@@ -311,7 +312,8 @@ def test_non_numeric_progress_is_rejected_and_not_stored():
     try:
         res = client.patch(
             f"/api/guilds/{GUILD_A}/tables/progress/{ids['node'][GUILD_A]}",
-            json={"manual_progress": "だいたい終わった"})
+            json={"manual_progress": "だいたい終わった"},
+        )
         assert res.status_code == 400
     finally:
         client.__exit__(None, None, None)

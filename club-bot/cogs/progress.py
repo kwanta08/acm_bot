@@ -980,8 +980,10 @@ class Progress(commands.Cog):
                     embed=error_embed(
                         f"`{parent}` は `{node}` の配下にあるため親にできません"
                         "（循環参照になります）。\n"
-                        "先に移動先を配下の外へ出してください。"),
-                    ephemeral=True)
+                        "先に移動先を配下の外へ出してください。"
+                    ),
+                    ephemeral=True,
+                )
                 return
 
         fields: dict[str, object] = {}

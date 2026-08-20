@@ -319,8 +319,7 @@ def _coerce(column: Column, value: Any) -> Any:
         try:
             return float(text)
         except ValueError:
-            raise InvalidValueError(
-                f"{column.label} には数値を入力してください。") from None
+            raise InvalidValueError(f"{column.label} には数値を入力してください。") from None
     if column.type == "bool":
         if isinstance(value, bool):
             return int(value)
@@ -331,8 +330,7 @@ def _coerce(column: Column, value: Any) -> Any:
             return 1
         if text in _FALSE_VALUES:
             return 0
-        raise InvalidValueError(
-            f"{column.label} には ON / OFF（1 または 0）を指定してください。")
+        raise InvalidValueError(f"{column.label} には ON / OFF（1 または 0）を指定してください。")
     if column.type == "progress":
         text = str(value).strip()
         if not text:
@@ -340,7 +338,8 @@ def _coerce(column: Column, value: Any) -> Any:
         parsed = parse_progress(value)
         if parsed is None:
             raise InvalidValueError(
-                f"{column.label} には 0.5 または 50% の形式で入力してください。")
+                f"{column.label} には 0.5 または 50% の形式で入力してください。"
+            )
         return parsed
     return value
 
@@ -498,8 +497,7 @@ class TableRepository(BaseRepository):
             raise UnknownColumnError(", ".join(sorted(unknown)))
         if not values:
             return False
-        coerced = {name: _coerce(by_name[name], value)
-                   for name, value in values.items()}
+        coerced = {name: _coerce(by_name[name], value) for name, value in values.items()}
         assignments = ", ".join(f"{name} = ?" for name in coerced)
         cur = await self.db.execute(
             f"UPDATE {spec.table} SET {assignments} WHERE guild_id = ? AND {spec.pk} = ?",

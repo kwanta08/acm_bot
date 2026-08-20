@@ -59,7 +59,6 @@ def test_administrator_passes_via_level():
     assert has_manage_guild_or_level(_member(administrator=True), gconf, Level.L2)
 
 
-
 # ---------------------------------------------------------------------
 # /progress setup に実際のデコレータが適用されていること
 #

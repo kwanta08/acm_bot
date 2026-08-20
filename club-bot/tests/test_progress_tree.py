@@ -338,13 +338,15 @@ def test_load_tree_returns_empty_tree_for_unknown_guild():
 # descendant_ids: 親の付け替えで循環参照を作らせないためのガード
 # ---------------------------------------------------------------------
 def test_descendant_ids_collects_whole_subtree():
-    tree = build_and_aggregate([
-        _node("airframe"),
-        _node("wing", "airframe"),
-        _node("spar", "wing"),
-        _node("rib", "wing"),
-        _node("tail", "airframe"),
-    ])
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe"),
+            _node("spar", "wing"),
+            _node("rib", "wing"),
+            _node("tail", "airframe"),
+        ]
+    )
     assert descendant_ids(tree, "wing") == {"spar", "rib"}
     assert descendant_ids(tree, "airframe") == {"wing", "spar", "rib", "tail"}
 

@@ -8,6 +8,7 @@ SQLite は動的型付けのため、REAL 列にも文字列がそのまま保�
 CSV 出力は、タスク名・メモなど Discord 利用者が自由に入力できる値を
 そのまま出すと表計算ソフトで数式として実行される（CSV インジェクション）。
 """
+
 from __future__ import annotations
 
 import os
@@ -40,15 +41,18 @@ NAME_COL = _column("progress", "name")
 # ---------------------------------------------------------------------
 # progress 列: bot 側の /progress edit と同じ解釈にそろえる
 # ---------------------------------------------------------------------
-@pytest.mark.parametrize(("raw", "expected"), [
-    (0.5, 0.5),
-    ("0.5", 0.5),
-    ("50%", 0.5),
-    ("50", 0.5),          # 1 より大きい数値は % とみなす
-    ("150%", 1.0),        # クランプ
-    (-1, 0.0),            # クランプ
-    ("", None),           # 空欄は未入力
-])
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (0.5, 0.5),
+        ("0.5", 0.5),
+        ("50%", 0.5),
+        ("50", 0.5),  # 1 より大きい数値は % とみなす
+        ("150%", 1.0),  # クランプ
+        (-1, 0.0),  # クランプ
+        ("", None),  # 空欄は未入力
+    ],
+)
 def test_progress_column_is_normalised(raw, expected):
     assert _coerce(PROGRESS_COL, raw) == expected
 
@@ -74,11 +78,22 @@ def test_number_column_rejects_text():
         _coerce(SORT_ORDER_COL, "いちばん上")
 
 
-@pytest.mark.parametrize(("raw", "expected"), [
-    (True, 1), (False, 0), (1, 1), (0, 0),
-    ("1", 1), ("0", 0), ("true", 1), ("FALSE", 0),
-    ("yes", 1), ("no", 0), ("", 0),
-])
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (True, 1),
+        (False, 0),
+        (1, 1),
+        (0, 0),
+        ("1", 1),
+        ("0", 0),
+        ("true", 1),
+        ("FALSE", 0),
+        ("yes", 1),
+        ("no", 0),
+        ("", 0),
+    ],
+)
 def test_bool_column_is_normalised(raw, expected):
     assert _coerce(IS_LEADER_COL, raw) == expected
 
@@ -99,14 +114,17 @@ def test_text_column_passes_through():
 # ---------------------------------------------------------------------
 # CSV インジェクション
 # ---------------------------------------------------------------------
-@pytest.mark.parametrize("raw", [
-    "=HYPERLINK(\"http://evil.example\",\"領収書\")",
-    "+1+1",
-    "-1+1",
-    "@SUM(A1:A9)",
-    "\tX",
-    "\rX",
-])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '=HYPERLINK("http://evil.example","領収書")',
+        "+1+1",
+        "-1+1",
+        "@SUM(A1:A9)",
+        "\tX",
+        "\rX",
+    ],
+)
 def test_formula_like_cells_are_escaped(raw):
     escaped = csv_safe(raw)
     assert escaped.startswith("'")
