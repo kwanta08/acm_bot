@@ -397,3 +397,111 @@ def test_repository_update_is_guild_scoped():
             await db.close()
 
     asyncio.run(_main())
+
+
+# ---------------------------------------------------------------------
+# 権限まわりの列は Web から書けないこと
+#
+# cogs/members._sync_roles() は teams.member_role_id をそのまま add_roles() に
+# 渡す。この列を Bot 管理者ロールの ID に書き換えてから /member assign-team（L2）を
+# 実行すると、bot の権限で L4 相当のロールが付いてしまう。
+# Discord 側の /team-role は元から管理者限定なので、Web だけが緩かった。
+# ---------------------------------------------------------------------
+async def _seed_team(db_path: str) -> int:
+    db = Database(db_path)
+    await db.connect()
+    try:
+        members = MemberRepository(db)
+        await members.upsert_team(GUILD_A, "struct", "構造班")
+        await db.execute(
+            "UPDATE teams SET member_role_id = ? WHERE guild_id = ? AND team_key = ?",
+            ("501", GUILD_A, "struct"),
+        )
+        row = await db.fetchone(
+            "SELECT team_id FROM teams WHERE guild_id = ? AND team_key = ?", (GUILD_A, "struct")
+        )
+        return int(row["team_id"])
+    finally:
+        await db.close()
+
+
+async def _team_role_id(db_path: str) -> str | None:
+    db = Database(db_path)
+    await db.connect()
+    try:
+        row = await db.fetchone(
+            "SELECT member_role_id FROM teams WHERE guild_id = ? AND team_key = ?",
+            (GUILD_A, "struct"),
+        )
+        return row["member_role_id"]
+    finally:
+        await db.close()
+
+
+@pytest.mark.parametrize("column", ["member_role_id", "leader_role_id", "secondary_role_id"])
+def test_team_role_ids_are_not_editable(column):
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    team_id = asyncio.run(_seed_team(db_path))
+    client = _client(db_path)  # サーバー管理権限あり（L4）でも拒否される
+    try:
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/teams/{team_id}",
+            json={column: "999"},
+        )
+        assert res.status_code == 400
+    finally:
+        client.__exit__(None, None, None)
+
+    assert asyncio.run(_team_role_id(db_path)) == "501"
+
+
+def test_is_leader_is_not_editable():
+    """L2 が任意の相手を L2（＝ダッシュボードの編集権）へ昇格できないこと。"""
+    db_path = _tmp_db_path()
+    ids = asyncio.run(_seed(db_path))
+    client = _client(db_path)
+    try:
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/members/{ids['member'][GUILD_A]}",
+            json={"is_leader": 1},
+        )
+        assert res.status_code == 400
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_role_ids_are_masked_for_non_admin():
+    """ロール ID の実値は L4 にだけ返す。設定済みかどうかは分かるようにする。"""
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+
+    async def _set_role():
+        db = Database(db_path)
+        await db.connect()
+        try:
+            from repositories.settings_repository import SettingsRepository
+
+            await SettingsRepository(db).set(GUILD_A, "ADMIN_ROLE_ID", "700")
+        finally:
+            await db.close()
+
+    asyncio.run(_set_role())
+
+    client = _client(db_path, permissions="0")  # 一般参加者
+    try:
+        res = client.get(f"/api/guilds/{GUILD_A}/settings")
+        assert res.status_code == 200
+        by_key = {s["key"]: s for s in res.json()["settings"]}
+        assert by_key["ADMIN_ROLE_ID"]["value"] == "（設定済み）"
+        assert res.json()["can_edit"] is False
+    finally:
+        client.__exit__(None, None, None)
+
+    client = _client(db_path)  # サーバー管理権限あり
+    try:
+        res = client.get(f"/api/guilds/{GUILD_A}/settings")
+        by_key = {s["key"]: s for s in res.json()["settings"]}
+        assert by_key["ADMIN_ROLE_ID"]["value"] == "700"
+    finally:
+        client.__exit__(None, None, None)

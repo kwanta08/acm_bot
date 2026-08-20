@@ -633,6 +633,12 @@ Docker で動かす場合は `deploy/docker-compose.dashboard.yml`
 - 参照・編集できるテーブルと列はホワイトリスト方式
   （`repositories/table_repository.py`）。`settings` や
   `todoist_configs` は表グリッドの対象外
+- **権限まわりの列は Web から編集できない**。`teams` のロール ID 3 列と
+  `members.is_leader` は読み取り専用（`editable=False`）。
+  ロール ID は `cogs/members._sync_roles()` がそのまま `add_roles()` に渡すため、
+  書き換えられると bot の権限で任意のロールを付けさせる経路になる。
+  変更は Discord の `/team-role`（管理者）と `/member set-leader`（L3 以上）から行う
+- ロール ID 設定の**実値は L4 にだけ返す**。参加者には「（設定済み）」と表示される
 - 設定変更で触れるキーもホワイトリスト（トークン類は対象外）
 - 編集は `audit_log` に必ず記録される（`/report audit` で確認できる）
 - API ドキュメント（`/docs`・`/openapi.json`）は配信しない

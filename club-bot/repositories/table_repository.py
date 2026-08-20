@@ -122,7 +122,10 @@ TABLES: dict[str, TableSpec] = {
             # 班は slug で保持し、表示だけ班名へ解決する（編集は slug / JSON 配列のまま）
             _c("primary_team", "主所属班", "team", editable=True),
             _c("secondary_teams", "副所属班", "team_list", editable=True),
-            _c("is_leader", "班長", "bool", editable=True),
+            # is_leader は Web ダッシュボードの認可（L2 判定）そのもの。
+            # 編集可にすると L2 が任意の相手を L2 へ昇格させられる。
+            # 変更は Discord の /member set-leader（L3 以上）から行う。
+            _c("is_leader", "班長", "bool"),
             _c("skills", "技能タグ", "text", editable=True),
             _c("notes", "メモ", "text", editable=True),
             _c("joined_at", "登録日時", "datetime"),
@@ -140,9 +143,16 @@ TABLES: dict[str, TableSpec] = {
             _c("team_id", "ID", "number"),
             _c("team_key", "班キー"),
             _c("team_name", "班名", "text", editable=True),
-            _c("leader_role_id", "班長ロールID", "text", editable=True),
-            _c("member_role_id", "班員ロールID", "text", editable=True),
-            _c("secondary_role_id", "副所属ロールID", "text", editable=True),
+            # ロール ID は Web から編集させない。
+            #
+            # cogs/members._sync_roles() は member_role_id をそのまま
+            # add_roles() に渡す。ここを Bot 管理者ロールの ID に書き換えてから
+            # /member assign-team（L2）を実行すると、bot の権限で L4 相当の
+            # ロールが付いてしまう（権限昇格の経路）。
+            # Discord 側の /team-role は元から管理者限定なので、そちらへ一本化する。
+            _c("leader_role_id", "班長ロールID", "text"),
+            _c("member_role_id", "班員ロールID", "text"),
+            _c("secondary_role_id", "副所属ロールID", "text"),
             _c("channel_id", "通知チャンネル", "channel", editable=True),
             _c("active_flag", "有効", "bool", editable=True),
             _c("updated_at", "更新日時", "datetime"),
