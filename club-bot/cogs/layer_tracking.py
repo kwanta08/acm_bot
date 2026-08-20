@@ -20,7 +20,13 @@ from discord.ext import commands
 from repositories.layer_keta_repository import LayerKetaRepository
 from repositories.layer_session_repository import LayerSessionRepository
 from services.layer_tracking_service import LayerTrackingService
-from utils.embeds import error_embed, info_embed, success_embed
+from utils.embeds import (
+    MAX_EMBED_FIELDS,
+    add_truncation_note,
+    error_embed,
+    info_embed,
+    success_embed,
+)
 from utils.logger import get_logger
 from utils.parser import fmt_jp, now, to_iso
 from utils.permissions import Level, ensure_guild, require
@@ -198,7 +204,7 @@ class LayerTracking(commands.Cog):
             return
         embed = info_embed("進行中の積層作業")
         guild = interaction.guild
-        for s in sessions:
+        for s in sessions[:MAX_EMBED_FIELDS]:
             name = s["user_id"]
             if guild:
                 m = guild.get_member(int(s["user_id"]))
@@ -209,6 +215,7 @@ class LayerTracking(commands.Cog):
                 value=f"桁: {s['keta']} / {s['layer_num']} / 経過 {s['elapsed_min']} 分",
                 inline=False,
             )
+        add_truncation_note(embed, len(sessions), MAX_EMBED_FIELDS)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 
