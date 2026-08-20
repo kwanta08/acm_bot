@@ -189,3 +189,48 @@ def test_layer_status_stays_within_field_limit():
             await db.close()
 
     run(_main())
+
+
+# ---------------------------------------------------------------------
+# /report attendance-rate は「表示は絞るが集計は全件」
+#
+# 26 件目以降を集計から落とすと、表示されないだけでなく参加率の数字
+# そのものが誤る。人に見せる集計値が黙って間違うのが一番まずい。
+# ---------------------------------------------------------------------
+def test_attendance_rate_aggregates_all_schedules():
+    from cogs.reports import Reports
+    from repositories.schedule_repository import ScheduleRepository
+
+    async def _main():
+        db = await _make_db()
+        try:
+            repo = ScheduleRepository(db)
+            # 25 件は全員 ok、26 件目以降は全員 ng にして、
+            # 打ち切ると通算参加率が 100% に化けるようにする
+            for i in range(OVER):
+                sid = f"sch_{i:03d}"
+                await repo.create_schedule(
+                    G1, sid, f"練習 {i}", None, None, None, "2026-09-01T19:00:00+09:00", "42", "9"
+                )
+                oid = f"opt_{i:03d}"
+                await repo.add_option(
+                    G1, oid, sid, "9/1 19:00", "2026-09-01T19:00:00+09:00", None, None
+                )
+                status = "ok" if i < MAX_EMBED_FIELDS else "ng"
+                await repo.set_vote(G1, oid, str(1000 + i), status)
+
+            cog = Reports(SimpleNamespace(db=db))
+            interaction = _Interaction()
+            await Reports.attendance_rate.callback(cog, interaction)
+
+            embed = interaction.last_embed
+            assert len(embed.fields) == MAX_EMBED_FIELDS
+            desc = embed.description or ""
+            assert "100%" not in desc, "打ち切った25件だけで集計している"
+            assert f"全 {OVER} 件" in desc
+            assert f"票 {OVER}" in desc
+            assert f"ほか {OVER - MAX_EMBED_FIELDS} 件" in desc
+        finally:
+            await db.close()
+
+    run(_main())

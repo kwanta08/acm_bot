@@ -23,7 +23,13 @@ from repositories.audit_log_repository import AuditLogRepository
 from repositories.member_repository import MemberRepository
 from repositories.skill_tag_repository import SkillTagRepository
 from services import team_service
-from utils.embeds import error_embed, info_embed, success_embed
+from utils.embeds import (
+    MAX_EMBED_FIELDS,
+    add_truncation_note,
+    error_embed,
+    info_embed,
+    success_embed,
+)
 from utils.logger import get_logger
 from utils.permissions import ensure_guild, is_admin
 
@@ -178,7 +184,7 @@ class Teams(commands.Cog):
                 counts[key] = counts.get(key, 0) + 1
 
         embed = info_embed("班一覧")
-        for t in teams[:25]:
+        for t in teams[:MAX_EMBED_FIELDS]:
             status = "✅ 有効" if t["active_flag"] else "⛔ 無効"
             lines = [
                 f"slug: `{t['team_key']}` / {status} / 主所属: {counts.get(t['team_key'], 0)}名"
@@ -192,6 +198,7 @@ class Teams(commands.Cog):
             if t.get("channel_id"):
                 lines.append(f"通知ch: <#{t['channel_id']}>")
             embed.add_field(name=t["team_name"], value="\n".join(lines), inline=False)
+        add_truncation_note(embed, len(teams), MAX_EMBED_FIELDS)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(

@@ -23,7 +23,7 @@ from repositories.task_repository import TaskRepository
 from services import team_service
 from services.milestone_service import days_until_competition, evaluate_all
 from services.progress_tree import load_tree
-from utils.embeds import info_embed, success_embed
+from utils.embeds import MAX_EMBED_FIELDS, add_truncation_note, info_embed, success_embed
 from utils.logger import get_logger
 from utils.parser import fmt_jp, from_iso, now
 from utils.permissions import Level, ensure_guild, require
@@ -203,7 +203,12 @@ class Reports(commands.Cog):
             embed.description = "集計対象の投票がありません。"
             await interaction.followup.send(embed=embed, ephemeral=True)
             return
-        for s in all_sched[:25]:
+        # 集計は全件で行い、表示だけ Embed の上限に合わせて絞る。
+        # 26 件目以降を集計から落とすと、表示されないだけでなく
+        # 全体の参加率そのものが誤った数字になる。
+        grand_ok = 0
+        grand_votes = 0
+        for i, s in enumerate(all_sched):
             options = await self.schedule_repo.list_options(guild_id, s["schedule_id"])
             total_ok = 0
             total_votes = 0
@@ -211,12 +216,21 @@ class Reports(commands.Cog):
                 votes = await self.schedule_repo.list_votes(guild_id, opt["option_id"])
                 total_votes += len(votes)
                 total_ok += sum(1 for v in votes if v["status"] == "ok")
+            grand_ok += total_ok
+            grand_votes += total_votes
+            if i >= MAX_EMBED_FIELDS:
+                continue
             rate = f"{(total_ok / total_votes * 100):.0f}%" if total_votes else "—"
             embed.add_field(
                 name=s["title"],
                 value=f"参加率(ok/総票): {rate}（ok {total_ok} / 票 {total_votes}）",
                 inline=False,
             )
+        overall = f"{(grand_ok / grand_votes * 100):.0f}%" if grand_votes else "—"
+        embed.description = (
+            f"全 {len(all_sched)} 件の通算参加率: **{overall}**（ok {grand_ok} / 票 {grand_votes}）"
+        )
+        add_truncation_note(embed, len(all_sched), MAX_EMBED_FIELDS, "通算は全件で計算しています")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 

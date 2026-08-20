@@ -19,7 +19,14 @@ from config import config
 from repositories.member_repository import MemberRepository
 from repositories.skill_tag_repository import SkillTagRepository
 from services import team_service
-from utils.embeds import error_embed, info_embed, member_embed, success_embed
+from utils.embeds import (
+    MAX_EMBED_FIELDS,
+    add_truncation_note,
+    error_embed,
+    info_embed,
+    member_embed,
+    success_embed,
+)
 from utils.logger import get_logger
 from utils.parser import fmt_jp, from_iso
 from utils.permissions import Level, ensure_guild, is_self_or_level, require
@@ -551,7 +558,7 @@ class Members(commands.Cog):
         if not candidates:
             embed.description = "該当者が見つかりませんでした。"
         else:
-            for m in candidates[:25]:
+            for m in candidates[:MAX_EMBED_FIELDS]:
                 primary = team_names.get(m.get("primary_team"), m.get("primary_team") or "—")
                 skills = "、".join(m["skills"]) or "—"
                 embed.add_field(
@@ -559,6 +566,9 @@ class Members(commands.Cog):
                     value=f"主所属: {primary} / 技能: {skills}",
                     inline=False,
                 )
+            add_truncation_note(
+                embed, len(candidates), MAX_EMBED_FIELDS, "条件を絞って再検索してください"
+            )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 

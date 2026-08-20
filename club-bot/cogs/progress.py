@@ -55,7 +55,13 @@ from services.progress_tree import (
 )
 from services.todoist_service import TodoistError
 from utils import progress_bar
-from utils.embeds import error_embed, info_embed, success_embed, task_embed
+from utils.embeds import (
+    add_truncation_note,
+    error_embed,
+    info_embed,
+    success_embed,
+    task_embed,
+)
 from utils.logger import get_logger
 from utils.parser import TZ, now, parse_deadline
 from utils.permissions import (
@@ -1435,9 +1441,10 @@ class Progress(commands.Cog):
             node = tree.by_id.get(row["node_id"])
             label = node.name if node is not None else f"{row['node_id']}（削除済み）"
             lines.append(f"**{row['due_date']}** — {label}: {row['name']}")
-        await interaction.followup.send(
-            embed=info_embed("🏁 マイルストーン一覧", "\n".join(lines[:50]))
-        )
+        shown = 50
+        embed = info_embed("🏁 マイルストーン一覧", "\n".join(lines[:shown]))
+        add_truncation_note(embed, len(lines), shown, "期限が近い順に表示しています")
+        await interaction.followup.send(embed=embed)
 
     # ---------- /countdown ----------
     async def pace_overrides(self, guild_id: int) -> dict[str, Pace]:
