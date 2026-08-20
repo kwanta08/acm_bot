@@ -23,7 +23,34 @@ from services.todoist_service import TodoistError
 from utils.embeds import error_embed, info_embed, success_embed, task_embed
 from utils.logger import get_logger
 from utils.parser import fmt_jp, from_iso, parse_datetime, to_iso
-from utils.permissions import Level, ensure_guild, require
+from utils.permissions import Level, ensure_guild, is_self_or_level, require
+
+
+async def _deny_not_owner(interaction: discord.Interaction, task: dict, verb: str) -> None:
+    """担当でも作成者でもない人が触ろうとしたときの案内。"""
+    assignee_id = task.get("assignee_id")
+    if assignee_id:
+        who = f"このタスクの担当は <@{assignee_id}> です。"
+    else:
+        who = "このタスクには担当者が設定されていません。"
+    await interaction.followup.send(
+        embed=error_embed(
+            f"{who}\n"
+            f"自分が担当か作成者のタスクだけ{verb}できます。"
+            "他の人のタスクは、本人か班長に依頼してください。"
+        ),
+        ephemeral=True,
+    )
+
+
+async def _may_modify(interaction: discord.Interaction, task: dict) -> bool:
+    """担当者・作成者・班長以上のいずれかなら True。"""
+    for owner in (task.get("assignee_id"), task.get("created_by")):
+        if owner and await is_self_or_level(interaction, owner, Level.L2):
+            return True
+    # 担当も作成者も自分でないなら、班長以上かどうかだけで決まる
+    return await is_self_or_level(interaction, None, Level.L2)
+
 
 log = get_logger("tasks")
 
@@ -290,6 +317,9 @@ class Tasks(commands.Cog):
                 embed=error_embed("対象の未完了タスクが見つかりません。"), ephemeral=True
             )
             return
+        if not await _may_modify(interaction, task):
+            await _deny_not_owner(interaction, task, "完了に")
+            return
         svc = await self._todoist_svc(guild_id)
         if task.get("todoist_task_id") and svc.enabled:
             try:
@@ -383,6 +413,9 @@ class Tasks(commands.Cog):
             await interaction.followup.send(
                 embed=error_embed("対象タスクが見つかりません。"), ephemeral=True
             )
+            return
+        if not await _may_modify(interaction, task):
+            await _deny_not_owner(interaction, task, "変更")
             return
         await self.repo.set_priority(guild_id, task_id, priority)
         await interaction.followup.send(

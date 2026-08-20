@@ -93,10 +93,10 @@ Bot管理者」というラベルで出ます（`utils/permissions.LEVEL_LABELS`
 |---|---|---|
 | `/task add` | L1 | タスク作成（Todoist へ反映） |
 | `/task list [mine]` | L1 | 一覧（`mine:true` で自分の担当のみ） |
-| `/task done <id>` | L1 | 完了（Todoist 側も close） |
+| `/task done <id>` | L1※ | 完了（Todoist 側も close）。※担当者・作成者・班長以上のみ |
 | `/task delete <id>` | L2 | 削除 |
 | `/task assign <id> <user>` | L2 | 担当者変更 |
-| `/task priority <id> <1-4>` | L1 | 優先度変更 |
+| `/task priority <id> <1-4>` | L1※ | 優先度変更。※担当者・作成者・班長以上のみ |
 | `/task overdue` | L1 | 期限超過一覧 |
 | `/task team <班>` | L1 | 班別一覧 |
 | `/task sections` | L2 | Todoist のセクション一覧と班との紐付け状況を表示 |
@@ -258,8 +258,8 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 | `/member setup <user>` | L3 | 主所属班・副所属班・班長を一括設定 |
 | `/member set-channel <班> <channel>` | L3 | 班の通知先チャンネルを設定（タスクの班別通知に使用） |
 | `/member set-leader <user> <bool>` | L3 | 班長フラグ設定 |
-| `/member skill add <技能> [user]` | L1 | 技能タグ追加（ギルドに登録済みのタグから選択） |
-| `/member skill remove <技能> [user]` | L1 | 技能タグ削除 |
+| `/member skill add <技能> [user]` | L1※ | 技能タグ追加（ギルドに登録済みのタグから選択）。※`user` 指定は班長以上のみ |
+| `/member skill remove <技能> [user]` | L1※ | 技能タグ削除。※`user` 指定は班長以上のみ |
 | `/member support [班] [技能]` | L2 | 支援候補検索（班横断作業向け）。既定は現役のみ。`include_alumni:True` で卒業者も含む |
 
 班・技能の選択肢は、そのギルドの DB（teams / skill_tags テーブル）から

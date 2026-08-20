@@ -22,7 +22,7 @@ from services import team_service
 from utils.embeds import error_embed, info_embed, member_embed, success_embed
 from utils.logger import get_logger
 from utils.parser import fmt_jp, from_iso
-from utils.permissions import Level, ensure_guild, require
+from utils.permissions import Level, ensure_guild, is_self_or_level, require
 
 log = get_logger("members")
 
@@ -460,6 +460,15 @@ class Members(commands.Cog):
             )
             return
         target = user or interaction.user
+        if not await is_self_or_level(interaction, str(target.id), Level.L2):
+            await interaction.followup.send(
+                embed=error_embed(
+                    "他の人の技能タグを変更できるのは班長以上です。\n"
+                    "自分に付けるだけなら `user` を空にして実行してください。"
+                ),
+                ephemeral=True,
+            )
+            return
         await self.repo.upsert_member(guild_id, str(target.id), target.display_name)
         await self.repo.add_skill(guild_id, str(target.id), skill)
         await interaction.followup.send(
@@ -483,6 +492,15 @@ class Members(commands.Cog):
         if guild_id is None:
             return
         target = user or interaction.user
+        if not await is_self_or_level(interaction, str(target.id), Level.L2):
+            await interaction.followup.send(
+                embed=error_embed(
+                    "他の人の技能タグを変更できるのは班長以上です。\n"
+                    "自分から外すだけなら `user` を空にして実行してください。"
+                ),
+                ephemeral=True,
+            )
+            return
         await self.repo.remove_skill(guild_id, str(target.id), skill)
         await interaction.followup.send(
             embed=success_embed(

@@ -159,6 +159,24 @@ def has_manage_guild_or_level(member: discord.Member, gconf: GuildConfig, requir
     return has_level(member, gconf, required)
 
 
+async def is_self_or_level(
+    interaction: discord.Interaction, user_id: str | None, required: Level
+) -> bool:
+    """本人（user_id が実行者）か、required 以上なら True。
+
+    「自分の分は自分で触れるが、他人の分は班長以上」という粒度を作るための判定。
+    コマンド単位の @require では表現できない（対象行を見ないと決まらない）ため、
+    ハンドラの中から呼ぶ。
+    """
+    member = interaction.user
+    if not isinstance(member, discord.Member) or interaction.guild is None:
+        return False
+    if user_id is not None and str(user_id) == str(member.id):
+        return True
+    gconf = await config.for_guild(interaction.guild.id)
+    return has_level(member, gconf, required)
+
+
 class PermissionDenied(app_commands.CheckFailure):
     """
     権限不足を表す例外（PERMISSION_DENIED）
