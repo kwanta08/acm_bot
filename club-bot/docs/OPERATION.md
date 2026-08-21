@@ -273,7 +273,7 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 | `/team-add slug:<識別子> name:<表示名>` | L4 | 班を追加。識別子は半角英小文字・数字・`-`・`_`（32文字以内）。同じ識別子の再登録で表示名更新・再有効化 |
 | `/team-remove slug:<識別子> [confirm]` | L4 | 班を無効化（論理削除）。主所属メンバーがいる場合は `confirm:True` が必要 |
 | `/team-list` | L4 | 班の一覧（有効/無効・所属人数・ロール・通知ch） |
-| `/team-role team:<識別子> role:<ロール> [role_type]` | L4 | 班と Discord ロールを紐付け。`role_type` は `primary`（主所属、既定）または `secondary`（副所属） |
+| `/team-role team:<識別子> role:<ロール> [role_type]` | L4 | 班と Discord ロールを紐付け。`role_type` は `primary`（主所属、既定）・`secondary`（副所属）・`leader`（班長。`/team-list` の表示用で自動付与も権限付与もしない） |
 | `/skill-add name:<タグ名>` | L4 | 技能タグを追加 |
 | `/skill-remove name:<タグ名>` | L4 | 技能タグを無効化（論理削除） |
 | `/skill-list` | L4 | 技能タグの一覧（有効/無効・付与人数） |
@@ -284,11 +284,16 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 `/team-add` `/skill-add` で登録してください。
 個別の班ロールは Discord 側で作成したロールを `/team-role` で紐付けます。
 
+`role_type:leader` で設定する班長ロールは `/team-list` に表示するための情報です。
+**班長の権限（L2）は settings の `LEADER_ROLE_IDS` が唯一の根拠**なので、
+権限を与えるときは `/set_role role_type:リーダー` を使ってください。
+
 使用例:
 ```
 /team-add slug:wing name:翼
 /team-role team:wing role:@翼班 role_type:primary
 /team-role team:wing role:@翼班支援 role_type:secondary
+/team-role team:wing role:@翼班長 role_type:leader
 /skill-add name:CFRP積層
 /skill-add name:はんだ
 ```
@@ -635,9 +640,11 @@ Docker で動かす場合は `deploy/docker-compose.dashboard.yml`
   `todoist_configs` は表グリッドの対象外
 - **権限まわりの列は Web から編集できない**。`teams` のロール ID 3 列と
   `members.is_leader` は読み取り専用（`editable=False`）。
-  ロール ID は `cogs/members._sync_roles()` がそのまま `add_roles()` に渡すため、
-  書き換えられると bot の権限で任意のロールを付けさせる経路になる。
-  変更は Discord の `/team-role`（管理者）と `/member set-leader`（L3 以上）から行う
+  `member_role_id` / `secondary_role_id` は `cogs/members._sync_roles()` がそのまま
+  `add_roles()` に渡すため、書き換えられると bot の権限で任意のロールを
+  付けさせる経路になる。`members.is_leader` はダッシュボードの L2 判定そのもの。
+  変更は Discord の `/team-role`（L4。`role_type` は primary / secondary / leader）と
+  `/member set-leader`（L3 以上）から行う
 - ロール ID 設定の**実値は L4 にだけ返す**。参加者には「（設定済み）」と表示される
 - 設定変更で触れるキーもホワイトリスト（トークン類は対象外）
 - 編集は `audit_log` に必ず記録される（`/report audit` で確認できる）

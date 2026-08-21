@@ -207,13 +207,14 @@ class Teams(commands.Cog):
     @app_commands.describe(
         team="班の識別子",
         role="紐付ける Discord ロール",
-        role_type="primary=主所属ロール / secondary=副所属ロール（既定: primary）",
+        role_type="primary=主所属ロール / secondary=副所属ロール / leader=班長ロール（既定: primary）",
     )
     @app_commands.autocomplete(team=_team_ac)
     @app_commands.choices(
         role_type=[
             app_commands.Choice(name="primary（主所属）", value="primary"),
             app_commands.Choice(name="secondary（副所属）", value="secondary"),
+            app_commands.Choice(name="leader（班長・表示用）", value="leader"),
         ]
     )
     @app_commands.check(is_admin)
@@ -238,12 +239,25 @@ class Teams(commands.Cog):
             )
             return
 
-        if role_type == "primary":
-            await self.repo.set_team_roles(guild_id, team, member_role_id=str(role.id))
-            label = "主所属ロール"
-        else:
+        synced_note = "以降、所属変更時にこのロールが自動で付与・剥奪されます。"
+        if role_type == "secondary":
             await self.repo.set_team_roles(guild_id, team, secondary_role_id=str(role.id))
             label = "副所属ロール"
+            note = synced_note
+        elif role_type == "leader":
+            # 班長ロールは `/team-list` の表示用。_sync_roles() の自動付与にも
+            # 権限判定にも使わない（L2 の根拠は settings の LEADER_ROLE_IDS）。
+            # 混同されると「設定したのに班長が何もできない」になるので明記する。
+            await self.repo.set_team_roles(guild_id, team, leader_role_id=str(role.id))
+            label = "班長ロール"
+            note = (
+                "`/team-list` の表示に使います（自動付与はしません）。\n"
+                "班長の**権限**を与えるには `/set_role role_type:リーダー` を使ってください。"
+            )
+        else:
+            await self.repo.set_team_roles(guild_id, team, member_role_id=str(role.id))
+            label = "主所属ロール"
+            note = synced_note
         await self.audit_repo.record(
             guild_id,
             str(interaction.user.id),
@@ -256,8 +270,7 @@ class Teams(commands.Cog):
         await interaction.followup.send(
             embed=success_embed(
                 "班ロールを設定しました",
-                f"**{t['team_name']}** の{label} → {role.mention}\n"
-                "以降、所属変更時にこのロールが自動で付与・剥奪されます。",
+                f"**{t['team_name']}** の{label} → {role.mention}\n{note}",
                 executor=interaction.user.display_name,
             ),
             ephemeral=True,

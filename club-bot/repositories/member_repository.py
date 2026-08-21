@@ -60,8 +60,13 @@ class MemberRepository(BaseRepository):
         *,
         member_role_id: str | None = None,
         secondary_role_id: str | None = None,
+        leader_role_id: str | None = None,
     ) -> bool:
-        """班のロール紐付けを更新する。指定した種別のみ更新。対象班が無ければ False。"""
+        """班のロール紐付けを更新する。指定した種別のみ更新。対象班が無ければ False。
+
+        leader_role_id は班長を示す表示用の列で、権限判定には使わない
+        （L2 の判定根拠は settings の LEADER_ROLE_IDS。utils/permissions.has_level）。
+        """
         sets: list[str] = ["updated_at = ?"]
         params: list = [to_iso(now())]
         if member_role_id is not None:
@@ -70,6 +75,9 @@ class MemberRepository(BaseRepository):
         if secondary_role_id is not None:
             sets.append("secondary_role_id = ?")
             params.append(secondary_role_id)
+        if leader_role_id is not None:
+            sets.append("leader_role_id = ?")
+            params.append(leader_role_id)
         params.extend([guild_id, team_key])
         cur = await self.db.execute(
             f"UPDATE teams SET {', '.join(sets)} WHERE guild_id = ? AND team_key = ?", tuple(params)
