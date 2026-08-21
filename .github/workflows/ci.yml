@@ -41,3 +41,97 @@ jobs:
 
       - name: Test (pytest)
         run: python -m pytest tests/ -q
+
+  # ---------------------------------------------------------------------
+  # PostgreSQL 版（本番と同じドライバ経路を1回通す）
+  #
+  # 本番は PostgreSQL、SQLite は開発・テスト専用（ADR 0006）。SQLite は
+  # 型親和性で '5' を 5 として扱うため、G1-0 / G1-9 のような
+  # 「SQLite の CI は全部緑なのに PG の本番だけ壊れる」不具合を
+  # 上の test ジョブでは検出できない。ここが本番を代表するジョブ。
+  #
+  # Python は 3.12 のみに絞る。このジョブで見たいのは **DB ドライバ経路**で
+  # あって Python バージョン間の差ではなく、後者は上の test ジョブ
+  # （3.10 / 3.11 / 3.12）が担保している。PG サービス込みで3版回すのは
+  # 実行時間に見合わない。
+  # ---------------------------------------------------------------------
+  test-postgres:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: club-bot
+
+    env:
+      # DB 名に "test" を含めること。含まないと tests/ 側の安全装置
+      # （_guarded_dsn() / _pg_dsn_or_skip()）が本番 DB 保護のため skip し、
+      # 「CI に PG を足したのに1件も走らない」という最悪の形になる
+      CLUB_TEST_PG_DSN: postgresql://clubbot:clubbot@127.0.0.1:5432/clubbot_test
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: clubbot
+          # ジョブ終了で破棄される CI 専用コンテナの使い捨て資格情報
+          # （runner 内の 127.0.0.1 のみ。本番の秘密情報ではない）
+          POSTGRES_PASSWORD: clubbot
+          POSTGRES_DB: clubbot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U clubbot -d clubbot_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            club-bot/requirements.txt
+            club-bot/dashboard/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r dashboard/requirements.txt
+          pip install pytest
+          # ruff は Python バージョンにも DB にも依らないので test ジョブ側だけで実行する
+
+      - name: Check PG live tests are collected
+        shell: bash
+        run: |
+          # 「PG を足したのにテストが1件も無い」を検出する。収集は DSN と
+          # 無関係に成立するので、ここは純粋な件数チェック（skip の検査は次段）
+          python -m pytest tests/ -q --collect-only -k pg_live \
+            > "$RUNNER_TEMP/pg-collect.log" || true
+          count=$(grep -c '::test_pg_live' "$RUNNER_TEMP/pg-collect.log" || true)
+          echo "収集された PG ライブテスト: ${count} 件"
+          if [ "${count}" -eq 0 ]; then
+            echo "::error::PG ライブテストが1件も収集されませんでした"
+            exit 1
+          fi
+
+      - name: Test (pytest, PostgreSQL)
+        shell: bash
+        run: |
+          # -rs で skip 理由を必ずログに出す（skip を「緑」と数えないため）
+          python -m pytest tests/ -q -rs | tee "$RUNNER_TEMP/pytest-pg.log"
+
+      - name: Assert no tests were skipped
+        shell: bash
+        run: |
+          # pytest は skip 0 件のときサマリに "skipped" を出さないので、
+          # "N skipped" が出ていれば skip が発生している
+          if grep -qE '[0-9]+ skipped' "$RUNNER_TEMP/pytest-pg.log"; then
+            echo "::error::PG ジョブで skip が発生しました（skip は緑ではありません）"
+            grep -E '^SKIPPED' "$RUNNER_TEMP/pytest-pg.log" || true
+            exit 1
+          fi
+          echo "skip 0 件を確認しました"
