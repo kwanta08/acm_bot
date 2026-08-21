@@ -45,19 +45,20 @@ def _tmp_db_path() -> str:
     return path
 
 
-def _config(db_path: str) -> DashboardConfig:
+def _config(db_path: str, database_url: str | None = None) -> DashboardConfig:
     return DashboardConfig(
         client_id="cid",
         client_secret="secret",
         redirect_uri="https://example.com/auth/callback",
         secret_key="unit-test-secret",
         db_path=db_path,
+        database_url=database_url,
         secure_cookie=False,
     )
 
 
-async def _seed(db_path: str) -> dict[str, int]:
-    db = Database(db_path)
+async def _seed(db_path: str, database_url: str | None = None) -> dict[str, int]:
+    db = Database(db_path, database_url=database_url)
     await db.connect()
     try:
         await GuildRepository(db).ensure(GUILD_A, "A大学")
@@ -93,8 +94,10 @@ def _transport(guilds: list[dict]):
     return httpx.MockTransport(handler)
 
 
-def _client(db_path: str, *, permissions: str = "32") -> TestClient:
-    app = create_app(_config(db_path))
+def _client(
+    db_path: str, *, permissions: str = "32", database_url: str | None = None
+) -> TestClient:
+    app = create_app(_config(db_path, database_url))
     app.state.http_client = httpx.AsyncClient(
         transport=_transport([{"id": str(GUILD_A), "name": "A大学", "permissions": permissions}])
     )
@@ -505,3 +508,134 @@ def test_role_ids_are_masked_for_non_admin():
         assert by_key["ADMIN_ROLE_ID"]["value"] == "700"
     finally:
         client.__exit__(None, None, None)
+
+
+# ---------------------------------------------------------------------
+# 行 ID が主キーの型に変換できない場合（G1-0）
+#
+# PostgreSQL では asyncpg が DataError を投げて 500 になっていた。
+# SQLite では型親和性で拾えてしまうため、ここで固定できるのは
+# 「500 にならず 404 になる」ことと「書き込みへ進まない」ことだけ。
+# 実際に PG で通ることは tests/test_db_postgres.py が担保する。
+# ---------------------------------------------------------------------
+@pytest.mark.parametrize("bad_id", ["abc", "5.5", "1%20OR%201", "٥"])
+def test_unconvertible_row_id_is_404_not_500(bad_id):
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    client = _client(db_path)
+    try:
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/tasks/{bad_id}", json={"title": "書き換え"}
+        )
+        assert res.status_code == 404, res.text
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_unconvertible_row_id_does_not_write():
+    """変換の失敗は get_row で起きるので、UPDATE には到達しない。"""
+    db_path = _tmp_db_path()
+    ids = asyncio.run(_seed(db_path))
+    client = _client(db_path)
+    try:
+        assert (
+            client.patch(
+                f"/api/guilds/{GUILD_A}/tables/tasks/abc", json={"title": "書き換わってはいけない"}
+            ).status_code
+            == 404
+        )
+        # 既存行はそのまま
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/tasks")
+        titles = [r["title"] for r in res.json()["rows"]]
+        assert "書き換わってはいけない" not in titles
+        assert ids  # シードが効いていること
+    finally:
+        client.__exit__(None, None, None)
+
+
+# ---------------------------------------------------------------------
+# PostgreSQL 実機でのダッシュボード編集（G1-0）
+#
+# 上の SQLite テストは、型親和性のせいで**修正前でも緑になる**。
+# 「直しても再発を検出できない」状態を作らないため、HTTP 経路そのものを
+# PostgreSQL で1往復させる。CLUB_TEST_PG_DSN があるときだけ走る
+# （skip を緑と数えない: gotcha `dashboard-tests-silently-skipped`）。
+# ---------------------------------------------------------------------
+async def _pg_database_name(dsn: str) -> str:
+    import asyncpg
+
+    con = await asyncpg.connect(dsn)
+    try:
+        return await con.fetchval("SELECT current_database()")
+    finally:
+        await con.close()
+
+
+def _pg_dsn_or_skip() -> str:
+    """CLUB_TEST_PG_DSN がテスト専用 DB を指す場合だけ返す。
+
+    本番 DB を誤って書き換えないよう、接続先のデータベース名に
+    "test" を含む場合に限る（tests/test_db_postgres.py と同じ規約）。
+    """
+    dsn = os.getenv("CLUB_TEST_PG_DSN")
+    if not dsn:
+        pytest.skip("CLUB_TEST_PG_DSN 未設定（テスト専用 DB の DSN を指定してください）")
+    name = asyncio.run(_pg_database_name(dsn))
+    if "test" not in name.lower():
+        pytest.skip(f"安全のためテスト専用 DB でのみ実行します（接続先: {name}）")
+    return dsn
+
+
+async def _pg_reset(dsn: str) -> None:
+    """このテストが使うギルドの行だけ消す（他の行には触らない）。"""
+    db = Database("./unused.db", database_url=dsn)
+    await db.connect()
+    try:
+        for table in ("progress_nodes", "members", "guilds"):
+            for guild_id in (GUILD_A, GUILD_B):
+                await db.execute(f"DELETE FROM {table} WHERE guild_id = ?", (guild_id,))
+    finally:
+        await db.close()
+
+
+def test_pg_live_dashboard_edit_accepts_string_row_id():
+    """URL 由来の str な row_id で PATCH が通ること（500 にならない）。
+
+    修正前は asyncpg が Bind の時点で DataError を投げ、
+    `before = await repo.get_row(...)` で 500 になっていた。
+    """
+    dsn = _pg_dsn_or_skip()
+    asyncio.run(_pg_reset(dsn))
+    ids = asyncio.run(_seed("./unused.db", dsn))
+    client = _client("./unused.db", database_url=dsn)
+    try:
+        node_id = ids["node"][GUILD_A]
+        assert isinstance(node_id, int)
+
+        # 画面が組み立てる URL と同じく str で渡る
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/progress/{node_id}",
+            json={"manual_progress": "0.75"},
+        )
+        assert res.status_code == 200, res.text
+        assert res.json()["row"]["manual_progress"] == 0.75
+
+        # 変換できない ID は 500 ではなく 404
+        assert (
+            client.patch(
+                f"/api/guilds/{GUILD_A}/tables/progress/abc", json={"manual_progress": "0.5"}
+            ).status_code
+            == 404
+        )
+
+        # 他ギルドの行は PG でも見えない（guild_id スコープの回帰）
+        other = ids["node"][GUILD_B]
+        assert (
+            client.patch(
+                f"/api/guilds/{GUILD_A}/tables/progress/{other}", json={"manual_progress": "0.5"}
+            ).status_code
+            == 404
+        )
+    finally:
+        client.__exit__(None, None, None)
+        asyncio.run(_pg_reset(dsn))

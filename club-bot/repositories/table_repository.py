@@ -63,6 +63,10 @@ class TableSpec:
     label: str
     table: str
     pk: str
+    # 主キー列の型: "int" | "text"。既定値を置かない（新しい表を足すときに
+    # 決め忘れると、PostgreSQL でだけ落ちる不具合が再発するため）。
+    # Web から来る row_id は必ず str なので、ここを見て正規化する。
+    pk_type: str
     columns: tuple[Column, ...]
     order_by: str
     description: str = ""
@@ -92,6 +96,7 @@ TABLES: dict[str, TableSpec] = {
         label="タスク",
         table="tasks",
         pk="local_task_id",
+        pk_type="int",
         description="Todoist 連携タスクとローカルタスク",
         order_by="(due_date IS NULL), due_date, priority DESC",
         columns=(
@@ -113,6 +118,7 @@ TABLES: dict[str, TableSpec] = {
         label="メンバー",
         table="members",
         pk="member_id",
+        pk_type="int",
         description="班所属・技能タグ",
         order_by="display_name",
         columns=(
@@ -137,6 +143,7 @@ TABLES: dict[str, TableSpec] = {
         label="班",
         table="teams",
         pk="team_id",
+        pk_type="int",
         description="班のマスタとロール紐付け",
         order_by="team_name",
         columns=(
@@ -163,6 +170,7 @@ TABLES: dict[str, TableSpec] = {
         label="日程調整",
         table="schedules",
         pk="schedule_id",
+        pk_type="text",
         description="出欠投票の親レコード",
         order_by="deadline DESC",
         columns=(
@@ -182,6 +190,7 @@ TABLES: dict[str, TableSpec] = {
         label="出欠回答",
         table="schedule_votes",
         pk="vote_id",
+        pk_type="int",
         description="候補日ごとの回答（○/△/×）",
         order_by="updated_at DESC",
         columns=(
@@ -197,6 +206,7 @@ TABLES: dict[str, TableSpec] = {
         label="桁巻き積層記録",
         table="layer_records",
         pk="record_id",
+        pk_type="int",
         description="/layer start〜end の作業記録",
         order_by="ended_at DESC",
         columns=(
@@ -214,6 +224,7 @@ TABLES: dict[str, TableSpec] = {
         label="機体進捗",
         table="progress_nodes",
         pk="progress_node_id",
+        pk_type="int",
         description="機体→パーツ→部品の進捗ツリー",
         order_by="sort_order, node_id",
         columns=(
@@ -260,6 +271,46 @@ class UnknownColumnError(KeyError):
 
 class InvalidValueError(ValueError):
     """列の型に合わない値が指定された（例: 進捗率に数値でない文字列）。"""
+
+
+class UnknownRowError(KeyError):
+    """行 ID が主キーの型に変換できない（＝そんな行は存在しえない）。
+
+    「存在しない行」と同じ扱い（HTTP 404）にする。異常系ではなく
+    URL の打ち間違いなので、500 にはしない。
+    """
+
+
+def coerce_row_id(spec: TableSpec, row_id: Any) -> Any:
+    """行 ID を主キー列の型へ正規化する。変換できなければ UnknownRowError。
+
+    Web から来る row_id は URL 由来なので必ず str になる。SQLite は
+    型親和性で `'5'` を 5 として扱うため素通しでも動くが、**PostgreSQL の
+    asyncpg は bigint 引数に str を渡すと DataError を投げる**
+    （本番は PostgreSQL。ADR 0006）。
+
+        asyncpg.exceptions.DataError: invalid input for query argument $2: '5'
+
+    型はルータではなく TableSpec が持つ。列の定義とその型が同じ場所に
+    あれば、表を足すときに片方だけ直し忘れることがない（ADR 0016）。
+    """
+    if spec.pk_type == "int":
+        # bool は int の派生。True が「1行目」として通らないように弾く
+        if isinstance(row_id, bool):
+            raise UnknownRowError(f"{spec.key}: 行 ID が不正です")
+        if isinstance(row_id, int):
+            return row_id
+        text = str(row_id).strip()
+        # ASCII の数字だけを受ける。int() は全角「５」やアラビア数字「٥」、
+        # 桁区切りの "5_000" も 5 / 5000 として通してしまい、**同じ行を指す
+        # URL の綴りが複数できる**。監査ログには URL の生値が残るため、
+        # 「tasks#٥ を編集」と記録されて実際は 5 行目、というずれが起きる。
+        if not (text.isascii() and text.isdigit()):
+            raise UnknownRowError(f"{spec.key}: 行 ID が不正です: {row_id!r}")
+        return int(text)
+    if row_id is None:
+        raise UnknownRowError(f"{spec.key}: 行 ID が指定されていません")
+    return str(row_id)
 
 
 def get_spec(table_key: str) -> TableSpec:
@@ -487,11 +538,12 @@ class TableRepository(BaseRepository):
             offset += MAX_LIMIT
 
     async def get_row(self, guild_id: int, table_key: str, row_id: Any) -> dict[str, Any] | None:
+        """1行を返す。行 ID が主キーの型に変換できなければ UnknownRowError。"""
         spec = get_spec(table_key)
         row = await self.db.fetchone(
             f"SELECT {', '.join(spec.column_names)} FROM {spec.table}"
             f" WHERE guild_id = ? AND {spec.pk} = ?",
-            (guild_id, row_id),
+            (guild_id, coerce_row_id(spec, row_id)),
         )
         return dict(row) if row else None
 
@@ -502,9 +554,12 @@ class TableRepository(BaseRepository):
 
         編集不可・未知の列が含まれていれば UnknownColumnError。
         列の型に合わない値は InvalidValueError。
+        行 ID が主キーの型に変換できなければ UnknownRowError。
         更新した行があれば True。
         """
         spec = get_spec(table_key)
+        # 変換は列の検査より前に行う（UPDATE へ到達させない）
+        row_id = coerce_row_id(spec, row_id)
         by_name = {c.name: c for c in spec.columns if c.editable}
         unknown = [name for name in values if name not in by_name]
         if unknown:

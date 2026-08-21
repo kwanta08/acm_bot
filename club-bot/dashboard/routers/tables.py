@@ -42,6 +42,7 @@ from repositories.table_repository import (
     TableRepository,
     TableSpec,
     UnknownColumnError,
+    UnknownRowError,
     UnknownTableError,
     get_spec,
     rows_to_csv,
@@ -268,7 +269,13 @@ async def update_row(
         raise HTTPException(status_code=400, detail="変更内容がありません。")
 
     repo = scope.bind(TableRepository(get_database()))
-    before = await repo.get_row(table_key, row_id)
+    try:
+        before = await repo.get_row(table_key, row_id)
+    except UnknownRowError:
+        # 主キーの型に変換できない ID。存在しない行と同じ扱いにする
+        # （PostgreSQL ではここを通さないと asyncpg が DataError を投げ、
+        #   利用者には 500 が返っていた）。update_row へは到達しない
+        raise HTTPException(status_code=404, detail="対象の行がありません。") from None
     if before is None:
         # 他サーバーの行 ID を指定した場合もここに来る（guild_id 条件付きの
         # SELECT で見つからないため、存在の有無を区別しない）

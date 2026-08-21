@@ -494,6 +494,54 @@ CREATE TABLE IF NOT EXISTS {mig_table} (
     run(_main())
 
 
+# ---------------------------------------------------------------------
+# ダッシュボードの行 ID（G1-0）
+#
+# ルータは URL の row_id を str で受け取り、_prepare() は型変換をしない。
+# **SQLite は型親和性で '5' を 5 として扱うため、この不具合は
+# PostgreSQL でしか再現しない**（G0-3 の実測で確定）。
+#
+#     asyncpg.exceptions.DataError: invalid input for query argument $2: '5'
+#     ('str' object cannot be interpreted as an integer)
+# ---------------------------------------------------------------------
+def test_pg_live_dashboard_row_id_accepts_string():
+    """str の row_id で bigint 主キーの表を読み書きできること。"""
+    dsn = _guarded_dsn()
+
+    async def _main():
+        from repositories.table_repository import TableRepository, UnknownRowError
+        from repositories.task_repository import TaskRepository
+
+        db = Database("./unused.db", database_url=dsn)
+        await db.connect()
+        try:
+            tasks = TaskRepository(db)
+            repo = TableRepository(db)
+            task_id = await tasks.create_task(G2, "行IDの型テスト", created_by="tester")
+
+            # URL 由来と同じ str を渡す（ここが DataError になっていた）
+            row = await repo.get_row(G2, "tasks", str(task_id))
+            assert row is not None and row["title"] == "行IDの型テスト"
+
+            assert await repo.update_row(G2, "tasks", str(task_id), {"title": "更新後"}) is True
+            assert (await repo.get_row(G2, "tasks", str(task_id)))["title"] == "更新後"
+
+            # 変換できない ID は DataError ではなく UnknownRowError（→ 404）
+            try:
+                await repo.get_row(G2, "tasks", "abc")
+                raise AssertionError("UnknownRowError にならなかった")
+            except UnknownRowError:
+                pass
+
+            # TEXT 主キーの表は str のまま扱える（int 化しない）
+            assert await repo.get_row(G2, "schedules", "sch_missing") is None
+        finally:
+            await db.execute("DELETE FROM tasks WHERE guild_id = ?", (G2,))
+            await db.close()
+
+    run(_main())
+
+
 if __name__ == "__main__":
     test_to_pg_ddl_autoincrement_and_guild_id()
     print("test_to_pg_ddl_autoincrement_and_guild_id: OK")
@@ -520,6 +568,8 @@ if __name__ == "__main__":
         print("test_pg_live_big_snowflake_crud: OK")
         test_pg_live_bigint_migration_sql()
         print("test_pg_live_bigint_migration_sql: OK")
+        test_pg_live_dashboard_row_id_accepts_string()
+        print("test_pg_live_dashboard_row_id_accepts_string: OK")
     else:
         print("ライブ PG テストは CLUB_TEST_PG_DSN 未設定のためスキップ")
     print("全テスト成功")
