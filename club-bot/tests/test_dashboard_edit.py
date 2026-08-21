@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import sys
 import tempfile
@@ -712,6 +713,93 @@ def test_real_column_still_accepts_fractions():
         assert res.json()["row"]["target_weight_g"] == 1234.5
     finally:
         client.__exit__(None, None, None)
+
+
+def test_pg_live_number_out_of_range_is_400_not_500():
+    """PG 実機: DB の型に収まらない値は 400（500 にしない）。
+
+    変換は通るが BIGINT / float8 に収まらない、という G1-0・G1-9 と
+    同じ形。Python の int は任意精度なので "9" * 30 はそのまま通り、
+    "1e20" は float 経由で整数になる。どちらも asyncpg が投げる。
+
+    REAL 側は 500 にすらならない: PostgreSQL の float8 は Infinity /
+    NaN を格納できてしまうので、NaN が重量ツリーへ静かに伝播する
+    （ADR 0021 は未計測を None で表すと決めている）。
+    """
+    dsn = _pg_dsn_or_skip()
+    asyncio.run(_pg_reset(dsn))
+    ids = asyncio.run(_seed("./unused.db", dsn))
+    task_id = asyncio.run(_insert_task("./unused.db", dsn))
+    node_id = ids["node"][GUILD_A]
+    client = _client("./unused.db", database_url=dsn)
+    int32_max = 2**31 - 1
+    try:
+        # INTEGER 列: BIGINT を超える3つの入口はすべて 400
+        for value in ("9" * 30, "1e20", str(int32_max + 1), 10**30):
+            res = client.patch(
+                f"/api/guilds/{GUILD_A}/tables/tasks/{task_id}", json={"priority": value}
+            )
+            assert res.status_code == 400, f"{value!r}: {res.status_code} / {res.text}"
+
+        # 境界そのものは通る（1つ内側で切っていない）
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/tasks/{task_id}", json={"priority": str(int32_max)}
+        )
+        assert res.status_code == 200, res.text
+        assert res.json()["row"]["priority"] == int32_max
+
+        # REAL 列: inf / nan / float8 に収まらない int は 400
+        for value in ("1e400", "nan", "inf", "9" * 400):
+            res = client.patch(
+                f"/api/guilds/{GUILD_A}/tables/progress/{node_id}",
+                json={"target_weight_g": value},
+            )
+            assert res.status_code == 400, f"{value!r}: {res.status_code} / {res.text}"
+
+        # 通常の重量は通る（上限を新設していない）
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/progress/{node_id}", json={"target_weight_g": "1234.5"}
+        )
+        assert res.status_code == 200, res.text
+        assert res.json()["row"]["target_weight_g"] == 1234.5
+    finally:
+        client.__exit__(None, None, None)
+        asyncio.run(_pg_reset(dsn))
+
+
+def test_pg_live_float8_would_store_nan_if_we_let_it():
+    """弾く理由の実証: PostgreSQL の float8 は NaN を**格納できてしまう**。
+
+    つまり DB 側は止めてくれない。入口（_coerce_number）が唯一の防波堤で、
+    ここを外すと重量ツリーが静かに壊れる。
+    """
+    dsn = _pg_dsn_or_skip()
+    asyncio.run(_pg_reset(dsn))
+    ids = asyncio.run(_seed("./unused.db", dsn))
+    node_id = ids["node"][GUILD_A]
+
+    async def _main():
+        db = Database("./unused.db", database_url=dsn)
+        await db.connect()
+        try:
+            # アプリを迂回して直接入れる（= 入口を外したときに起きること）
+            await db.execute(
+                "UPDATE progress_nodes SET target_weight_g = 'NaN'"
+                " WHERE guild_id = ? AND progress_node_id = ?",
+                (GUILD_A, node_id),
+            )
+            row = await db.fetchone(
+                "SELECT target_weight_g FROM progress_nodes"
+                " WHERE guild_id = ? AND progress_node_id = ?",
+                (GUILD_A, node_id),
+            )
+            return row["target_weight_g"]
+        finally:
+            await db.close()
+
+    stored = asyncio.run(_main())
+    assert math.isnan(stored), "float8 は NaN を拒否しない（だから入口で弾く）"
+    asyncio.run(_pg_reset(dsn))
 
 
 def test_pg_live_number_columns_match_the_ddl_types():

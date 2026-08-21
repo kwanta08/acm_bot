@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -385,6 +386,18 @@ _TRUE_VALUES = {"1", "true", "yes", "on", "はい"}
 _FALSE_VALUES = {"", "0", "false", "no", "off", "いいえ"}
 
 
+# 編集できる INTEGER 列（tasks.priority / layer_records.minutes）は
+# PostgreSQL では **int4**。BIGINT になるのは主キーだけで、to_pg_ddl() は
+# 一般の INTEGER 列を INTEGER のまま出す（guild_id だけ BIGINT へ寄せる）。
+# int8 の範囲で通すと 3000000000 のような値が素通りして本番だけ
+# OverflowError: value out of int32 range になるため、int4 で判定する。
+# SQLite の INTEGER は 64bit なので開発環境では通ってしまう＝ここで揃える。
+# priority / minutes に CHECK 制約は無く、DB 側では止まらない。
+# （編集できる int 列が本当に int4 かは
+#   tests/test_number_column_types.py が DDL と突き合わせて固定している）
+_INT32_MIN = -(2**31)
+_INT32_MAX = 2**31 - 1
+
 def _coerce_number(column: Column, value: Any) -> int | float | None:
     """number 列の値を DDL の型（INTEGER / REAL）へ正規化する。
 
@@ -395,6 +408,11 @@ def _coerce_number(column: Column, value: Any) -> int | float | None:
 
     小数は丸めない。`priority` に 2.7 が来たら「2 にしておく」ではなく
     拒否して入れ直してもらう（勝手に値を変えない）。
+
+    **変換が通っても DB の型に収まるとは限らない。** Python の int は
+    任意精度なので `"9" * 30` はそのまま通り、`"1e20"` は float 経由で
+    整数になる。どちらも int4 を超えて asyncpg が投げる（本番だけ 500）。
+    範囲外は丸めず・切り詰めず 400 で返す。
     """
     if isinstance(value, bool):
         # 従来どおり ON/OFF を 1/0 として受ける
@@ -415,14 +433,41 @@ def _coerce_number(column: Column, value: Any) -> int | float | None:
                     f"{column.label} には数値を入力してください。"
                 ) from None
 
+    # inf / nan は int にも float8 にも「値」として入れてはいけない。
+    # PostgreSQL の float8 は Infinity / NaN を**格納できてしまう**ので、
+    # int 側と違って 500 にすらならず静かに入る。target_weight_g /
+    # actual_weight_g に NaN が入ると services/progress_tree.py の
+    # _resolve_weight() が子の合計を取る際に伝播し、重量ツリーが静かに壊れる。
+    # ADR 0021 は未計測を 0.0 に丸めず None のまま扱うと決めているので、
+    # 「値でない値」を第3の状態として通さない。
+    if isinstance(number, float) and not math.isfinite(number):
+        raise InvalidValueError(
+            f"{column.label} が扱える範囲を超えています"
+            "（inf / nan は保存できません）。"
+        )
+
     if column.number_type == "int":
         # 2.0 のような「小数点付きの整数」は受ける（丸めではなく等価変換）
         if isinstance(number, float) and not number.is_integer():
             raise InvalidValueError(
                 f"{column.label} には整数を入力してください（小数は使えません）。"
             )
-        return int(number)
-    return float(number)
+        number = int(number)
+        # 丸めない・切り詰めない。範囲外は 400 にして入れ直してもらう
+        if not _INT32_MIN <= number <= _INT32_MAX:
+            raise InvalidValueError(
+                f"{column.label} が扱える範囲を超えています"
+                f"（{_INT32_MIN} 〜 {_INT32_MAX}）。"
+            )
+        return number
+
+    try:
+        return float(number)
+    except OverflowError:
+        # 任意精度の int（"9" * 400 など）は float8 にできない
+        raise InvalidValueError(
+            f"{column.label} が扱える範囲を超えています。"
+        ) from None
 
 
 def _coerce(column: Column, value: Any) -> Any:
