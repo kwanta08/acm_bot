@@ -212,17 +212,22 @@ class ProgressRepository(BaseRepository):
         )
         return cur.rowcount > 0
 
-    async def delete_subtree(self, guild_id: int, node_id: str) -> int:
-        """ノードとその子孫をまとめて削除し、削除件数を返す。
+    async def _subtree_ids(self, guild_id: int, node_id: str) -> list[str]:
+        """ノードとその子孫の ID を返す（存在しなければ空）。
 
         親子関係はアプリ側で辿る（再帰 CTE はドライバ差が大きく、
         循環データがあると停止しないため）。訪問済み集合で循環を防ぐ。
         """
         children_by_parent: dict[str, list[str]] = {}
+        known: set[str] = set()
         for row in await self.list_nodes(guild_id):
+            known.add(row["node_id"])
             parent = row["parent_id"] or None
             if parent:
                 children_by_parent.setdefault(parent, []).append(row["node_id"])
+
+        if node_id not in known:
+            return []
 
         targets: list[str] = []
         seen: set[str] = set()
@@ -234,7 +239,19 @@ class ProgressRepository(BaseRepository):
             seen.add(current)
             targets.append(current)
             stack.extend(children_by_parent.get(current, []))
+        return targets
 
+    async def count_subtree(self, guild_id: int, node_id: str) -> int:
+        """削除したら何件消えるかを、消す前に数える（/progress remove の確認用）。
+
+        `delete_subtree()` と同じ辿り方を共有するので、プレビューの件数と
+        実際に消える件数がずれない。
+        """
+        return len(await self._subtree_ids(guild_id, node_id))
+
+    async def delete_subtree(self, guild_id: int, node_id: str) -> int:
+        """ノードとその子孫をまとめて削除し、削除件数を返す。"""
+        targets = await self._subtree_ids(guild_id, node_id)
         deleted = 0
         for target in targets:
             if await self.delete_node(guild_id, target):

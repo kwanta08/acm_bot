@@ -71,6 +71,7 @@ from utils.permissions import (
     require,
     require_manage_guild_or,
 )
+from utils.views import ConfirmView
 
 if TYPE_CHECKING:
     from utils.db import Database
@@ -1033,15 +1034,35 @@ class Progress(commands.Cog):
             return
         if not await self._resolve_node(interaction, guild_id, node):
             return
-        deleted = await self.repo.delete_subtree(guild_id, node)
-        await interaction.followup.send(
-            embed=success_embed(
-                "進捗ノードを削除しました",
-                f"`{node}` とその配下 合計 **{deleted}** 件を削除しました。",
-                executor=interaction.user.display_name,
-            ),
-            ephemeral=True,
+
+        # 消える件数を**消す前に**見せる。配下ごと消えることは説明文にしか
+        # 書かれておらず、実行後に件数を報告するだけでは手遅れだった
+        total = await self.repo.count_subtree(guild_id, node)
+        descendants = max(total - 1, 0)
+        body = (
+            f"`{node}` を削除します。\n"
+            f"配下のノード: **{descendants}** 件（自身を含めて合計 **{total}** 件）\n\n"
+            "削除したノードの進捗・重量・マイルストーンは戻せません。"
         )
+
+        async def _do_remove(confirm_interaction: discord.Interaction) -> None:
+            deleted = await self.repo.delete_subtree(guild_id, node)
+            await confirm_interaction.followup.send(
+                embed=success_embed(
+                    "進捗ノードを削除しました",
+                    f"`{node}` とその配下 合計 **{deleted}** 件を削除しました。",
+                    executor=confirm_interaction.user.display_name,
+                ),
+                ephemeral=True,
+            )
+
+        view = ConfirmView(
+            interaction.user.id,
+            info_embed("進捗ノードの削除を確認してください", body),
+            _do_remove,
+            cancel_message="進捗ノードは削除していません。",
+        )
+        await interaction.followup.send(embed=view.preview_embed, view=view, ephemeral=True)
 
     # ---------- /progress spar-link ----------
     @group.command(

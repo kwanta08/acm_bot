@@ -39,6 +39,7 @@ from utils.parser import (
     to_iso,
 )
 from utils.permissions import Level, ensure_guild, is_admin, require
+from utils.views import ConfirmView
 
 log = get_logger("schedule")
 
@@ -464,29 +465,48 @@ class Schedule(commands.Cog):
             )
             return
 
-        # Discord上の候補メッセージを削除
+        # 消えるものを**消す前に**見せる。票は CASCADE で一緒に消え、
+        # Discord 上の投票メッセージも戻せない
         options = await self.repo.list_options(guild_id, schedule_id)
-        channel = self.bot.get_channel(int(schedule["channel_id"]))
-        deleted_msgs = 0
-        for opt in options:
-            if not opt.get("message_id") or not channel:
-                continue
-            try:
-                msg = await channel.fetch_message(int(opt["message_id"]))
-                await msg.delete()
-                deleted_msgs += 1
-            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                pass
-
-        # DBから削除（外部キーCASCADEでoptions/votesも削除される）
-        await self.repo.delete_schedule(guild_id, schedule_id)
-
-        detail = f"ID: `{schedule_id}`\nDiscordメッセージ削除: {deleted_msgs} 件"
-
-        await interaction.followup.send(
-            embed=success_embed("削除しました", detail, executor=interaction.user.display_name),
-            ephemeral=True,
+        voters = await self.repo.list_voters_for_schedule(guild_id, schedule_id)
+        body = (
+            f"**{schedule['title']}**（ID: `{schedule_id}`）を削除します。\n"
+            f"候補: **{len(options)}** 件 / 回答した人: **{len(voters)}** 名\n\n"
+            "投票メッセージを削除し、票データも一緒に消えます。**元に戻せません。**"
         )
+
+        async def _do_delete(confirm_interaction: discord.Interaction) -> None:
+            # Discord上の候補メッセージを削除
+            channel = self.bot.get_channel(int(schedule["channel_id"]))
+            deleted_msgs = 0
+            for opt in options:
+                if not opt.get("message_id") or not channel:
+                    continue
+                try:
+                    msg = await channel.fetch_message(int(opt["message_id"]))
+                    await msg.delete()
+                    deleted_msgs += 1
+                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                    pass
+
+            # DBから削除（外部キーCASCADEでoptions/votesも削除される）
+            await self.repo.delete_schedule(guild_id, schedule_id)
+
+            detail = f"ID: `{schedule_id}`\nDiscordメッセージ削除: {deleted_msgs} 件"
+            await confirm_interaction.followup.send(
+                embed=success_embed(
+                    "削除しました", detail, executor=confirm_interaction.user.display_name
+                ),
+                ephemeral=True,
+            )
+
+        view = ConfirmView(
+            interaction.user.id,
+            info_embed("日程調整の削除を確認してください", body),
+            _do_delete,
+            cancel_message="日程調整は削除していません。",
+        )
+        await interaction.followup.send(embed=view.preview_embed, view=view, ephemeral=True)
 
     @group.command(name="edit-deadline", description="開催中の日程調整の締切を変更します。")
     @app_commands.describe(
