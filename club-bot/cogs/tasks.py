@@ -57,6 +57,25 @@ log = get_logger("tasks")
 PRIORITY_LABELS = {1: "低", 2: "中", 3: "高", 4: "最優先"}
 
 
+def task_choices(rows: list[dict], current: str, limit: int = 25) -> list[tuple[str, int]]:
+    """オートコンプリート用の (表示名, local_task_id) 一覧を返す。
+
+    表示名は「#ID タイトル」。ID を手で写させない（G2-2）。
+    current による絞り込みはタイトル・ID の部分一致。
+    """
+    needle = (current or "").strip().lower()
+    out: list[tuple[str, int]] = []
+    for row in rows:
+        task_id = int(row["local_task_id"])
+        label = f"#{task_id} {row.get('title') or ''}".rstrip()
+        if needle and needle not in label.lower():
+            continue
+        out.append((label[:100], task_id))
+        if len(out) >= limit:
+            break
+    return out
+
+
 class SectionSelectView(discord.ui.View):
     def __init__(self, cog: Tasks, candidates: list[dict], owner_id: int, **task_kwargs):
         super().__init__(timeout=120)
@@ -112,6 +131,24 @@ class Tasks(commands.Cog):
         if interaction.guild is None:
             return []
         return await team_service.team_choices(self.bot.db, interaction.guild.id, current)
+
+    async def _task_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[int]]:
+        """未完了タスクの候補（done / delete / assign / priority 用）。
+
+        task_id: int の引数に合わせて Choice[int] を返す。
+        """
+        if interaction.guild is None:
+            return []
+        try:
+            rows = await self.repo.list_tasks(interaction.guild.id, status="open")
+        except Exception:  # noqa: BLE001  (補完は失敗しても致命的でない)
+            return []
+        return [
+            app_commands.Choice(name=label, value=value)
+            for label, value in task_choices(rows, current)
+        ]
 
     async def _resolve_team(
         self, interaction: discord.Interaction, guild_id: int, team_key: str
@@ -865,6 +902,13 @@ class Tasks(commands.Cog):
         if len(tasks) > 25:
             embed.set_footer(text=f"他 {len(tasks) - 25} 件")
         return embed
+
+
+# task_id のオートコンプリートを一括登録する（cogs/progress.py と同じ作法）
+Tasks.done.autocomplete("task_id")(Tasks._task_autocomplete)
+Tasks.delete.autocomplete("task_id")(Tasks._task_autocomplete)
+Tasks.assign.autocomplete("task_id")(Tasks._task_autocomplete)
+Tasks.priority.autocomplete("task_id")(Tasks._task_autocomplete)
 
 
 async def setup(bot: commands.Bot):
