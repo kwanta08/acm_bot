@@ -283,7 +283,7 @@
       - **注意**: ADR 0018 / 0024 の「既存データを動かさない」軸に沿う。
         `/schedule delete` の論理削除化は破壊的なので **このタスクには含めない**（G3-3 で扱う）
 
-- [ ] **G2-2** ID を手で写させるのをやめる（オートコンプリート追加）。
+- [x] **G2-2** ID を手で写させるのをやめる（オートコンプリート追加）。
       `cogs/schedule.py:347,393,416,441,482` の5コマンドが素の `schedule_id: str`、
       `cogs/tasks.py:280,311,342,369` が素の `task_id: int`。
       一方 `cogs/progress.py:1482-1491` は10箇所に階層字下げ付きオートコンプリートを一括登録している。
@@ -1119,3 +1119,49 @@ ADR 0014（1タスク＝1ブランチ）に従い混ぜなかった。
 **B. gotcha `progress-subtree-disappears` とは別件。**
 あちらは親の付け替えで循環を作るとツリーから部分木が落ちる話で、
 `/progress remove` の確認欠如とは原因が違う。今回の変更では解消しない。
+
+---
+
+### 2026-08-22 — G2-2: schedule_id / task_id のオートコンプリート（ブランチ `fix/g2-2`）
+
+5コマンドが素の `schedule_id: str`、4コマンドが素の `task_id: int` で、
+利用者は一覧の出力から ID を手で写していた。`cogs/progress.py` の一括登録の
+作法（クラス定義後に `Class.command.autocomplete("param")(Class._method)`）を
+そのまま踏襲した。
+
+#### 追加した候補
+
+| コマンド | 候補 | 表示名 |
+|---|---|---|
+| `/schedule close` / `remind` / `edit-deadline` | **開催中のみ** | `イベント名（〜MM/DD HH:MM）` |
+| `/schedule status` / `delete` | 締切済みも含む | 締切済みは `[終了]` を前置 |
+| `/task done` / `delete` / `assign` / `priority` | 未完了のみ（`Choice[int]`） | `#ID タイトル` |
+
+締切済みに close は意味がなく remind は嘘の通知になるため、開催中のみに絞る。
+絞り込みは名前・ID の部分一致。候補は25件以内・表示名は100文字以内
+（Discord の制約）。guild_id でスコープし、DM（guild None）では空を返す。
+
+#### 設計判断
+
+- 純粋関数 `schedule_choices()` / `task_choices()` に切り出し、DB 行 → 候補の
+  変換を Discord なしでテストできるようにした（`node_choices()` と同型）
+- 補完コールバックは例外を握りつぶして空を返す（補完の失敗で入力を妨げない。
+  `_node_autocomplete` と同じ判断）
+- 登録先コマンドの検査は `command.get_parameter("schedule_id").autocomplete` の
+  有無で行う（gotcha `test-asserts-permission-but-decorator-missing` と同じ
+  「実装ではなく登録を見る」形）
+
+#### 検証
+
+- `ruff check .`: パス
+- `pytest tests/ -q -rs`: **799 passed, 9 skipped**（skip は PG ライブ9件）
+- 実装を戻す（2ファイルを checkout）と `tests/test_autocomplete.py` が
+  collection error で赤になることを確認
+
+#### 申し送り
+
+- `/schedule remind` の嘘成功（対象0名でも緑）は **G2-3 の範囲**。
+  ここでは候補に出す・出さないだけを直した
+- 候補が25件を超えるサーバーでは古い投票が候補から落ちる。
+  絞り込み入力で到達できるので実害は小さいが、`/schedule status` を
+  日付降順で出しているのはそのため（新しいものが先に出る）
