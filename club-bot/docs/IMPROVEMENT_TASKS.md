@@ -330,7 +330,7 @@
         「まだデータがありません。`/task add` `/schedule create` から始めてください」に切り替える
       - **検証**: `tests/test_empty_states.py`（新規）で、各コマンドの空状態にコマンド名が含まれることを検査
 
-- [ ] **G2-6** `/progress edit` の進捗率を検証する。
+- [x] **G2-6** `/progress edit` の進捗率を検証する。
       `services/progress_tree.py:82-107` の `parse_progress` は解釈不能なら `None` を返し、
       `cogs/progress.py:977-979` がそれをそのまま `manual_progress` に代入する。
       `/progress edit node:主桁 progress:半分` で**既存の進捗率が消え**、緑の成功 Embed が出る。
@@ -1330,3 +1330,49 @@ fell_back / failed）で「誰に届かなかったか」を呼び出し側が�
   「まだ締め切られた投票が無い」は初心者の行き止まりではないため対象外とした
 - 空状態が残っている可能性のある他コマンドは未調査（`/member list` 等）。
   `empty_state_embed` ができたので追加は1行
+
+---
+
+### 2026-08-22 — G2-6: `/progress edit` の進捗率検証（ブランチ `fix/g2-6`）
+
+`parse_progress` は解釈不能なら None を返し（移行スクリプト用の仕様。
+**変えていない**）、コマンド側がそれをそのまま `manual_progress` へ代入して
+いた。`/progress edit node:主桁 progress:半分` で**既存の進捗率が消え**、
+緑の成功 Embed が出る。
+
+`Progress._parse_progress_input()` を挟み、(成立したか, 値) に分けて
+コマンド側で弾く。エラーは
+「進捗率「{入力}」を解釈できません。`0.5` `50%` `50` の形式で指定してください。」
+
+#### 解釈規則（ダッシュボード側と揃えた）
+
+G0-2 で取り込んだ `8b9c0f4` がダッシュボード側
+（`repositories/table_repository.py` の progress 列検証）に入れた規則と同一:
+
+| 入力 | 結果 |
+|---|---|
+| `0.5` / `50%` / `50` / `１００％` | 受理（1 より大きい数値は % とみなす） |
+| 空・空白のみ | クリア（None を保存） |
+| `半分` など解釈不能 | エラー（既存値は変更しない） |
+
+#### スコープ判断
+
+**`/progress add` にも同じ検証を入れた。** タスク本文は edit を名指しするが、
+add も同じ `parse_progress(progress)` 素通しで「progress:半分 が黙って
+未入力になり緑が出る」形（既存値が無いぶん実害が軽いだけで、原因は同一行）。
+edit だけ直すと2つの入口で挙動が食い違う。
+
+#### 検証
+
+- `ruff check .`: パス
+- `pytest tests/ -q -rs`: **836 passed, 9 skipped**（skip は PG ライブ9件）
+- 実装を戻す（progress.py を checkout）と新テスト2件が赤
+  （既存値の保持・add のエラー化）
+
+#### 申し送り
+
+- エラー文言はダッシュボード側（「には 0.5 または 50% の形式で入力して
+  ください。」）と**基調は同じだが完全一致ではない**（コマンド側は入力値の
+  エコーと `50` の例示がある）。文言まで一本化したくなったら
+  `_invalid_progress_embed` とテーブル側 `InvalidValueError` を共通化する
+- gotcha `progress-stops-after-dashboard-edit` とは別件（あちらは同期停止）
