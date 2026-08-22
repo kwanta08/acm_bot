@@ -23,6 +23,7 @@ from services.layer_tracking_service import LayerTrackingService
 from utils.embeds import (
     MAX_EMBED_FIELDS,
     add_truncation_note,
+    empty_state_embed,
     error_embed,
     info_embed,
     success_embed,
@@ -106,7 +107,10 @@ class LayerTracking(commands.Cog):
         rows = await self.keta_repo.list_all(guild_id)
         if not rows:
             await interaction.followup.send(
-                embed=info_embed("桁名一覧", "登録済みの桁名はありません。"), ephemeral=True
+                embed=empty_state_embed(
+                    "桁名一覧", "登録済みの桁名はありません。", "/layer keta-add"
+                ),
+                ephemeral=True,
             )
             return
         lines = [f"{'✅' if r['active_flag'] else '⛔'} {r['keta_name']}" for r in rows]

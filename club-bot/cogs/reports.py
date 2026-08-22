@@ -23,7 +23,13 @@ from repositories.task_repository import TaskRepository
 from services import team_service
 from services.milestone_service import days_until_competition, evaluate_all
 from services.progress_tree import load_tree
-from utils.embeds import MAX_EMBED_FIELDS, add_truncation_note, info_embed, success_embed
+from utils.embeds import (
+    MAX_EMBED_FIELDS,
+    add_truncation_note,
+    empty_state_embed,
+    info_embed,
+    success_embed,
+)
 from utils.logger import get_logger
 from utils.parser import fmt_jp, from_iso, now
 from utils.permissions import Level, ensure_guild, require
@@ -54,6 +60,21 @@ class Reports(commands.Cog):
         schedules = await self.schedule_repo.list_open_schedules(guild_id)
 
         gconf = await config.for_guild(guild_id, db=self.bot.db)
+
+        if not open_tasks and not overdue and not schedules:
+            # 全部0件は「健全に運用できている」ではなく「まだ始まっていない」。
+            # 0/0/0 のサマリーは両者を見分けられないので空状態として出す
+            await interaction.followup.send(
+                embed=empty_state_embed(
+                    f"{gconf.club_name_or_default} 週次サマリー",
+                    "まだデータがありません。`/task add` でタスクを、"
+                    "`/schedule create` で日程調整を作成できます。",
+                    "/task add",
+                ),
+                ephemeral=True,
+            )
+            return
+
         embed = info_embed(f"{gconf.club_name_or_default} 週次サマリー")
         embed.add_field(name="未完了タスク", value=str(len(open_tasks)), inline=True)
         embed.add_field(name="期限超過", value=str(len(overdue)), inline=True)
@@ -176,9 +197,20 @@ class Reports(commands.Cog):
         if guild_id is None:
             return
         rows = await self.log_repo.list_recent(guild_id, limit)
-        embed = info_embed("監査・通知ログ")
         if not rows:
-            embed.description = "ログがありません。"
+            # ログは通知（リマインダー等）が動いて初めて溜まる。
+            # 何も無い＝まだ通知が発生する運用が始まっていない
+            await interaction.followup.send(
+                embed=empty_state_embed(
+                    "監査・通知ログ",
+                    "通知はまだ記録されていません。日程調整やタスクを作ると、"
+                    "締切前のリマインドがここに記録されます。",
+                    "/schedule create",
+                ),
+                ephemeral=True,
+            )
+            return
+        embed = info_embed("監査・通知ログ")
         for r in rows:
             d = dict(r)
             embed.add_field(
@@ -200,8 +232,12 @@ class Reports(commands.Cog):
         all_sched = await self.schedule_repo.list_all(guild_id)
         embed = info_embed("出欠率一覧")
         if not all_sched:
-            embed.description = "集計対象の投票がありません。"
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(
+                embed=empty_state_embed(
+                    "出欠率一覧", "集計対象の投票がありません。", "/schedule create"
+                ),
+                ephemeral=True,
+            )
             return
         # 集計は全件で行い、表示だけ Embed の上限に合わせて絞る。
         # 26 件目以降を集計から落とすと、表示されないだけでなく
