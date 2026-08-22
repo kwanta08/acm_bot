@@ -100,6 +100,14 @@ def new_node_id() -> str:
     return f"{MANUAL_ID_PREFIX}{uuid.uuid4().hex[:10]}"
 
 
+def _invalid_progress_embed(raw: str | None) -> discord.Embed:
+    """進捗率が解釈できなかったときのエラー（ダッシュボード側と同じ文言基調）。"""
+    return error_embed(
+        f"進捗率「{raw}」を解釈できません。"
+        "`0.5` `50%` `50` の形式で指定してください。"
+    )
+
+
 # ---------------------------------------------------------------------
 # 表示用ヘルパー（純粋関数。テスト対象）
 # ---------------------------------------------------------------------
@@ -739,6 +747,23 @@ class Progress(commands.Cog):
         svc = await self.bot.todoist_manager.for_guild(guild_id)
         return await progress_sync_service.sync_guild_db(self.db, guild_id, svc)
 
+    @staticmethod
+    def _parse_progress_input(progress: str | None) -> tuple[bool, float | None]:
+        """コマンド引数の進捗率を検証つきで解釈する。
+
+        `parse_progress` の「解釈不能は None」仕様は移行スクリプト用なので
+        変えず、コマンド側で (成立したか, 値) に分けて弾く（G2-6）。
+        解釈規則はダッシュボード側（repositories/table_repository.py の
+        progress 列検証）と同じ: 0.5 / 50% / 50 を受け、空はクリア（None）、
+        解釈不能はエラー。
+        """
+        if progress is None or not progress.strip():
+            return True, None
+        parsed = pt.parse_progress(progress)
+        if parsed is None:
+            return False, None
+        return True, parsed
+
     async def _resolve_node(
         self, interaction: discord.Interaction, guild_id: int, node_id: str
     ) -> bool:
@@ -910,6 +935,12 @@ class Progress(commands.Cog):
             return
         if parent and not await self._resolve_node(interaction, guild_id, parent):
             return
+        ok, progress_value = self._parse_progress_input(progress)
+        if not ok:
+            await interaction.followup.send(
+                embed=_invalid_progress_embed(progress), ephemeral=True
+            )
+            return
 
         node_id = new_node_id()
         siblings = await self.repo.list_children(guild_id, parent or None)
@@ -921,7 +952,7 @@ class Progress(commands.Cog):
             name=name,
             assignee=assignee,
             status=status,
-            manual_progress=pt.parse_progress(progress),
+            manual_progress=progress_value,
             now_text=progress_sync_service._now_text(),
         )
 
@@ -995,7 +1026,15 @@ class Progress(commands.Cog):
         if status is not None:
             fields["status"] = status
         if progress is not None:
-            fields["manual_progress"] = pt.parse_progress(progress)
+            ok, progress_value = self._parse_progress_input(progress)
+            if not ok:
+                # 従来は None が manual_progress へそのまま入り、
+                # 既存の進捗率が消えたうえで緑の成功 Embed が出ていた
+                await interaction.followup.send(
+                    embed=_invalid_progress_embed(progress), ephemeral=True
+                )
+                return
+            fields["manual_progress"] = progress_value
             fields["source"] = pt.SOURCE_MANUAL  # 手入力に戻す
         if parent is not None:
             fields["parent_id"] = parent
