@@ -157,6 +157,26 @@ class Reminders(commands.Cog):
         for s in candidates:
             try:
                 count = await schedule_cog.notify_unanswered(s)
+                if count is None:
+                    # 対象ロール未設定などで催促できない。送信済みフラグを
+                    # 立てない（立てると後からロールを付けても永久に再送
+                    # されない。G2-3）。ウィンドウ内は毎tick ここへ来るが、
+                    # skipped の記録だけで送信は発生しない
+                    await self._log_reminder(
+                        guild_id,
+                        "schedule_unanswered",
+                        s["schedule_id"],
+                        None,
+                        None,
+                        "skipped",
+                        "対象ロール未設定のため未回答者を特定できません",
+                    )
+                    log.info(
+                        "締切前催促をスキップ: %s（対象ロール未設定, guild=%s）",
+                        s["title"],
+                        guild_id,
+                    )
+                    continue
                 await self.schedule_repo.mark_reminder_sent(guild_id, s["schedule_id"])
                 await self._log_reminder(
                     guild_id, "schedule_unanswered", s["schedule_id"], None, None, "success"

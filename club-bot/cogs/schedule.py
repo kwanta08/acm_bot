@@ -30,6 +30,7 @@ from utils.embeds import (
     success_embed,
 )
 from utils.logger import get_logger
+from utils.notify import dm_each_with_channel_fallback
 from utils.parser import (
     InvalidDatetimeError,
     fmt_jp,
@@ -217,7 +218,7 @@ class Schedule(commands.Cog):
         emoji_maps = build_emoji_maps(gconf, interaction.guild)
         all_emojis = emoji_maps["all_emojis"]
 
-        for label, start in parsed_options:
+        for index, (label, start) in enumerate(parsed_options):
             option_id = svc.new_option_id()
             await self.repo.add_option(
                 guild_id, option_id, schedule_id, label, to_iso(start), None, None
@@ -226,7 +227,13 @@ class Schedule(commands.Cog):
             embed = await svc.build_option_embed(
                 scoped_repo, self.bot, schedule, opt, interaction.guild
             )
-            msg = await target_channel.send(embed=embed)
+            # 対象ロールへは先頭の1通だけでメンションする（候補の数だけ
+            # 鳴らさない）。従来はメンションが無く、対象者は投票の開始に
+            # 気付けなかった（G2-3）
+            content = None
+            if index == 0 and target_role:
+                content = f"{target_role.mention} 日程調整「{title}」の投票が始まりました。"
+            msg = await target_channel.send(content=content, embed=embed)
             await self.repo.set_option_message(guild_id, option_id, str(msg.id))
             for emoji in all_emojis:
                 await msg.add_reaction(emoji)
@@ -499,6 +506,17 @@ class Schedule(commands.Cog):
             )
             return
         count = await self.notify_unanswered(schedule)
+        if count is None:
+            # 従来はここで「対象: 0 名」の緑 Embed が出ていた（嘘の成功）
+            await interaction.followup.send(
+                embed=error_embed(
+                    "対象ロールが設定されていないため、未回答者を特定できません。\n"
+                    "`/schedule create` の `target_role` で対象ロールを指定した投票のみ"
+                    "再通知できます。"
+                ),
+                ephemeral=True,
+            )
+            return
         await interaction.followup.send(
             embed=success_embed(
                 "未回答者へ再通知しました",
@@ -757,15 +775,21 @@ class Schedule(commands.Cog):
     # ====================================================================
     # 締切・通知ヘルパー（Reminders から呼ばれる）
     # ====================================================================
-    async def notify_unanswered(self, schedule: dict) -> int:
-        """未回答者へ DM 通知。DM 不可ならチャンネルでメンション（仕様 11.2.5）。"""
+    async def notify_unanswered(self, schedule: dict) -> int | None:
+        """未回答者へ DM 通知。DM 不可ならチャンネルでメンション（仕様 11.2.5）。
+
+        **None は「対象を特定できない」**（対象ロール未設定・ロール削除済み・
+        ギルド不可視）。0 は「対象は特定でき、未回答が0名」。従来はどちらも
+        0 を返していたため、呼び出し側が緑の成功 Embed で「対象: 0 名」と
+        表示し、定期リマインドは送っていないのに送信済みフラグを立てていた。
+        """
         guild_id = schedule["guild_id"]
         guild = self.bot.get_guild(guild_id)
         if not guild or not schedule.get("target_role_id"):
-            return 0
+            return None
         role = guild.get_role(int(schedule["target_role_id"]))
         if not role:
-            return 0
+            return None
 
         answered = await self.repo.list_voters_for_schedule(guild_id, schedule["schedule_id"])
         targets = [m for m in role.members if not m.bot and str(m.id) not in answered]
@@ -776,19 +800,10 @@ class Schedule(commands.Cog):
             f"締切: {deadline}\n投票チャンネルでリアクションをお願いします。"
         )
 
-        failed_mentions = []
-        for m in targets:
-            try:
-                await m.send(text)
-            except (discord.Forbidden, discord.HTTPException):
-                failed_mentions.append(m.mention)
-
-        if failed_mentions:
-            channel = self.bot.get_channel(int(schedule["channel_id"]))
-            if channel:
-                await channel.send(
-                    f"未回答リマインド（DM不可）: {' '.join(failed_mentions)}\n{text}"
-                )
+        channel = self.bot.get_channel(int(schedule["channel_id"]))
+        await dm_each_with_channel_fallback(
+            targets, text, channel, fallback_note="未回答リマインド（DM不可）:"
+        )
         return len(targets)
 
     async def finalize_schedule(self, schedule: dict):
