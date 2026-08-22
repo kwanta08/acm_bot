@@ -224,6 +224,47 @@
       - **注意**: `docs/DASHBOARD_SETUP.md` §11 と `docs/OPERATION.md` §8.2 に
         「restart 前に `pg_dump -Fc` を取る」を追記する（マイグレーションは down が無い）
 
+- [x] **G1-9** `_coerce()` が INTEGER 列に float を返す（G1-0 と同じ失敗の書き込み側）。
+      `repositories/table_repository.py` の `number` 分岐は `int(text)` → 失敗したら
+      `float(text)` の順に試すため、INTEGER 列にも float が入る。さらに
+      `isinstance(value, (int, float)): return value` により、JSON ボディの
+      `{"priority": 2.7}` は変換すら経ずに素通りする。
+      asyncpg は int8 の引数に float を渡しても `DataError` になるため、
+      **G1-0 とまったく同じ形で本番だけ 500 になる**（SQLite では保存できてしまい、
+      そのあと bot 側の読み取りが壊れる — gotcha `progress-stops-after-dashboard-edit` と同型）。
+
+      **`number` の既定を int にはできない。** 編集できる `number` 列は整数と実数が混在する:
+
+      | 列 | DDL | 受けるべき型 |
+      |---|---|---|
+      | `tasks.priority` | INTEGER | int のみ |
+      | `layer_records.minutes` | INTEGER | int のみ |
+      | `progress.sort_order` | **REAL** | float 可 |
+      | `progress.target_weight_g` | **REAL** | float 可 |
+      | `progress.actual_weight_g` | **REAL** | float 可 |
+
+      - **受入**: `Column` に列型（int / real）を持たせ `_coerce()` が従う。
+        INTEGER 列に小数が来たら 400（`InvalidValueError`）で「整数で入力してください」。**丸めない**。
+        `isinstance(value, (int, float)) → return value` の素通りを塞ぐ。
+        宣言と DDL のずれを検出するテスト。PG 実機で `tasks.priority` に `"2.7"` → 400
+      - **注意**: `progress` 型（`manual_progress`）は `parse_progress` が別に扱うので対象外
+      - **追撃（2026-08-22 完了）**: 型は揃ったが**大きさ**が未検査だった。`"9" * 30` / `"1e20"` が
+        int4 を超えて本番だけ 500 になる穴と、REAL 列の inf / NaN を同ブランチで塞いだ。
+        範囲は BIGINT ではなく **int4**（編集できる INTEGER 列は PG でも `INTEGER`）。完了ログ参照
+
+- [ ] **G1-10** CI に PostgreSQL を追加し、PG 経路を回す。
+      G1-0 の不具合は「CI が全部緑なのに本番だけ壊れている」形で残った。
+      ADR 0006（本番は PostgreSQL / SQLite は開発・テスト専用）を踏まえると、
+      **SQLite だけの CI は本番を代表していない。**
+      - **受入**: `.github/workflows/ci.yml` に `services: postgres:16` を追加し `CLUB_TEST_PG_DSN` を渡す。
+        **DB 名に `test` を含めること**（含めないと `_guarded_dsn()` が skip し、追加したのに1件も走らない）。
+        PG ジョブで skip が 0 件であることを `-rs` で確認する。
+        マトリクス3版すべては高コストなので **PG は 3.12 のみ**に絞ってよい（判断を完了ログに残す）
+      - **検証**: 意図的に G1-0 / G1-9 の修正を戻した PR で CI が赤になること
+      - **注意**: ADR 0014（1タスク＝1ブランチ）に従い、他の変更と混ぜない
+      - **現状**: G1-9 時点で PG テストは7件（`test_db_postgres.py` 5 / `test_dashboard_edit.py` 2）。
+        すべて `CLUB_TEST_PG_DSN` 未設定で skip している
+
 ---
 
 ## Phase G2: 事故を防ぐ / 迷わせない（全89コマンドに効く共通改善）
@@ -835,3 +876,172 @@ ADR 0006（本番は PostgreSQL）を踏まえると SQLite だけの CI は本�
   受入基準3が求めていたのはこちらなので、実質的な担保はできている
 
 **E. `docs/IMPROVEMENT_REPORT.md` の P0-8 は解消済みにできる。**
+
+### 2026-08-21 — G1-9（ブランチ `fix/g1-9`）
+
+`fix/g1-0` の `e93c949` から分岐。同じ `table_repository.py` を触るので
+G1-0 の `coerce_row_id` と同居させた。**未コミット。**
+
+- ruff: `All checks passed!`
+- pytest: **729 passed, 7 skipped**（G1-9 前は 701 passed / 6 skipped）。
+  skip は `CLUB_TEST_PG_DSN` 未設定の PG テストのみで、**6 → 7 の増分が今回追加した PG 結合テスト**
+
+#### 完了内容
+
+| ファイル | 変更 |
+|---|---|
+| `repositories/table_repository.py` | `Column.number_type`（`"int"` / `"real"`）を追加し、`__post_init__` で宣言を強制。`_coerce()` の number 分岐を `_coerce_number()` へ切り出し、列の型に従わせた |
+| `tests/test_number_column_types.py`（新規・26件） | 型変換、小数の拒否、DDL との整合、宣言し忘れの検出、ドライバへ渡る値 |
+| `tests/test_dashboard_edit.py`（+3件） | HTTP で 400 になること、REAL 列は小数を受けること、PG 実機（DSN 条件付き） |
+
+対象は number 列 11本（INTEGER 8 / REAL 3）。うち編集可能なのは
+`tasks.priority`・`layer_records.minutes`（int）と
+`progress.sort_order`・`target_weight_g`・`actual_weight_g`（real）の5本。
+
+#### 設計判断
+
+**1. `number_type` に既定値を置かず、`__post_init__` で強制した。**
+G1-0 の `pk_type` は `TableSpec` の必須フィールドにできたが、`Column` は
+`type` / `editable` が既定値を持つため、必須の位置引数を後ろに足せない。
+そこで**フィールドは `None` 既定のまま、`__post_init__` で「number なら宣言必須」を検査**する形にした。
+`TABLES` はモジュール読み込み時に構築されるので、宣言し忘れると **import が失敗する**
+（テストが1件落ちるのではなく、モジュール全体が読めない）。「決めずには書けない」構造は保てている。
+逆向き（number 以外の列に `number_type` を書く）も弾く。効かない宣言を残さないため。
+
+**2. 小数は丸めない。ただし `2.0` は受ける。**
+`priority` に `2.7` が来たら「2 にしておく」ではなく 400 で返す（勝手に値を変えない）。
+一方 `2.0` / `"2.0"` は `int(2)` として受ける。これは丸めではなく**等価変換**で、
+JSON の数値リテラルが float になる言語・クライアントを弾かないため。
+判定は `float.is_integer()` なので `1.0000001` は拒否される。
+
+**3. REAL 列は int で来ても float に寄せる。**
+`sort_order` に `7` が来たら `7.0` にする。値は変わらないが、
+「列の型に合わせる」という契約を int / real の両方向で同じにしておくため。
+
+**4. bool の扱いは変えていない。**
+`_coerce(priority, True) == 1` は従来どおり。ON/OFF を 1/0 として受ける既存の挙動で、
+今回の論点（INTEGER 列に float）とは別。
+
+**5. `progress` 型（`manual_progress`）には触っていない。**
+`parse_progress` が `0.5` / `50%` / `50` を解釈して 0.0〜1.0 にクランプする別系統で、
+列は REAL。今回の変更の対象外（チケットの注意どおり）。
+
+ADR との衝突なし。スキーマ変更なしのためマイグレーション不要。
+
+#### 実装を戻すとテストが落ちること
+
+| 戻した実装 | 落ちたテスト |
+|---|---|
+| `_coerce_number()` を旧挙動へ（`isinstance` の素通り＋int→float の順試行。宣言は残置） | 11（うち HTTP 1） |
+| `Column.__post_init__` の検証 | 2 |
+| `tasks.priority` の `number_type` を `"real"` に改ざん | 14（DDL 整合テストを含む） |
+
+#### 次タスクへの申し送り
+
+**A. G1-10（CI に PostgreSQL）の優先度が上がった。**
+PG でしか再現しない不具合がこれで2件（G1-0 / G1-9）になり、どちらも
+**SQLite の CI は全部緑のまま**だった。現在 PG テストは7件あるが、
+`CLUB_TEST_PG_DSN` 未設定で全部 skip している。**CI で回さない限り、
+このブランチがマージされた後に同じ型の不具合が入っても気付けない。**
+
+**B. 型の宣言が3系統になった。整理は不要だが、次に列を足す人向けに一言。**
+`TableSpec.pk_type`（主キー）/ `Column.type`（表示・入力の扱い）/
+`Column.number_type`（number の下位型）。それぞれ DDL との整合テストがあるので、
+宣言を間違えれば落ちる。**新しい表・列を足すときは DDL を見てから宣言する**、で足りる。
+
+**C. 同じ形の穴が他に無いかは未調査。**
+今回は `number` 列だけを見た。`bool` 列（INTEGER）は `_coerce` が 1/0 の int を返すので安全、
+`datetime` / `text` 列は TEXT なので対象外。ただし **`type` の宣言自体が DDL とずれている列**が
+あれば別の話になる（例: TEXT 列を `"number"` と宣言している）。
+`Column.type` と DDL の整合を機械的に検査するテストは**まだ無い**ので、
+気になるなら G2 以降で足す価値がある。
+
+---
+
+### 2026-08-22 — G1-9 追撃: number 列の範囲チェック（ブランチ `fix/g1-9`）
+
+`_coerce_number()` は型（int / real）は揃えるが**大きさを見ていない**ため、
+変換が通っても DB の型に収まらない値がドライバへ渡っていた。
+G1-0 / G1-9 と同じ「SQLite は保存でき、**PostgreSQL だけ 500**」の形。
+
+#### 塞いだ入口
+
+| 入口 | 変換の経路 | 変換結果 |
+|---|---|---|
+| `"1e20"` | `int()` 失敗 → `float()` → `is_integer()` True → `int()` | 10^20 |
+| `"9" * 30` | `int()` が**直接成功**する（Python は任意精度整数） | 10^30 - 1 |
+| `{"priority": 10**30}` | JSON ボディの数値。文字列を経ないので素通り | 10^30 |
+| `"9" * 400`（REAL 列） | `int()` 成功 → `float()` が **OverflowError**（未捕捉＝500） | — |
+
+`priority` / `minutes` に CHECK 制約は無いので DB 側では止まらない。
+範囲外は丸めず・切り詰めず `InvalidValueError`（→ 400）。
+
+#### 受入基準の訂正: 範囲は BIGINT ではなく **int4**
+
+チケットは「BIGINT の範囲（±2^63）を超えると asyncpg が投げる」としていたが、
+**編集できる INTEGER 列は PostgreSQL では int4** だった。
+`to_pg_ddl()` が BIGINT へ寄せるのは**主キーと `guild_id` だけ**で、
+`tasks.priority` / `layer_records.minutes` は `INTEGER` のまま出る。
+
+int8 の範囲で判定すると `3000000000` が素通りし、**本番だけ**
+`OverflowError: value out of int32 range` になる。PG 実機で確認済み:
+
+    # チケット記載どおり int8 で判定した場合
+    asyncpg.exceptions.DataError: invalid input for query argument $1:
+        2147483648 (value out of int32 range)
+
+そのため判定は `_INT32_MIN` / `_INT32_MAX`。
+「編集できる int 列が本当に int4 か」は
+`test_editable_integer_columns_are_int4_in_postgres` が PG の DDL と
+突き合わせて固定する（BIGINT へ広げたら落ちて、範囲判定の見直しを促す）。
+
+SQLite の INTEGER は 64bit なので開発環境では通ってしまうが、
+**ADR 0006（本番は PostgreSQL）に合わせて厳しい側へ揃える**。
+開発で通って本番で落ちる、が今回の不具合そのものだった。
+
+#### REAL 列の inf / NaN も同じコミットで塞いだ（スコープ判断）
+
+**一緒に塞ぐ**と判断した。理由:
+
+1. **同じ関数の同じ分岐対**。`_coerce_number()` の末尾は
+   `int` 側と `real` 側の2本しかなく、片方だけ直すのは関数を半分だけ直すこと
+2. **同じ欠陥クラス**「DDL の型に入れてはいけない値を通す」。
+   int 側は 500、real 側は**500 にすらならない**（float8 は Infinity / NaN を格納できる）
+3. **ADR 0021 と整合する**。未計測を 0.0 に丸めず None で表すと決めている以上、
+   NaN という第3の「値でない値」を通すのはその判断に反する。
+   新方針の発明ではなく既存 ADR の徹底
+4. **コストが小さい**。同じ `InvalidValueError` 経路に数行。
+   スキーマ変更・設定追加・マイグレーションなし
+5. ADR 0014 が禁じているのは**無関係な変更の混在**。
+   同一関数・同一欠陥クラスの対は「無関係」ではない
+
+放置した場合の壊れ方: `target_weight_g` / `actual_weight_g` に NaN が入ると
+`services/progress_tree.py` の `_resolve_weight()` が子の合計を取る際に伝播し、
+**祖先ノードの重量がすべて NaN になる**。エラーにならないぶん G1-0 より発見が遅れる。
+PG 実機で「float8 は NaN を拒否しない」ことも確認済み
+（`test_pg_live_float8_would_store_nan_if_we_let_it`）＝ DB 側は止めてくれない。
+
+#### 変更したファイル
+
+- `repositories/table_repository.py`: `_coerce_number()` に有限性チェックと
+  int4 範囲チェック、REAL 側の `OverflowError` 捕捉を追加
+- `tests/test_number_column_types.py`: 範囲・inf・NaN の単体テスト（+27）
+- `tests/test_dashboard_edit.py`: PG 実機の HTTP 経路テスト（+2）
+
+#### 検証
+
+- `ruff check .`: パス
+- `pytest tests/ -q -rs`（SQLite）: **758 passed, 9 skipped**（skip は PG ライブ9件）
+- `pytest tests/ -q -rs`（**PostgreSQL 16 実機**）: **767 passed, skip 0**
+- 実装を戻すとテストが落ちること: 範囲チェックを無効化 → **20 failed**
+
+#### 申し送り
+
+**A. G1-9 の「型は宣言、大きさは？」が残っていた。**
+`number_type` は int / real の別は宣言させるが、**その int がどれだけ入るか**は
+DDL 側にしか無い。今回は「編集できる int 列は int4」をテストで固定して塞いだが、
+将来 BIGINT 列を編集可能にするなら `number_type` に幅を持たせる設計判断が要る。
+
+**B. 同じ「大きさ」の穴は text 列にもある（未調査）。**
+`title` などの TEXT 列に長さ上限が無い。PostgreSQL の TEXT に上限は無いので
+500 にはならないが、Discord の埋め込み文字数制限に当たる可能性はある。別件。

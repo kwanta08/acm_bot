@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -53,6 +54,22 @@ class Column:
     label: str
     type: str = "text"
     editable: bool = False
+    # type == "number" のときの下位型: "int" | "real"（DDL の INTEGER / REAL）。
+    #
+    # **安全な既定値が無い。** int を既定にすると重量・並び順（REAL）が壊れ、
+    # real を既定にすると priority / minutes（INTEGER）へ小数が入り、
+    # asyncpg が int8 引数に float を受け付けず本番だけ落ちる。
+    # そこで既定値を置かず、number 列は列ごとに宣言させる（__post_init__ で強制）。
+    number_type: str | None = None
+
+    def __post_init__(self):
+        if self.type == "number":
+            if self.number_type not in ("int", "real"):
+                raise ValueError(
+                    f"{self.name}: number 列には number_type（'int' か 'real'）が必要です"
+                )
+        elif self.number_type is not None:
+            raise ValueError(f"{self.name}: number 以外の列に number_type は指定できません")
 
 
 @dataclass(frozen=True)
@@ -83,8 +100,16 @@ class TableSpec:
         return tuple(c.name for c in self.columns if c.editable)
 
 
-def _c(name: str, label: str, type_: str = "text", editable: bool = False) -> Column:
-    return Column(name=name, label=label, type=type_, editable=editable)
+def _c(
+    name: str,
+    label: str,
+    type_: str = "text",
+    editable: bool = False,
+    number_type: str | None = None,
+) -> Column:
+    return Column(
+        name=name, label=label, type=type_, editable=editable, number_type=number_type
+    )
 
 
 # ---------------------------------------------------------------------
@@ -100,12 +125,12 @@ TABLES: dict[str, TableSpec] = {
         description="Todoist 連携タスクとローカルタスク",
         order_by="(due_date IS NULL), due_date, priority DESC",
         columns=(
-            _c("local_task_id", "ID", "number"),
+            _c("local_task_id", "ID", "number", number_type="int"),
             _c("title", "タイトル", "text", editable=True),
             _c("assignee_id", "担当者", "user", editable=True),
             _c("team_key", "班", "text", editable=True),
             _c("due_date", "期限", "text", editable=True),
-            _c("priority", "優先度", "number", editable=True),
+            _c("priority", "優先度", "number", editable=True, number_type="int"),
             _c("status", "状態", "text", editable=True),
             _c("todoist_task_id", "TodoistタスクID"),
             _c("created_by", "作成者", "user"),
@@ -122,7 +147,7 @@ TABLES: dict[str, TableSpec] = {
         description="班所属・技能タグ",
         order_by="display_name",
         columns=(
-            _c("member_id", "ID", "number"),
+            _c("member_id", "ID", "number", number_type="int"),
             _c("user_id", "Discordユーザー", "user"),
             _c("display_name", "表示名", "text", editable=True),
             # 班は slug で保持し、表示だけ班名へ解決する（編集は slug / JSON 配列のまま）
@@ -147,7 +172,7 @@ TABLES: dict[str, TableSpec] = {
         description="班のマスタとロール紐付け",
         order_by="team_name",
         columns=(
-            _c("team_id", "ID", "number"),
+            _c("team_id", "ID", "number", number_type="int"),
             _c("team_key", "班キー"),
             _c("team_name", "班名", "text", editable=True),
             # ロール ID は Web から編集させない。
@@ -194,7 +219,7 @@ TABLES: dict[str, TableSpec] = {
         description="候補日ごとの回答（○/△/×）",
         order_by="updated_at DESC",
         columns=(
-            _c("vote_id", "ID", "number"),
+            _c("vote_id", "ID", "number", number_type="int"),
             _c("option_id", "候補", "option"),
             _c("user_id", "回答者", "user"),
             _c("status", "回答", "text", editable=True),
@@ -210,13 +235,13 @@ TABLES: dict[str, TableSpec] = {
         description="/layer start〜end の作業記録",
         order_by="ended_at DESC",
         columns=(
-            _c("record_id", "ID", "number"),
+            _c("record_id", "ID", "number", number_type="int"),
             _c("user_id", "作業者", "user"),
             _c("keta", "桁名", "text", editable=True),
             _c("layer_num", "層番号", "text", editable=True),
             _c("started_at", "開始", "datetime"),
             _c("ended_at", "終了", "datetime"),
-            _c("minutes", "作業時間(分)", "number", editable=True),
+            _c("minutes", "作業時間(分)", "number", editable=True, number_type="int"),
         ),
     ),
     "progress": TableSpec(
@@ -228,17 +253,17 @@ TABLES: dict[str, TableSpec] = {
         description="機体→パーツ→部品の進捗ツリー",
         order_by="sort_order, node_id",
         columns=(
-            _c("progress_node_id", "ID", "number"),
+            _c("progress_node_id", "ID", "number", number_type="int"),
             _c("node_id", "ノードID"),
             _c("parent_id", "親ノードID", "text", editable=True),
-            _c("sort_order", "表示順", "number", editable=True),
+            _c("sort_order", "表示順", "number", editable=True, number_type="real"),
             _c("name", "名前", "text", editable=True),
             _c("assignee", "担当者", "text", editable=True),
             _c("status", "状態", "text", editable=True),
             _c("manual_progress", "進捗率", "progress", editable=True),
             # 重量はグラム固定（列名の _g で明示。単位設定は作らない）
-            _c("target_weight_g", "目標重量(g)", "number", editable=True),
-            _c("actual_weight_g", "実測重量(g)", "number", editable=True),
+            _c("target_weight_g", "目標重量(g)", "number", editable=True, number_type="real"),
+            _c("actual_weight_g", "実測重量(g)", "number", editable=True, number_type="real"),
             _c("source", "ソース"),
             _c("todoist_task_id", "TodoistタスクID"),
             _c("updated_at", "更新日時", "datetime"),
@@ -361,26 +386,96 @@ _TRUE_VALUES = {"1", "true", "yes", "on", "はい"}
 _FALSE_VALUES = {"", "0", "false", "no", "off", "いいえ"}
 
 
+# 編集できる INTEGER 列（tasks.priority / layer_records.minutes）は
+# PostgreSQL では **int4**。BIGINT になるのは主キーだけで、to_pg_ddl() は
+# 一般の INTEGER 列を INTEGER のまま出す（guild_id だけ BIGINT へ寄せる）。
+# int8 の範囲で通すと 3000000000 のような値が素通りして本番だけ
+# OverflowError: value out of int32 range になるため、int4 で判定する。
+# SQLite の INTEGER は 64bit なので開発環境では通ってしまう＝ここで揃える。
+# priority / minutes に CHECK 制約は無く、DB 側では止まらない。
+# （編集できる int 列が本当に int4 かは
+#   tests/test_number_column_types.py が DDL と突き合わせて固定している）
+_INT32_MIN = -(2**31)
+_INT32_MAX = 2**31 - 1
+
+def _coerce_number(column: Column, value: Any) -> int | float | None:
+    """number 列の値を DDL の型（INTEGER / REAL）へ正規化する。
+
+    以前は `int()` → 失敗したら `float()` の順に試し、さらに数値型は
+    そのまま返していたため、**INTEGER 列に float が入りえた**。
+    asyncpg は int8 の引数に float を渡しても DataError になるので、
+    本番（PostgreSQL）だけが 500 になる（SQLite は保存できてしまう）。
+
+    小数は丸めない。`priority` に 2.7 が来たら「2 にしておく」ではなく
+    拒否して入れ直してもらう（勝手に値を変えない）。
+
+    **変換が通っても DB の型に収まるとは限らない。** Python の int は
+    任意精度なので `"9" * 30` はそのまま通り、`"1e20"` は float 経由で
+    整数になる。どちらも int4 を超えて asyncpg が投げる（本番だけ 500）。
+    範囲外は丸めず・切り詰めず 400 で返す。
+    """
+    if isinstance(value, bool):
+        # 従来どおり ON/OFF を 1/0 として受ける
+        return int(value)
+    if isinstance(value, (int, float)):
+        number: int | float = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            number = int(text)
+        except ValueError:
+            try:
+                number = float(text)
+            except ValueError:
+                raise InvalidValueError(
+                    f"{column.label} には数値を入力してください。"
+                ) from None
+
+    # inf / nan は int にも float8 にも「値」として入れてはいけない。
+    # PostgreSQL の float8 は Infinity / NaN を**格納できてしまう**ので、
+    # int 側と違って 500 にすらならず静かに入る。target_weight_g /
+    # actual_weight_g に NaN が入ると services/progress_tree.py の
+    # _resolve_weight() が子の合計を取る際に伝播し、重量ツリーが静かに壊れる。
+    # ADR 0021 は未計測を 0.0 に丸めず None のまま扱うと決めているので、
+    # 「値でない値」を第3の状態として通さない。
+    if isinstance(number, float) and not math.isfinite(number):
+        raise InvalidValueError(
+            f"{column.label} が扱える範囲を超えています"
+            "（inf / nan は保存できません）。"
+        )
+
+    if column.number_type == "int":
+        # 2.0 のような「小数点付きの整数」は受ける（丸めではなく等価変換）
+        if isinstance(number, float) and not number.is_integer():
+            raise InvalidValueError(
+                f"{column.label} には整数を入力してください（小数は使えません）。"
+            )
+        number = int(number)
+        # 丸めない・切り詰めない。範囲外は 400 にして入れ直してもらう
+        if not _INT32_MIN <= number <= _INT32_MAX:
+            raise InvalidValueError(
+                f"{column.label} が扱える範囲を超えています"
+                f"（{_INT32_MIN} 〜 {_INT32_MAX}）。"
+            )
+        return number
+
+    try:
+        return float(number)
+    except OverflowError:
+        # 任意精度の int（"9" * 400 など）は float8 にできない
+        raise InvalidValueError(
+            f"{column.label} が扱える範囲を超えています。"
+        ) from None
+
+
 def _coerce(column: Column, value: Any) -> Any:
     """列の型に合わせて値を正規化する。合わない値は InvalidValueError。"""
     if value is None:
         return None
     if column.type == "number":
-        if isinstance(value, bool):
-            return int(value)
-        if isinstance(value, (int, float)):
-            return value
-        text = str(value).strip()
-        if not text:
-            return None
-        try:
-            return int(text)
-        except ValueError:
-            pass
-        try:
-            return float(text)
-        except ValueError:
-            raise InvalidValueError(f"{column.label} には数値を入力してください。") from None
+        return _coerce_number(column, value)
     if column.type == "bool":
         if isinstance(value, bool):
             return int(value)

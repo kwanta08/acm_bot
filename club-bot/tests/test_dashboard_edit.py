@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import sys
 import tempfile
@@ -591,7 +592,7 @@ async def _pg_reset(dsn: str) -> None:
     db = Database("./unused.db", database_url=dsn)
     await db.connect()
     try:
-        for table in ("progress_nodes", "members", "guilds"):
+        for table in ("tasks", "progress_nodes", "members", "guilds"):
             for guild_id in (GUILD_A, GUILD_B):
                 await db.execute(f"DELETE FROM {table} WHERE guild_id = ?", (guild_id,))
     finally:
@@ -636,6 +637,208 @@ def test_pg_live_dashboard_edit_accepts_string_row_id():
             ).status_code
             == 404
         )
+    finally:
+        client.__exit__(None, None, None)
+        asyncio.run(_pg_reset(dsn))
+
+
+# ---------------------------------------------------------------------
+# number 列を DDL の型どおりに受けること（G1-9）
+#
+# INTEGER 列（tasks.priority / layer_records.minutes）に小数が来たら 400。
+# REAL 列（progress.sort_order / 重量2列）は小数を受ける。
+# SQLite はどちらの列にも何でも保存できるので、**HTTP で 400 が返ること**と
+# **PG 実機で通ること**の両方を見る。
+# ---------------------------------------------------------------------
+async def _insert_task(db_path: str, database_url: str | None = None) -> int:
+    db = Database(db_path, database_url=database_url)
+    await db.connect()
+    try:
+        cur = await db.execute(
+            "INSERT INTO tasks (guild_id, title, status, created_by, created_at, priority)"
+            " VALUES (?, '主桁の積層', 'open', 'tester', '2026-01-01', 2)",
+            (GUILD_A,),
+        )
+        return cur.lastrowid
+    finally:
+        await db.close()
+
+
+def test_fraction_for_an_integer_column_is_400():
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    task_id = asyncio.run(_insert_task(db_path))
+    client = _client(db_path)
+    try:
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/tasks/{task_id}", json={"priority": "2.7"}
+        )
+        assert res.status_code == 400, res.text
+        assert "整数" in res.json()["detail"]
+
+        # JSON 由来の float も同じ扱い（文字列を経ない経路）
+        assert (
+            client.patch(
+                f"/api/guilds/{GUILD_A}/tables/tasks/{task_id}", json={"priority": 2.7}
+            ).status_code
+            == 400
+        )
+    finally:
+        client.__exit__(None, None, None)
+
+    async def _check():
+        db = Database(db_path)
+        await db.connect()
+        try:
+            row = await TableRepository(db).get_row(GUILD_A, "tasks", task_id)
+            assert row["priority"] == 2  # 丸めも書き込みもされていない
+        finally:
+            await db.close()
+
+    asyncio.run(_check())
+
+
+def test_real_column_still_accepts_fractions():
+    """INTEGER を締めたついでに重量・表示順まで拒否していないこと。"""
+    db_path = _tmp_db_path()
+    ids = asyncio.run(_seed(db_path))
+    client = _client(db_path)
+    try:
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/progress/{ids['node'][GUILD_A]}",
+            json={"sort_order": "2.5", "target_weight_g": "1234.5"},
+        )
+        assert res.status_code == 200, res.text
+        assert res.json()["row"]["sort_order"] == 2.5
+        assert res.json()["row"]["target_weight_g"] == 1234.5
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_pg_live_number_out_of_range_is_400_not_500():
+    """PG 実機: DB の型に収まらない値は 400（500 にしない）。
+
+    変換は通るが BIGINT / float8 に収まらない、という G1-0・G1-9 と
+    同じ形。Python の int は任意精度なので "9" * 30 はそのまま通り、
+    "1e20" は float 経由で整数になる。どちらも asyncpg が投げる。
+
+    REAL 側は 500 にすらならない: PostgreSQL の float8 は Infinity /
+    NaN を格納できてしまうので、NaN が重量ツリーへ静かに伝播する
+    （ADR 0021 は未計測を None で表すと決めている）。
+    """
+    dsn = _pg_dsn_or_skip()
+    asyncio.run(_pg_reset(dsn))
+    ids = asyncio.run(_seed("./unused.db", dsn))
+    task_id = asyncio.run(_insert_task("./unused.db", dsn))
+    node_id = ids["node"][GUILD_A]
+    client = _client("./unused.db", database_url=dsn)
+    int32_max = 2**31 - 1
+    try:
+        # INTEGER 列: BIGINT を超える3つの入口はすべて 400
+        for value in ("9" * 30, "1e20", str(int32_max + 1), 10**30):
+            res = client.patch(
+                f"/api/guilds/{GUILD_A}/tables/tasks/{task_id}", json={"priority": value}
+            )
+            assert res.status_code == 400, f"{value!r}: {res.status_code} / {res.text}"
+
+        # 境界そのものは通る（1つ内側で切っていない）
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/tasks/{task_id}", json={"priority": str(int32_max)}
+        )
+        assert res.status_code == 200, res.text
+        assert res.json()["row"]["priority"] == int32_max
+
+        # REAL 列: inf / nan / float8 に収まらない int は 400
+        for value in ("1e400", "nan", "inf", "9" * 400):
+            res = client.patch(
+                f"/api/guilds/{GUILD_A}/tables/progress/{node_id}",
+                json={"target_weight_g": value},
+            )
+            assert res.status_code == 400, f"{value!r}: {res.status_code} / {res.text}"
+
+        # 通常の重量は通る（上限を新設していない）
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/progress/{node_id}", json={"target_weight_g": "1234.5"}
+        )
+        assert res.status_code == 200, res.text
+        assert res.json()["row"]["target_weight_g"] == 1234.5
+    finally:
+        client.__exit__(None, None, None)
+        asyncio.run(_pg_reset(dsn))
+
+
+def test_pg_live_float8_would_store_nan_if_we_let_it():
+    """弾く理由の実証: PostgreSQL の float8 は NaN を**格納できてしまう**。
+
+    つまり DB 側は止めてくれない。入口（_coerce_number）が唯一の防波堤で、
+    ここを外すと重量ツリーが静かに壊れる。
+    """
+    dsn = _pg_dsn_or_skip()
+    asyncio.run(_pg_reset(dsn))
+    ids = asyncio.run(_seed("./unused.db", dsn))
+    node_id = ids["node"][GUILD_A]
+
+    async def _main():
+        db = Database("./unused.db", database_url=dsn)
+        await db.connect()
+        try:
+            # アプリを迂回して直接入れる（= 入口を外したときに起きること）
+            await db.execute(
+                "UPDATE progress_nodes SET target_weight_g = 'NaN'"
+                " WHERE guild_id = ? AND progress_node_id = ?",
+                (GUILD_A, node_id),
+            )
+            row = await db.fetchone(
+                "SELECT target_weight_g FROM progress_nodes"
+                " WHERE guild_id = ? AND progress_node_id = ?",
+                (GUILD_A, node_id),
+            )
+            return row["target_weight_g"]
+        finally:
+            await db.close()
+
+    stored = asyncio.run(_main())
+    assert math.isnan(stored), "float8 は NaN を拒否しない（だから入口で弾く）"
+    asyncio.run(_pg_reset(dsn))
+
+
+def test_pg_live_number_columns_match_the_ddl_types():
+    """PG 実機: INTEGER 列は小数を弾き、REAL 列は受ける。
+
+    修正前は `{"priority": 2.7}` がそのまま asyncpg へ渡り、
+    int8 引数に float を渡した時点で DataError（＝500）になっていた。
+    """
+    dsn = _pg_dsn_or_skip()
+    asyncio.run(_pg_reset(dsn))
+    ids = asyncio.run(_seed("./unused.db", dsn))
+    task_id = asyncio.run(_insert_task("./unused.db", dsn))
+    client = _client("./unused.db", database_url=dsn)
+    try:
+        # INTEGER 列: 小数は 400（500 にしない）
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/tasks/{task_id}", json={"priority": "2.7"}
+        )
+        assert res.status_code == 400, res.text
+
+        # INTEGER 列: 整数は通る（int でバインドされている）
+        res = client.patch(f"/api/guilds/{GUILD_A}/tables/tasks/{task_id}", json={"priority": "3"})
+        assert res.status_code == 200, res.text
+        assert res.json()["row"]["priority"] == 3
+
+        # REAL 列: 小数を受ける
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/progress/{ids['node'][GUILD_A]}",
+            json={"sort_order": "2.5"},
+        )
+        assert res.status_code == 200, res.text
+        assert res.json()["row"]["sort_order"] == 2.5
+
+        # REAL 列: 整数を入れても float として通る
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/progress/{ids['node'][GUILD_A]}",
+            json={"target_weight_g": 1200},
+        )
+        assert res.status_code == 200, res.text
     finally:
         client.__exit__(None, None, None)
         asyncio.run(_pg_reset(dsn))
