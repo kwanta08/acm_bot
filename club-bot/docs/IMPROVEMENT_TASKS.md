@@ -319,7 +319,7 @@
         `RolloverView` の timeout を 300 → 900 に延ばす
       - **検証**: `tests/test_views_timeout.py`（新規）で `on_timeout` が `message.edit` を呼ぶことを検査
 
-- [ ] **G2-5** 空状態に「次の1コマンド」を必ず添える。
+- [x] **G2-5** 空状態に「次の1コマンド」を必ず添える。
       良い例（`cogs/progress.py:75-78` / `cogs/teams.py:165-169` / `cogs/season.py:147-155`）と
       悪い例（`cogs/tasks.py:794` / `cogs/schedule.py:331` / `cogs/layer_tracking.py:101` /
       `cogs/reports.py:180,202`）が混在している。
@@ -1285,3 +1285,48 @@ fell_back / failed）で「誰に届かなかったか」を呼び出し側が�
   継承を1行変えるだけ
 - G2-1 の ConfirmView 申し送り（「放置でボタンが生きたまま無反応」）は
   これで解消
+
+---
+
+### 2026-08-22 — G2-5: 空状態に「次の1コマンド」（ブランチ `fix/g2-5`）
+
+`utils/embeds.py` に `empty_state_embed(title, situation, next_command)` を追加し、
+「〜はありません。」で行き止まりだった空状態に次のコマンドを添えた。
+
+| 箇所 | 従来 | 次の1コマンド |
+|---|---|---|
+| `/task list`（Todoist 一覧含む） | 該当するタスクはありません。 | `/task add` |
+| `/schedule list` | 現在、開催中の投票はありません。 | `/schedule create` |
+| `/layer keta-list` | 登録済みの桁名はありません。 | `/layer keta-add` |
+| `/report audit` | ログがありません。 | `/schedule create`（通知が発生する運用の起点） |
+| `/report attendance-rate` | 集計対象の投票がありません。 | `/schedule create` |
+| `/report weekly` | 未完了 0 / 超過 0 / 投票 0 | 下記 |
+
+`/report weekly` はタスク・超過・投票がすべて0件のとき、0/0/0 のサマリーを
+出す代わりに「まだデータがありません。`/task add` でタスクを、
+`/schedule create` で日程調整を作成できます。」へ切り替えた
+（**健全な運用と未開始を見分けられない**問題への対処）。
+1件でもデータがあれば従来どおり集計を出す（テストで固定）。
+
+#### 設計判断
+
+- `next_command` は**1つだけ**受け取る。複数の選択肢は situation 側の文に
+  書く（`/report weekly` がその形）。「次はこれ」を1つに絞るのが趣旨で、
+  選択肢を並べ直すと元の迷いが戻る
+- タスク本文の「悪い例」の行番号は現行コードとずれていたため、
+  該当コマンドの空状態表示を実体として特定して直した
+  （`tasks.py:794` は実際には `/task push` の行で空状態ではない。
+  タスク一覧の空状態 `_build_task_list_embed` / `_build_todoist_task_list_embed` を対象にした）
+
+#### 検証
+
+- `ruff check .`: パス
+- `pytest tests/ -q -rs`: **833 passed, 9 skipped**（skip は PG ライブ9件）
+- 実装を戻す（5ファイル checkout）と `tests/test_empty_states.py` が赤
+
+#### 申し送り
+
+- `/schedule list-closed`（締切済み一覧）の空状態は触っていない。
+  「まだ締め切られた投票が無い」は初心者の行き止まりではないため対象外とした
+- 空状態が残っている可能性のある他コマンドは未調査（`/member list` 等）。
+  `empty_state_embed` ができたので追加は1行
