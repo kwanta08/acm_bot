@@ -77,6 +77,33 @@ def filter_emoji_choices(emojis, current: str) -> list[app_commands.Choice[str]]
     return out
 
 
+def schedule_choices(
+    rows: list[dict], current: str, limit: int = 25
+) -> list[tuple[str, str]]:
+    """オートコンプリート用の (表示名, schedule_id) 一覧を返す。
+
+    表示名は「イベント名（〜締切）」。ID を手で写させない（G2-2）。
+    締切済みの行には [終了] を付け、開催中と見分けられるようにする。
+    current による絞り込みはイベント名・ID の部分一致。
+    """
+    needle = (current or "").strip().lower()
+    out: list[tuple[str, str]] = []
+    for row in rows:
+        title = str(row.get("title") or row["schedule_id"])
+        try:
+            deadline = fmt_jp(from_iso(str(row["deadline"])))
+        except (ValueError, KeyError):
+            deadline = "?"
+        prefix = "[終了] " if row.get("closed_flag") else ""
+        label = f"{prefix}{title}（〜{deadline}）"
+        if needle and needle not in label.lower() and needle not in row["schedule_id"].lower():
+            continue
+        out.append((label[:100], row["schedule_id"]))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def resolve_emoji_input(guild: discord.Guild, raw: str) -> discord.Emoji | None:
     """emoji オプションの入力値をサーバーのカスタム絵文字へ解決する。
 
@@ -213,6 +240,40 @@ class Schedule(commands.Cog):
             ),
             ephemeral=True,
         )
+
+    # ---------- schedule_id のオートコンプリート ----------
+    async def _schedule_ac_open(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """開催中の投票のみ（close / remind / edit-deadline 用）。
+
+        締切済みに close は意味がなく、remind は嘘の通知になるため出さない。
+        """
+        if interaction.guild is None:
+            return []
+        try:
+            rows = await self.repo.list_open_schedules(interaction.guild.id)
+        except Exception:  # noqa: BLE001  (補完は失敗しても致命的でない)
+            return []
+        return [
+            app_commands.Choice(name=label, value=value)
+            for label, value in schedule_choices(rows, current)
+        ]
+
+    async def _schedule_ac_all(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """締切済みも含む全投票（status / delete 用）。"""
+        if interaction.guild is None:
+            return []
+        try:
+            rows = await self.repo.list_all(interaction.guild.id)
+        except Exception:  # noqa: BLE001
+            return []
+        return [
+            app_commands.Choice(name=label, value=value)
+            for label, value in schedule_choices(rows, current)
+        ]
 
     # ==================================================================
     # /schedule emoji — 出欠リアクション絵文字のサーバー別設定
@@ -744,6 +805,15 @@ class Schedule(commands.Cog):
                 await channel.send(embed=embed)
             except discord.HTTPException:
                 pass
+
+
+# schedule_id のオートコンプリートを一括登録する（cogs/progress.py と同じ作法）。
+# 開催中のみ: close / remind / edit-deadline、締切済みも含む: status / delete
+Schedule.close.autocomplete("schedule_id")(Schedule._schedule_ac_open)
+Schedule.remind.autocomplete("schedule_id")(Schedule._schedule_ac_open)
+Schedule.edit_deadline.autocomplete("schedule_id")(Schedule._schedule_ac_open)
+Schedule.status.autocomplete("schedule_id")(Schedule._schedule_ac_all)
+Schedule.delete.autocomplete("schedule_id")(Schedule._schedule_ac_all)
 
 
 async def setup(bot: commands.Bot):
