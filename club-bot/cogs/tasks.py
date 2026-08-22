@@ -15,6 +15,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from config import config
 from repositories.member_repository import MemberRepository
 from repositories.section_repository import SectionRepository
 from repositories.task_repository import TaskRepository
@@ -22,6 +23,7 @@ from services import team_service
 from services.todoist_service import TodoistError
 from utils.embeds import error_embed, info_embed, success_embed, task_embed
 from utils.logger import get_logger
+from utils.notify import dm_each_with_channel_fallback
 from utils.parser import fmt_jp, from_iso, parse_datetime, to_iso
 from utils.permissions import Level, ensure_guild, is_self_or_level, require
 
@@ -170,6 +172,51 @@ class Tasks(commands.Cog):
         """ギルド別の TodoistService を返す（未登録なら enabled=False）。"""
         return await self.bot.todoist_manager.for_guild(guild_id)
 
+    async def _notify_assignee(
+        self,
+        guild_id: int,
+        assignee: discord.Member,
+        task_id: int,
+        title: str,
+        *,
+        due_iso: str | None = None,
+        team_key: str | None = None,
+        assigned_by: str | None = None,
+    ) -> None:
+        """担当者本人へ割り当てを知らせる（G2-3）。
+
+        DM を試み、拒否されたら班チャンネル（無ければ既定のタスク
+        チャンネル）でメンションする。通知の失敗でタスク作成・変更を
+        巻き戻さない（登録は済んでいる）。
+        """
+        lines = [f"【タスク割り当て】「{title}」（#{task_id}）の担当になりました。"]
+        if due_iso:
+            lines.append(f"期限: {fmt_jp(from_iso(due_iso))}")
+        if assigned_by:
+            lines.append(f"登録: {assigned_by}")
+        text = "\n".join(lines)
+
+        channel = None
+        if team_key:
+            team = await self.member_repo.get_team(guild_id, team_key)
+            if team and team.get("channel_id"):
+                channel = self.bot.get_channel(int(team["channel_id"]))
+        if channel is None:
+            gconf = await config.for_guild(guild_id)
+            if gconf.default_task_channel_id:
+                channel = self.bot.get_channel(gconf.default_task_channel_id)
+
+        outcome = await dm_each_with_channel_fallback(
+            [assignee], text, channel, fallback_note="（DM不可のためこちらでお知らせします）"
+        )
+        if outcome.failed:
+            log.warning(
+                "担当者への割り当て通知が届きませんでした (guild=%s, task=%s, user=%s)",
+                guild_id,
+                task_id,
+                assignee.id,
+            )
+
     @staticmethod
     def _todoist_unconfigured_embed() -> discord.Embed:
         return info_embed(
@@ -313,11 +360,22 @@ class Tasks(commands.Cog):
             location_key=location,
         )
 
+        if assignee:
+            await self._notify_assignee(
+                guild_id,
+                assignee,
+                local_id,
+                title,
+                due_iso=due_iso,
+                team_key=team_key,
+                assigned_by=interaction.user.display_name,
+            )
+
         desc = f"ローカル ID: `{local_id}`"
         if todoist_id:
             desc += "\nTodoist: 連携済み"
         if assignee:
-            desc += f"\n担当: {assignee.display_name}"
+            desc += f"\n担当: {assignee.display_name}（本人へ通知済み）"
         if due_iso:
             desc += f"\n期限: {fmt_jp(from_iso(due_iso))}"
         embed = success_embed(
@@ -422,10 +480,20 @@ class Tasks(commands.Cog):
             )
             return
         await self.repo.set_assignee(guild_id, task_id, str(assignee.id))
+        # 担当になったことを本人へ知らせる（作成時と同じ抜け。G2-3）
+        await self._notify_assignee(
+            guild_id,
+            assignee,
+            task_id,
+            task["title"],
+            due_iso=task.get("due_date"),
+            team_key=task.get("team_key"),
+            assigned_by=interaction.user.display_name,
+        )
         await interaction.followup.send(
             embed=success_embed(
                 "担当者を変更しました",
-                f"`{task_id}` → {assignee.display_name}",
+                f"`{task_id}` → {assignee.display_name}（本人へ通知済み）",
                 executor=interaction.user.display_name,
             ),
             ephemeral=True,
