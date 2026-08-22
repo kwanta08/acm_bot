@@ -21,6 +21,10 @@
 
 上位レベルは下位の権限をすべて含みます（L4 は L3/L2/L1 を内包）。
 
+L1〜L4 は内部表記です。Discord 上のメッセージには「一般メンバー / 班長 / 幹部 /
+Bot管理者」というラベルで出ます（`utils/permissions.LEVEL_LABELS`）。
+権限が足りないときは、そのサーバーで実行できるロールを依頼先として併記します。
+
 ---
 
 ## 2. コマンド一覧
@@ -31,7 +35,7 @@
 | `/ping` | L1 | 応答確認 |
 | `/health` | L1 | Bot・各連携サービスの状態表示 |
 | `/help [command]` | L1 | コマンド一覧をカテゴリから探す。`command:` で個別の説明・引数・必要権限 |
-| `/setup-status` | L1 | 初期設定（通知/ログチャンネル・管理者ロール・班・桁）の未完了項目を表示 |
+| `/setup-status` | L1 | 初期設定（タスク通知/ログチャンネル・管理者ロール・班長ロール・班・桁・大会日）の未完了項目を表示 |
 
 ### Settings（サーバー設定）
 | コマンド | 権限 | 説明 |
@@ -89,10 +93,10 @@
 |---|---|---|
 | `/task add` | L1 | タスク作成（Todoist へ反映） |
 | `/task list [mine]` | L1 | 一覧（`mine:true` で自分の担当のみ） |
-| `/task done <id>` | L1 | 完了（Todoist 側も close） |
+| `/task done <id>` | L1※ | 完了（Todoist 側も close）。※担当者・作成者・班長以上のみ |
 | `/task delete <id>` | L2 | 削除 |
 | `/task assign <id> <user>` | L2 | 担当者変更 |
-| `/task priority <id> <1-4>` | L1 | 優先度変更 |
+| `/task priority <id> <1-4>` | L1※ | 優先度変更。※担当者・作成者・班長以上のみ |
 | `/task overdue` | L1 | 期限超過一覧 |
 | `/task team <班>` | L1 | 班別一覧 |
 | `/task sections` | L2 | Todoist のセクション一覧と班との紐付け状況を表示 |
@@ -143,7 +147,7 @@ Google Sheets へのエクスポート連携（旧 `/set_sheet` `/sheet_sync`）
 | `/progress edit` | L2 | 名前・担当・状態・進捗率・親を変更（進捗率を入れるとソースは手入力に戻る） |
 | `/progress remove` | L2 | ノードを配下ごと削除 |
 | `/progress spar-link` | L2 | 桁名と目標層数を進捗ノードへ紐付け（`/layer` の記録から進捗率を自動計算） |
-| `/progress setup` | L2 | Todoist プロジェクトを進捗ツリーに紐付けるウィザード（プロジェクト選択 → 紐付け先選択 → 通知先選択。手入力・再起動なし） |
+| `/progress setup` | サーバー管理 または L2 | Todoist プロジェクトを進捗ツリーに紐付けるウィザード（プロジェクト選択 → 紐付け先選択 → 通知先選択。手入力・再起動なし）。導入直後で班長ロールが未設定でも、Discord の「サーバー管理」権限があれば実行できる |
 | `/progress sync` | L4 | Todoist 同期＋桁巻き反映＋再集計を即時実行（通常は20分ごとに自動実行） |
 
 #### 重量管理（機体重量はグラム固定）
@@ -208,7 +212,7 @@ Discord からドリルダウンで確認できる機能です。深さに制限
 
 ```
 1. /todoist-setup で Todoist トークンを登録（済みならスキップ）
-2. 班長が /progress setup を実行:
+2. 班長（またはサーバー管理権限を持つ人）が /progress setup を実行:
    ① Todoist プロジェクトをメニューから選択（ID の手入力なし）
    ② 紐付け先ノード（機体/パーツ or 新規パーツとして追加）を選択
    ③ タスク通知の送信先（専用チャンネルをピッカーで指定 or 共通）を選択
@@ -254,8 +258,8 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 | `/member setup <user>` | L3 | 主所属班・副所属班・班長を一括設定 |
 | `/member set-channel <班> <channel>` | L3 | 班の通知先チャンネルを設定（タスクの班別通知に使用） |
 | `/member set-leader <user> <bool>` | L3 | 班長フラグ設定 |
-| `/member skill add <技能> [user]` | L1 | 技能タグ追加（ギルドに登録済みのタグから選択） |
-| `/member skill remove <技能> [user]` | L1 | 技能タグ削除 |
+| `/member skill add <技能> [user]` | L1※ | 技能タグ追加（ギルドに登録済みのタグから選択）。※`user` 指定は班長以上のみ |
+| `/member skill remove <技能> [user]` | L1※ | 技能タグ削除。※`user` 指定は班長以上のみ |
 | `/member support [班] [技能]` | L2 | 支援候補検索（班横断作業向け）。既定は現役のみ。`include_alumni:True` で卒業者も含む |
 
 班・技能の選択肢は、そのギルドの DB（teams / skill_tags テーブル）から
@@ -269,7 +273,7 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 | `/team-add slug:<識別子> name:<表示名>` | L4 | 班を追加。識別子は半角英小文字・数字・`-`・`_`（32文字以内）。同じ識別子の再登録で表示名更新・再有効化 |
 | `/team-remove slug:<識別子> [confirm]` | L4 | 班を無効化（論理削除）。主所属メンバーがいる場合は `confirm:True` が必要 |
 | `/team-list` | L4 | 班の一覧（有効/無効・所属人数・ロール・通知ch） |
-| `/team-role team:<識別子> role:<ロール> [role_type]` | L4 | 班と Discord ロールを紐付け。`role_type` は `primary`（主所属、既定）または `secondary`（副所属） |
+| `/team-role team:<識別子> role:<ロール> [role_type]` | L4 | 班と Discord ロールを紐付け。`role_type` は `primary`（主所属、既定）・`secondary`（副所属）・`leader`（班長。`/team-list` の表示用で自動付与も権限付与もしない） |
 | `/skill-add name:<タグ名>` | L4 | 技能タグを追加 |
 | `/skill-remove name:<タグ名>` | L4 | 技能タグを無効化（論理削除） |
 | `/skill-list` | L4 | 技能タグの一覧（有効/無効・付与人数） |
@@ -280,11 +284,16 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 `/team-add` `/skill-add` で登録してください。
 個別の班ロールは Discord 側で作成したロールを `/team-role` で紐付けます。
 
+`role_type:leader` で設定する班長ロールは `/team-list` に表示するための情報です。
+**班長の権限（L2）は settings の `LEADER_ROLE_IDS` が唯一の根拠**なので、
+権限を与えるときは `/set_role role_type:リーダー` を使ってください。
+
 使用例:
 ```
 /team-add slug:wing name:翼
 /team-role team:wing role:@翼班 role_type:primary
 /team-role team:wing role:@翼班支援 role_type:secondary
+/team-role team:wing role:@翼班長 role_type:leader
 /skill-add name:CFRP積層
 /skill-add name:はんだ
 ```
@@ -629,6 +638,14 @@ Docker で動かす場合は `deploy/docker-compose.dashboard.yml`
 - 参照・編集できるテーブルと列はホワイトリスト方式
   （`repositories/table_repository.py`）。`settings` や
   `todoist_configs` は表グリッドの対象外
+- **権限まわりの列は Web から編集できない**。`teams` のロール ID 3 列と
+  `members.is_leader` は読み取り専用（`editable=False`）。
+  `member_role_id` / `secondary_role_id` は `cogs/members._sync_roles()` がそのまま
+  `add_roles()` に渡すため、書き換えられると bot の権限で任意のロールを
+  付けさせる経路になる。`members.is_leader` はダッシュボードの L2 判定そのもの。
+  変更は Discord の `/team-role`（L4。`role_type` は primary / secondary / leader）と
+  `/member set-leader`（L3 以上）から行う
+- ロール ID 設定の**実値は L4 にだけ返す**。参加者には「（設定済み）」と表示される
 - 設定変更で触れるキーもホワイトリスト（トークン類は対象外）
 - 編集は `audit_log` に必ず記録される（`/report audit` で確認できる）
 - API ドキュメント（`/docs`・`/openapi.json`）は配信しない

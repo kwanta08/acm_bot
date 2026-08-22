@@ -12,6 +12,7 @@ from services.progress_tree import (
     ProgressNode,
     build_and_aggregate,
     build_tree,
+    descendant_ids,
     load_tree,
     node_from_row,
     parse_progress,
@@ -331,3 +332,31 @@ def test_load_tree_returns_empty_tree_for_unknown_guild():
     assert tree.roots == []
     assert tree.by_id == {}
     assert tree.errors == []
+
+
+# ---------------------------------------------------------------------
+# descendant_ids: 親の付け替えで循環参照を作らせないためのガード
+# ---------------------------------------------------------------------
+def test_descendant_ids_collects_whole_subtree():
+    tree = build_and_aggregate(
+        [
+            _node("airframe"),
+            _node("wing", "airframe"),
+            _node("spar", "wing"),
+            _node("rib", "wing"),
+            _node("tail", "airframe"),
+        ]
+    )
+    assert descendant_ids(tree, "wing") == {"spar", "rib"}
+    assert descendant_ids(tree, "airframe") == {"wing", "spar", "rib", "tail"}
+
+
+def test_descendant_ids_excludes_self_and_leaves():
+    tree = build_and_aggregate([_node("airframe"), _node("wing", "airframe")])
+    assert descendant_ids(tree, "wing") == set()
+    assert "airframe" not in descendant_ids(tree, "airframe")
+
+
+def test_descendant_ids_for_unknown_node_is_empty():
+    tree = build_and_aggregate([_node("airframe")])
+    assert descendant_ids(tree, "missing") == set()

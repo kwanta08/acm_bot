@@ -185,8 +185,8 @@ def test_audit_log_isolation():
             assert logs1[0]["action"] == "team.add"
             assert logs2[0]["action"] == "todoist.setup"
             # 他ギルドのログが混入しない
-            assert all(l["guild_id"] == G1 for l in logs1)
-            assert all(l["guild_id"] == G2 for l in logs2)
+            assert all(row["guild_id"] == G1 for row in logs1)
+            assert all(row["guild_id"] == G2 for row in logs2)
         finally:
             await db.close()
 

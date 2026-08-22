@@ -206,6 +206,27 @@ def _resolve_weight(own: float | None, child_values: list[float | None]) -> floa
     return sum(present)
 
 
+def descendant_ids(tree: ProgressTree, node_id: str) -> set[str]:
+    """指定ノードの子孫 ID の集合を返す（自身は含まない）。
+
+    親の付け替え（/progress edit の parent）で循環参照を作らせないために使う。
+    循環を作ると build_tree がその部分木ごとツリーから除外するため、
+    利用者からは「進捗が丸ごと消えた」ように見えてしまう。
+    """
+    node = tree.by_id.get(node_id)
+    if node is None:
+        return set()
+    out: set[str] = set()
+    stack = list(node.children)
+    while stack:
+        current = stack.pop()
+        if current.node_id in out:
+            continue
+        out.add(current.node_id)
+        stack.extend(current.children)
+    return out
+
+
 def aggregate(tree: ProgressTree) -> None:
     """集計進捗率・集計重量と深さを末端から根に向けて計算し、各ノードに書き込む。
 

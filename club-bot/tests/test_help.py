@@ -180,14 +180,14 @@ def test_badge_shown_only_above_viewer_level():
             l1_cmd = by_name["task list"]  # L1
             no_check = by_name["ping"]  # 制限なし
 
-            assert level_badge(l3_cmd, Level.L1) == "L3 以上"
-            assert level_badge(l3_cmd, Level.L2) == "L3 以上"
+            assert level_badge(l3_cmd, Level.L1) == "幹部以上"
+            assert level_badge(l3_cmd, Level.L2) == "幹部以上"
             assert level_badge(l3_cmd, Level.L3) == ""
             assert level_badge(l3_cmd, Level.L4) == ""
             assert level_badge(l1_cmd, Level.L1) == ""
             assert level_badge(no_check, Level.L1) == ""
             # 実行者レベルが不明なときは L1 とみなして案内する
-            assert level_badge(l3_cmd, None) == "L3 以上"
+            assert level_badge(l3_cmd, None) == "幹部以上"
         finally:
             await _unload_all(bot)
 
@@ -331,9 +331,11 @@ def test_setup_status_all_done_after_configuration():
             await LayerKetaRepository(db).add(G1, "主桁", "tester", NOW)
             gconf = GuildConfig(
                 guild_id=G1,
-                default_announce_channel_id=1001,
+                default_task_channel_id=1001,
                 bot_log_channel_id=1002,
                 admin_role_id=2001,
+                leader_role_ids=[3001],
+                competition_date="2026-07-25",
             )
             items = await collect_setup_status(db, gconf)
             assert all(i.done for i in items), [i.name for i in items if not i.done]
@@ -353,7 +355,7 @@ def test_setup_status_is_guild_scoped():
             await LayerKetaRepository(db).add(G2, "主桁", "tester", NOW)
             gconf = GuildConfig(
                 guild_id=G1,
-                default_announce_channel_id=1001,
+                default_task_channel_id=1001,
                 bot_log_channel_id=1002,
                 admin_role_id=2001,
             )
@@ -361,7 +363,7 @@ def test_setup_status_is_guild_scoped():
             assert done["班"] is False
             assert done["桁"] is False
             # チャンネル・ロールはギルド別設定なので完了のまま
-            assert done["通知チャンネル"] is True
+            assert done["タスク通知チャンネル"] is True
         finally:
             await db.close()
 
@@ -379,8 +381,9 @@ def test_setup_status_partial_configuration():
             done = {i.name: i.done for i in await collect_setup_status(db, gconf)}
             assert done["班"] is True
             assert done["ログチャンネル"] is True
-            assert done["通知チャンネル"] is False
+            assert done["タスク通知チャンネル"] is False
             assert done["管理者ロール"] is False
+            assert done["班長ロール"] is False
             assert done["桁"] is False
         finally:
             await db.close()
@@ -422,5 +425,70 @@ def test_setup_status_command_is_registered():
             assert "setup-status" in listed
         finally:
             await _unload_all(bot)
+
+    run(_main())
+
+
+# ---------------------------------------------------------------------
+# /setup-status が見るのは「実際に挙動を左右する設定」であること
+#
+# 以前は DEFAULT_ANNOUNCE_CHANNEL_ID（どこからも送信に使われない）を見て
+# 「すべて設定済み」と表示する一方、通知の落とし先である
+# DEFAULT_TASK_CHANNEL_ID と、班長判定の唯一の根拠である LEADER_ROLE_IDS を
+# 見ていなかった。設定したのに通知が来ない状態を検知できるようにする。
+# ---------------------------------------------------------------------
+def test_setup_status_checks_task_channel_not_announce():
+    async def _main():
+        db = await _fresh_db()
+        try:
+            # お知らせチャンネルだけ設定した状態は「未完了」でなければならない
+            gconf = GuildConfig(guild_id=G1, default_announce_channel_id=1001)
+            done = {i.name: i.done for i in await collect_setup_status(db, gconf)}
+            assert "通知チャンネル" not in done
+            assert done["タスク通知チャンネル"] is False
+
+            gconf = GuildConfig(guild_id=G1, default_task_channel_id=1001)
+            done = {i.name: i.done for i in await collect_setup_status(db, gconf)}
+            assert done["タスク通知チャンネル"] is True
+        finally:
+            await db.close()
+
+    run(_main())
+
+
+def test_setup_status_checks_leader_role():
+    """班長ロールが空なら未完了。members.is_leader では代替できない。"""
+
+    async def _main():
+        db = await _fresh_db()
+        try:
+            done = {
+                i.name: i.done for i in await collect_setup_status(db, GuildConfig(guild_id=G1))
+            }
+            assert done["班長ロール"] is False
+
+            gconf = GuildConfig(guild_id=G1, leader_role_ids=[3001])
+            done = {i.name: i.done for i in await collect_setup_status(db, gconf)}
+            assert done["班長ロール"] is True
+        finally:
+            await db.close()
+
+    run(_main())
+
+
+def test_setup_status_checks_competition_date():
+    async def _main():
+        db = await _fresh_db()
+        try:
+            items = await collect_setup_status(db, GuildConfig(guild_id=G1))
+            item = next(i for i in items if i.name.startswith("大会日"))
+            assert item.done is False
+            assert "COMPETITION_DATE" in item.hint
+
+            gconf = GuildConfig(guild_id=G1, competition_date="2026-07-25")
+            items = await collect_setup_status(db, gconf)
+            assert next(i for i in items if i.name.startswith("大会日")).done is True
+        finally:
+            await db.close()
 
     run(_main())

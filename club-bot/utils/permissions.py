@@ -27,6 +27,73 @@ class Level(IntEnum):
     L4 = 4  # Bot 管理者
 
 
+# レベルの人間向けラベル。
+#
+# 「L2 以上の権限が必要です」とだけ返していたが、L1〜L4 が何を指すかは
+# ソースのコメントにしか書かれておらず、Discord のどの出力にも凡例が無い。
+# 新入生には「Bot が壊れている」としか見えないため、必ずこの語で出す。
+LEVEL_LABELS: dict[Level, str] = {
+    Level.L1: "一般メンバー",
+    Level.L2: "班長",
+    Level.L3: "幹部",
+    Level.L4: "Bot管理者",
+}
+
+
+def level_label(level: Level | None) -> str:
+    """レベルの日本語ラベル。宣言が無い（誰でも実行できる）場合は「全員」。"""
+    if level is None:
+        return "全員"
+    return LEVEL_LABELS.get(level, f"L{int(level)}")
+
+
+def roles_for_level(gconf: GuildConfig, required: Level) -> list[int]:
+    """required を満たすロール ID を、低い階層から順に返す。
+
+    上位ロールも「頼める相手」なので含める（班長が居ない/不在でも
+    幹部・Bot管理者に頼めることが分かるようにする）。
+    """
+    out: list[int] = []
+    if required <= Level.L2:
+        out.extend(gconf.leader_role_ids)
+    if required <= Level.L3 and gconf.exec_role_id:
+        out.append(gconf.exec_role_id)
+    if required <= Level.L4 and gconf.admin_role_id:
+        out.append(gconf.admin_role_id)
+    # 重複を除きつつ順序は保つ
+    seen: set[int] = set()
+    return [r for r in out if not (r in seen or seen.add(r))]
+
+
+def denial_message(
+    required: Level,
+    *,
+    current: Level | None = None,
+    gconf: GuildConfig | None = None,
+    manage_guild_ok: bool = False,
+) -> str:
+    """権限不足の案内文。「誰に頼めばいいか」まで書く。"""
+    head = f"この操作は**{level_label(required)}以上**が実行できます"
+    if manage_guild_ok:
+        head += "（または「サーバー管理」権限を持つ人）"
+    if current is not None:
+        head += f"。あなたは{level_label(current)}です。"
+    else:
+        head += "。"
+
+    if gconf is None:
+        return head
+    role_ids = roles_for_level(gconf, required)
+    if role_ids:
+        mentions = " ".join(f"<@&{rid}>" for rid in role_ids)
+        return f"{head}\n依頼先: {mentions}"
+    return (
+        f"{head}\n"
+        f"このサーバーには{level_label(required)}ロールが設定されていないため、"
+        "実行できる人がいません。サーバー管理者に `/setup` での設定を依頼してください。"
+    )
+
+
 # 権限チェック関数に「必要レベル」を刻む属性名。
 # require() が返す check はクロージャなので、外からは必要レベルを読めない。
 # /help がコマンド一覧に権限バッジを出せるよう、predicate 自身に持たせる。
@@ -92,14 +159,46 @@ def has_manage_guild_or_level(member: discord.Member, gconf: GuildConfig, requir
     return has_level(member, gconf, required)
 
 
+async def is_self_or_level(
+    interaction: discord.Interaction, user_id: str | None, required: Level
+) -> bool:
+    """本人（user_id が実行者）か、required 以上なら True。
+
+    「自分の分は自分で触れるが、他人の分は班長以上」という粒度を作るための判定。
+    コマンド単位の @require では表現できない（対象行を見ないと決まらない）ため、
+    ハンドラの中から呼ぶ。
+    """
+    member = interaction.user
+    if not isinstance(member, discord.Member) or interaction.guild is None:
+        return False
+    if user_id is not None and str(user_id) == str(member.id):
+        return True
+    gconf = await config.for_guild(interaction.guild.id)
+    return has_level(member, gconf, required)
+
+
 class PermissionDenied(app_commands.CheckFailure):
     """
     権限不足を表す例外（PERMISSION_DENIED）
     """
 
-    def __init__(self, required: Level, message: str | None = None):
+    def __init__(
+        self,
+        required: Level,
+        message: str | None = None,
+        *,
+        current: Level | None = None,
+        gconf: GuildConfig | None = None,
+        manage_guild_ok: bool = False,
+    ):
         self.required = required
-        super().__init__(message or f"この操作には L{int(required)} 以上の権限が必要です。")
+        self.current = current
+        super().__init__(
+            message
+            or denial_message(
+                required, current=current, gconf=gconf, manage_guild_ok=manage_guild_ok
+            )
+        )
 
 
 async def _guild_config_for(interaction: discord.Interaction) -> GuildConfig:
@@ -119,7 +218,7 @@ def require(level: Level):
             raise PermissionDenied(level)
         gconf = await _guild_config_for(interaction)
         if not has_level(member, gconf, level):
-            raise PermissionDenied(level)
+            raise PermissionDenied(level, current=get_level(member, gconf), gconf=gconf)
         return True
 
     return app_commands.check(_mark_required_level(predicate, level))
@@ -139,8 +238,9 @@ def require_manage_guild_or(level: Level):
         if not has_manage_guild_or_level(member, gconf, level):
             raise PermissionDenied(
                 level,
-                "この操作には「サーバー管理（Manage Server）」権限、"
-                f"または L{int(level)} 以上の権限が必要です。",
+                current=get_level(member, gconf),
+                gconf=gconf,
+                manage_guild_ok=True,
             )
         return True
 
@@ -156,7 +256,7 @@ async def is_admin(interaction: discord.Interaction) -> bool:
         raise PermissionDenied(Level.L4)
     gconf = await _guild_config_for(interaction)
     if not has_level(member, gconf, Level.L4):
-        raise PermissionDenied(Level.L4)
+        raise PermissionDenied(Level.L4, current=get_level(member, gconf), gconf=gconf)
     return True
 
 

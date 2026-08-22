@@ -55,10 +55,22 @@ from services.progress_tree import (
 )
 from services.todoist_service import TodoistError
 from utils import progress_bar
-from utils.embeds import error_embed, info_embed, success_embed, task_embed
+from utils.embeds import (
+    add_truncation_note,
+    error_embed,
+    info_embed,
+    success_embed,
+    task_embed,
+)
 from utils.logger import get_logger
 from utils.parser import TZ, now, parse_deadline
-from utils.permissions import Level, ensure_guild, is_admin, require
+from utils.permissions import (
+    Level,
+    ensure_guild,
+    is_admin,
+    require,
+    require_manage_guild_or,
+)
 
 if TYPE_CHECKING:
     from utils.db import Database
@@ -966,6 +978,19 @@ class Progress(commands.Cog):
                 return
             if not await self._resolve_node(interaction, guild_id, parent):
                 return
+            # 自分の配下を親にすると循環参照になり、その部分木がツリーから
+            # 丸ごと除外される（利用者からは進捗が消えたように見える）
+            tree = await self.load_tree(guild_id)
+            if parent in pt.descendant_ids(tree, node):
+                await interaction.followup.send(
+                    embed=error_embed(
+                        f"`{parent}` は `{node}` の配下にあるため親にできません"
+                        "（循環参照になります）。\n"
+                        "先に移動先を配下の外へ出してください。"
+                    ),
+                    ephemeral=True,
+                )
+                return
 
         fields: dict[str, object] = {}
         if name is not None:
@@ -1100,10 +1125,14 @@ class Progress(commands.Cog):
         )
 
     # ---------- /progress setup ----------
+    # 導入直後のサーバーは班長ロールが未設定のことが多いため、
+    # 「サーバー管理（Manage Server）」権限でも実行できるようにする
+    # （班長ロールを設定済みのサーバーとの後方互換は L2 判定で維持）。
     @group.command(
-        name="setup", description="Todoist プロジェクトを進捗ツリーに紐付けます（班長以上）。"
+        name="setup",
+        description="Todoist プロジェクトを進捗ツリーに紐付けます（サーバー管理権限または班長以上）。",
     )
-    @require(Level.L2)
+    @require_manage_guild_or(Level.L2)
     async def progress_setup(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
@@ -1412,9 +1441,10 @@ class Progress(commands.Cog):
             node = tree.by_id.get(row["node_id"])
             label = node.name if node is not None else f"{row['node_id']}（削除済み）"
             lines.append(f"**{row['due_date']}** — {label}: {row['name']}")
-        await interaction.followup.send(
-            embed=info_embed("🏁 マイルストーン一覧", "\n".join(lines[:50]))
-        )
+        shown = 50
+        embed = info_embed("🏁 マイルストーン一覧", "\n".join(lines[:shown]))
+        add_truncation_note(embed, len(lines), shown, "期限が近い順に表示しています")
+        await interaction.followup.send(embed=embed)
 
     # ---------- /countdown ----------
     async def pace_overrides(self, guild_id: int) -> dict[str, Pace]:

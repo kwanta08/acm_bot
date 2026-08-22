@@ -192,7 +192,7 @@ class TodoistService:
         if not self.enabled:
             return False
         labels = await self.get_labels()
-        if any(getattr(l, "name", None) == self.label_name for l in labels):
+        if any(getattr(label, "name", None) == self.label_name for label in labels):
             return True
         return await self.add_label(self.label_name) is not None
 

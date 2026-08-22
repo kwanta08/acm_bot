@@ -64,22 +64,30 @@ def _validate(spec: SettingSpec, value: str) -> str:
 
 @router.get("/settings")
 async def read_settings(scope: ScopedGuild):
-    """編集対象の設定を現在値つきで返す（閲覧は参加者なら可）。"""
+    """編集対象の設定を現在値つきで返す（閲覧は参加者なら可）。
+
+    ただし**ロール ID の実値は L4 にだけ返す**。管理者ロールの ID は
+    権限まわりの設定そのもので、参加者全員に配って回るものではない。
+    値を伏せても「設定済みかどうか」は分かるようにしておく。
+    """
     repo = scope.bind(SettingsRepository(get_database()))
     stored = await repo.get_all()
-    return {
-        "settings": [
+    can_edit = scope.level >= Level.L4
+    settings = []
+    for spec in EDITABLE_SETTINGS:
+        value = stored.get(spec.key, "")
+        if spec.type == "role" and not can_edit:
+            value = "（設定済み）" if value else ""
+        settings.append(
             {
                 "key": spec.key,
                 "label": spec.label,
                 "type": spec.type,
                 "description": spec.description,
-                "value": stored.get(spec.key, ""),
+                "value": value,
             }
-            for spec in EDITABLE_SETTINGS
-        ],
-        "can_edit": scope.level >= Level.L4,
-    }
+        )
+    return {"settings": settings, "can_edit": can_edit}
 
 
 @router.patch("/settings")

@@ -11,3 +11,10 @@
 ## 作業ディレクトリ
 - コードは club-bot/ 配下。ruff / pytest は club-bot/ で実行する
 - Python は club-bot/venv/Scripts/python.exe（無ければ python）
+
+## ナレッジベース
+
+開発ノートは C:\Users\yoshi\ClaudeVault\ にある。
+- セッション開始時: ClaudeVault/index.md と
+  ClaudeVault/projects/acm_bot/_index.md を読むこと
+- 書き込みルール: ClaudeVault/CLAUDE.md に従うこと

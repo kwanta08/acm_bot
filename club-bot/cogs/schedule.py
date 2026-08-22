@@ -21,7 +21,14 @@ from repositories.schedule_repository import ScheduleRepository
 from repositories.settings_repository import SettingsRepository
 from services import schedule_service as svc
 from services.schedule_service import build_emoji_maps
-from utils.embeds import error_embed, info_embed, schedule_embed, success_embed
+from utils.embeds import (
+    MAX_EMBED_FIELDS,
+    add_truncation_note,
+    error_embed,
+    info_embed,
+    schedule_embed,
+    success_embed,
+)
 from utils.logger import get_logger
 from utils.parser import (
     InvalidDatetimeError,
@@ -335,12 +342,13 @@ class Schedule(commands.Cog):
             )
             return
         embed = schedule_embed("開催中の日程調整一覧")
-        for s in schedules:
+        for s in schedules[:MAX_EMBED_FIELDS]:
             embed.add_field(
                 name=f"{s['title']}（`{s['schedule_id']}`）",
                 value=f"締切: {fmt_jp(from_iso(s['deadline']))}",
                 inline=False,
             )
+        add_truncation_note(embed, len(schedules), MAX_EMBED_FIELDS, "締切が近い順に表示しています")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ---------- status ----------
@@ -381,12 +389,13 @@ class Schedule(commands.Cog):
             )
             return
         embed = schedule_embed("締切済みの日程調整一覧")
-        for s in schedules:
+        for s in schedules[:MAX_EMBED_FIELDS]:
             embed.add_field(
                 name=f"{s['title']}（`{s['schedule_id']}`）",
                 value=f"締切: {fmt_jp(from_iso(s['deadline']))}",
                 inline=False,
             )
+        add_truncation_note(embed, len(schedules), MAX_EMBED_FIELDS, "新しい順に表示しています")
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ---------- close ----------

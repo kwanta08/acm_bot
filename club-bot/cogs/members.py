@@ -19,10 +19,17 @@ from config import config
 from repositories.member_repository import MemberRepository
 from repositories.skill_tag_repository import SkillTagRepository
 from services import team_service
-from utils.embeds import error_embed, info_embed, member_embed, success_embed
+from utils.embeds import (
+    MAX_EMBED_FIELDS,
+    add_truncation_note,
+    error_embed,
+    info_embed,
+    member_embed,
+    success_embed,
+)
 from utils.logger import get_logger
 from utils.parser import fmt_jp, from_iso
-from utils.permissions import Level, ensure_guild, require
+from utils.permissions import Level, ensure_guild, is_self_or_level, require
 
 log = get_logger("members")
 
@@ -460,6 +467,15 @@ class Members(commands.Cog):
             )
             return
         target = user or interaction.user
+        if not await is_self_or_level(interaction, str(target.id), Level.L2):
+            await interaction.followup.send(
+                embed=error_embed(
+                    "他の人の技能タグを変更できるのは班長以上です。\n"
+                    "自分に付けるだけなら `user` を空にして実行してください。"
+                ),
+                ephemeral=True,
+            )
+            return
         await self.repo.upsert_member(guild_id, str(target.id), target.display_name)
         await self.repo.add_skill(guild_id, str(target.id), skill)
         await interaction.followup.send(
@@ -483,6 +499,15 @@ class Members(commands.Cog):
         if guild_id is None:
             return
         target = user or interaction.user
+        if not await is_self_or_level(interaction, str(target.id), Level.L2):
+            await interaction.followup.send(
+                embed=error_embed(
+                    "他の人の技能タグを変更できるのは班長以上です。\n"
+                    "自分から外すだけなら `user` を空にして実行してください。"
+                ),
+                ephemeral=True,
+            )
+            return
         await self.repo.remove_skill(guild_id, str(target.id), skill)
         await interaction.followup.send(
             embed=success_embed(
@@ -533,7 +558,7 @@ class Members(commands.Cog):
         if not candidates:
             embed.description = "該当者が見つかりませんでした。"
         else:
-            for m in candidates[:25]:
+            for m in candidates[:MAX_EMBED_FIELDS]:
                 primary = team_names.get(m.get("primary_team"), m.get("primary_team") or "—")
                 skills = "、".join(m["skills"]) or "—"
                 embed.add_field(
@@ -541,6 +566,9 @@ class Members(commands.Cog):
                     value=f"主所属: {primary} / 技能: {skills}",
                     inline=False,
                 )
+            add_truncation_note(
+                embed, len(candidates), MAX_EMBED_FIELDS, "条件を絞って再検索してください"
+            )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 

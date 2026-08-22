@@ -294,7 +294,15 @@ class Reminders(commands.Cog):
         channel_id = await resolve_default_channel_id(self.bot.db, guild_id)
         channel = self.bot.get_channel(channel_id) if channel_id else None
         if channel is None:
+            # 部員への通知は送らない（ADR 0023: 送り先が無いギルドは沈黙する）が、
+            # 「遅延はあるのに届いていない」ことは運用者に見える形で残す。
             log.info("マイルストーン通知の送信先が無い (guild=%s)", guild_id)
+            await self.bot.log_to_channel(
+                "[マイルストーン] 遅れている節目がありますが、通知先チャンネルが"
+                "設定されていないため送信できませんでした。"
+                "`/setup` の進捗チャンネル、または `/set_channel` で設定してください。",
+                guild_id=guild_id,
+            )
             return 0
 
         left = days_until_competition(gconf.competition_date, current.date())
@@ -430,7 +438,7 @@ class Reminders(commands.Cog):
         if not svc.enabled:
             return 0
         links = await self.section_repo.list_links(guild_id)
-        linked_section_ids: set[str] = {l["section_id"] for l in links}
+        linked_section_ids: set[str] = {link["section_id"] for link in links}
 
         team_map = await self._team_map(guild_id)
         default_channel = await self._task_channel(guild_id)

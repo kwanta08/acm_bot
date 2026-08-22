@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
-fastapi = pytest.importorskip("fastapi", reason="dashboard/requirements.txt が未インストール")
+pytest.importorskip("fastapi", reason="dashboard/requirements.txt が未インストール")
 from fastapi.testclient import TestClient
 
 from dashboard import db as dashboard_db

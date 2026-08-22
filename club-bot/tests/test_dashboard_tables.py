@@ -483,3 +483,54 @@ def test_weight_update_does_not_cross_guilds():
             await db.close()
 
     asyncio.run(_main())
+
+
+# ---------------------------------------------------------------------
+# CSV は全件出す / シート絞り込みに従う
+#
+# 画面表示の上限（MAX_LIMIT=500）で切ると、数年運用したサーバーが
+# 引き継ぎ用に落とした CSV から古い行が黙って欠ける。監査ログには
+# 「500 行を CSV 出力」と正常終了で残るため、欠落に気づく手段が無い。
+# ---------------------------------------------------------------------
+def test_csv_export_is_not_capped_at_display_limit():
+    from repositories.table_repository import MAX_LIMIT
+
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+
+    over = MAX_LIMIT + 20
+
+    async def _seed_many():
+        db = Database(db_path)
+        await db.connect()
+        try:
+            repo = TaskRepository(db)
+            for i in range(over):
+                await repo.create_task(GUILD_A, title=f"タスク{i:04d}", created_by="42")
+        finally:
+            await db.close()
+
+    asyncio.run(_seed_many())
+
+    client = _logged_in_client(db_path)
+    try:
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/tasks/export.csv")
+        assert res.status_code == 200
+        body = res.content.decode("utf-8-sig")
+        assert "タスク0000" in body
+        assert f"タスク{over - 1:04d}" in body, "MAX_LIMIT で打ち切られている"
+        # 見出し1行 + データ行（末尾の改行で空要素が出ないよう strip）
+        assert len(body.strip().splitlines()) >= over + 1
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_csv_export_rejects_sheet_for_plain_table():
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    client = _logged_in_client(db_path)
+    try:
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/members/export.csv?sheet=x")
+        assert res.status_code == 400
+    finally:
+        client.__exit__(None, None, None)

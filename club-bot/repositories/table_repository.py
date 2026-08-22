@@ -13,10 +13,16 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 from dataclasses import dataclass, field
 from typing import Any
 
 from repositories.base import BaseRepository
+
+# 進捗率の解釈は bot 側（/progress edit）と同じ規則を使う。
+# progress_tree は DB・Discord に依存しない純粋関数モジュールなので
+# ここから参照しても循環参照にはならない。
+from services.progress_tree import parse_progress
 from utils.db import Database
 
 MAX_LIMIT = 500
@@ -48,6 +54,22 @@ class Column:
     label: str
     type: str = "text"
     editable: bool = False
+    # type == "number" のときの下位型: "int" | "real"（DDL の INTEGER / REAL）。
+    #
+    # **安全な既定値が無い。** int を既定にすると重量・並び順（REAL）が壊れ、
+    # real を既定にすると priority / minutes（INTEGER）へ小数が入り、
+    # asyncpg が int8 引数に float を受け付けず本番だけ落ちる。
+    # そこで既定値を置かず、number 列は列ごとに宣言させる（__post_init__ で強制）。
+    number_type: str | None = None
+
+    def __post_init__(self):
+        if self.type == "number":
+            if self.number_type not in ("int", "real"):
+                raise ValueError(
+                    f"{self.name}: number 列には number_type（'int' か 'real'）が必要です"
+                )
+        elif self.number_type is not None:
+            raise ValueError(f"{self.name}: number 以外の列に number_type は指定できません")
 
 
 @dataclass(frozen=True)
@@ -58,6 +80,10 @@ class TableSpec:
     label: str
     table: str
     pk: str
+    # 主キー列の型: "int" | "text"。既定値を置かない（新しい表を足すときに
+    # 決め忘れると、PostgreSQL でだけ落ちる不具合が再発するため）。
+    # Web から来る row_id は必ず str なので、ここを見て正規化する。
+    pk_type: str
     columns: tuple[Column, ...]
     order_by: str
     description: str = ""
@@ -74,8 +100,16 @@ class TableSpec:
         return tuple(c.name for c in self.columns if c.editable)
 
 
-def _c(name: str, label: str, type_: str = "text", editable: bool = False) -> Column:
-    return Column(name=name, label=label, type=type_, editable=editable)
+def _c(
+    name: str,
+    label: str,
+    type_: str = "text",
+    editable: bool = False,
+    number_type: str | None = None,
+) -> Column:
+    return Column(
+        name=name, label=label, type=type_, editable=editable, number_type=number_type
+    )
 
 
 # ---------------------------------------------------------------------
@@ -87,15 +121,16 @@ TABLES: dict[str, TableSpec] = {
         label="タスク",
         table="tasks",
         pk="local_task_id",
+        pk_type="int",
         description="Todoist 連携タスクとローカルタスク",
         order_by="(due_date IS NULL), due_date, priority DESC",
         columns=(
-            _c("local_task_id", "ID", "number"),
+            _c("local_task_id", "ID", "number", number_type="int"),
             _c("title", "タイトル", "text", editable=True),
             _c("assignee_id", "担当者", "user", editable=True),
             _c("team_key", "班", "text", editable=True),
             _c("due_date", "期限", "text", editable=True),
-            _c("priority", "優先度", "number", editable=True),
+            _c("priority", "優先度", "number", editable=True, number_type="int"),
             _c("status", "状態", "text", editable=True),
             _c("todoist_task_id", "TodoistタスクID"),
             _c("created_by", "作成者", "user"),
@@ -108,16 +143,20 @@ TABLES: dict[str, TableSpec] = {
         label="メンバー",
         table="members",
         pk="member_id",
+        pk_type="int",
         description="班所属・技能タグ",
         order_by="display_name",
         columns=(
-            _c("member_id", "ID", "number"),
+            _c("member_id", "ID", "number", number_type="int"),
             _c("user_id", "Discordユーザー", "user"),
             _c("display_name", "表示名", "text", editable=True),
             # 班は slug で保持し、表示だけ班名へ解決する（編集は slug / JSON 配列のまま）
             _c("primary_team", "主所属班", "team", editable=True),
             _c("secondary_teams", "副所属班", "team_list", editable=True),
-            _c("is_leader", "班長", "bool", editable=True),
+            # is_leader は Web ダッシュボードの認可（L2 判定）そのもの。
+            # 編集可にすると L2 が任意の相手を L2 へ昇格させられる。
+            # 変更は Discord の /member set-leader（L3 以上）から行う。
+            _c("is_leader", "班長", "bool"),
             _c("skills", "技能タグ", "text", editable=True),
             _c("notes", "メモ", "text", editable=True),
             _c("joined_at", "登録日時", "datetime"),
@@ -129,15 +168,23 @@ TABLES: dict[str, TableSpec] = {
         label="班",
         table="teams",
         pk="team_id",
+        pk_type="int",
         description="班のマスタとロール紐付け",
         order_by="team_name",
         columns=(
-            _c("team_id", "ID", "number"),
+            _c("team_id", "ID", "number", number_type="int"),
             _c("team_key", "班キー"),
             _c("team_name", "班名", "text", editable=True),
-            _c("leader_role_id", "班長ロールID", "text", editable=True),
-            _c("member_role_id", "班員ロールID", "text", editable=True),
-            _c("secondary_role_id", "副所属ロールID", "text", editable=True),
+            # ロール ID は Web から編集させない。
+            #
+            # cogs/members._sync_roles() は member_role_id をそのまま
+            # add_roles() に渡す。ここを Bot 管理者ロールの ID に書き換えてから
+            # /member assign-team（L2）を実行すると、bot の権限で L4 相当の
+            # ロールが付いてしまう（権限昇格の経路）。
+            # Discord 側の /team-role は元から管理者限定なので、そちらへ一本化する。
+            _c("leader_role_id", "班長ロールID", "text"),
+            _c("member_role_id", "班員ロールID", "text"),
+            _c("secondary_role_id", "副所属ロールID", "text"),
             _c("channel_id", "通知チャンネル", "channel", editable=True),
             _c("active_flag", "有効", "bool", editable=True),
             _c("updated_at", "更新日時", "datetime"),
@@ -148,6 +195,7 @@ TABLES: dict[str, TableSpec] = {
         label="日程調整",
         table="schedules",
         pk="schedule_id",
+        pk_type="text",
         description="出欠投票の親レコード",
         order_by="deadline DESC",
         columns=(
@@ -167,10 +215,11 @@ TABLES: dict[str, TableSpec] = {
         label="出欠回答",
         table="schedule_votes",
         pk="vote_id",
+        pk_type="int",
         description="候補日ごとの回答（○/△/×）",
         order_by="updated_at DESC",
         columns=(
-            _c("vote_id", "ID", "number"),
+            _c("vote_id", "ID", "number", number_type="int"),
             _c("option_id", "候補", "option"),
             _c("user_id", "回答者", "user"),
             _c("status", "回答", "text", editable=True),
@@ -182,16 +231,17 @@ TABLES: dict[str, TableSpec] = {
         label="桁巻き積層記録",
         table="layer_records",
         pk="record_id",
+        pk_type="int",
         description="/layer start〜end の作業記録",
         order_by="ended_at DESC",
         columns=(
-            _c("record_id", "ID", "number"),
+            _c("record_id", "ID", "number", number_type="int"),
             _c("user_id", "作業者", "user"),
             _c("keta", "桁名", "text", editable=True),
             _c("layer_num", "層番号", "text", editable=True),
             _c("started_at", "開始", "datetime"),
             _c("ended_at", "終了", "datetime"),
-            _c("minutes", "作業時間(分)", "number", editable=True),
+            _c("minutes", "作業時間(分)", "number", editable=True, number_type="int"),
         ),
     ),
     "progress": TableSpec(
@@ -199,20 +249,21 @@ TABLES: dict[str, TableSpec] = {
         label="機体進捗",
         table="progress_nodes",
         pk="progress_node_id",
+        pk_type="int",
         description="機体→パーツ→部品の進捗ツリー",
         order_by="sort_order, node_id",
         columns=(
-            _c("progress_node_id", "ID", "number"),
+            _c("progress_node_id", "ID", "number", number_type="int"),
             _c("node_id", "ノードID"),
             _c("parent_id", "親ノードID", "text", editable=True),
-            _c("sort_order", "表示順", "number", editable=True),
+            _c("sort_order", "表示順", "number", editable=True, number_type="real"),
             _c("name", "名前", "text", editable=True),
             _c("assignee", "担当者", "text", editable=True),
             _c("status", "状態", "text", editable=True),
             _c("manual_progress", "進捗率", "progress", editable=True),
             # 重量はグラム固定（列名の _g で明示。単位設定は作らない）
-            _c("target_weight_g", "目標重量(g)", "number", editable=True),
-            _c("actual_weight_g", "実測重量(g)", "number", editable=True),
+            _c("target_weight_g", "目標重量(g)", "number", editable=True, number_type="real"),
+            _c("actual_weight_g", "実測重量(g)", "number", editable=True, number_type="real"),
             _c("source", "ソース"),
             _c("todoist_task_id", "TodoistタスクID"),
             _c("updated_at", "更新日時", "datetime"),
@@ -241,6 +292,50 @@ class UnknownTableError(KeyError):
 
 class UnknownColumnError(KeyError):
     """ホワイトリストに無い（または編集不可の）列が指定された。"""
+
+
+class InvalidValueError(ValueError):
+    """列の型に合わない値が指定された（例: 進捗率に数値でない文字列）。"""
+
+
+class UnknownRowError(KeyError):
+    """行 ID が主キーの型に変換できない（＝そんな行は存在しえない）。
+
+    「存在しない行」と同じ扱い（HTTP 404）にする。異常系ではなく
+    URL の打ち間違いなので、500 にはしない。
+    """
+
+
+def coerce_row_id(spec: TableSpec, row_id: Any) -> Any:
+    """行 ID を主キー列の型へ正規化する。変換できなければ UnknownRowError。
+
+    Web から来る row_id は URL 由来なので必ず str になる。SQLite は
+    型親和性で `'5'` を 5 として扱うため素通しでも動くが、**PostgreSQL の
+    asyncpg は bigint 引数に str を渡すと DataError を投げる**
+    （本番は PostgreSQL。ADR 0006）。
+
+        asyncpg.exceptions.DataError: invalid input for query argument $2: '5'
+
+    型はルータではなく TableSpec が持つ。列の定義とその型が同じ場所に
+    あれば、表を足すときに片方だけ直し忘れることがない（ADR 0016）。
+    """
+    if spec.pk_type == "int":
+        # bool は int の派生。True が「1行目」として通らないように弾く
+        if isinstance(row_id, bool):
+            raise UnknownRowError(f"{spec.key}: 行 ID が不正です")
+        if isinstance(row_id, int):
+            return row_id
+        text = str(row_id).strip()
+        # ASCII の数字だけを受ける。int() は全角「５」やアラビア数字「٥」、
+        # 桁区切りの "5_000" も 5 / 5000 として通してしまい、**同じ行を指す
+        # URL の綴りが複数できる**。監査ログには URL の生値が残るため、
+        # 「tasks#٥ を編集」と記録されて実際は 5 行目、というずれが起きる。
+        if not (text.isascii() and text.isdigit()):
+            raise UnknownRowError(f"{spec.key}: 行 ID が不正です: {row_id!r}")
+        return int(text)
+    if row_id is None:
+        raise UnknownRowError(f"{spec.key}: 行 ID が指定されていません")
+    return str(row_id)
 
 
 def get_spec(table_key: str) -> TableSpec:
@@ -277,6 +372,132 @@ def rows_to_csv(spec: TableSpec, rows: list[dict[str, Any]]) -> str:
     for row in rows:
         writer.writerow([csv_safe(row.get(column.name)) for column in spec.columns])
     return CSV_BOM + buf.getvalue()
+
+
+# ---------------------------------------------------------------------
+# 値の型変換
+#
+# SQLite は動的型付けなので、REAL 列にも文字列がそのまま保存できてしまう。
+# 進捗率に数値でない値が入ると bot 側の float() 変換が落ち、
+# そのサーバーの /progress view と定期同期がまとめて動かなくなる。
+# 書き込み口である本リポジトリで列の型に正規化しておく。
+# ---------------------------------------------------------------------
+_TRUE_VALUES = {"1", "true", "yes", "on", "はい"}
+_FALSE_VALUES = {"", "0", "false", "no", "off", "いいえ"}
+
+
+# 編集できる INTEGER 列（tasks.priority / layer_records.minutes）は
+# PostgreSQL では **int4**。BIGINT になるのは主キーだけで、to_pg_ddl() は
+# 一般の INTEGER 列を INTEGER のまま出す（guild_id だけ BIGINT へ寄せる）。
+# int8 の範囲で通すと 3000000000 のような値が素通りして本番だけ
+# OverflowError: value out of int32 range になるため、int4 で判定する。
+# SQLite の INTEGER は 64bit なので開発環境では通ってしまう＝ここで揃える。
+# priority / minutes に CHECK 制約は無く、DB 側では止まらない。
+# （編集できる int 列が本当に int4 かは
+#   tests/test_number_column_types.py が DDL と突き合わせて固定している）
+_INT32_MIN = -(2**31)
+_INT32_MAX = 2**31 - 1
+
+def _coerce_number(column: Column, value: Any) -> int | float | None:
+    """number 列の値を DDL の型（INTEGER / REAL）へ正規化する。
+
+    以前は `int()` → 失敗したら `float()` の順に試し、さらに数値型は
+    そのまま返していたため、**INTEGER 列に float が入りえた**。
+    asyncpg は int8 の引数に float を渡しても DataError になるので、
+    本番（PostgreSQL）だけが 500 になる（SQLite は保存できてしまう）。
+
+    小数は丸めない。`priority` に 2.7 が来たら「2 にしておく」ではなく
+    拒否して入れ直してもらう（勝手に値を変えない）。
+
+    **変換が通っても DB の型に収まるとは限らない。** Python の int は
+    任意精度なので `"9" * 30` はそのまま通り、`"1e20"` は float 経由で
+    整数になる。どちらも int4 を超えて asyncpg が投げる（本番だけ 500）。
+    範囲外は丸めず・切り詰めず 400 で返す。
+    """
+    if isinstance(value, bool):
+        # 従来どおり ON/OFF を 1/0 として受ける
+        return int(value)
+    if isinstance(value, (int, float)):
+        number: int | float = value
+    else:
+        text = str(value).strip()
+        if not text:
+            return None
+        try:
+            number = int(text)
+        except ValueError:
+            try:
+                number = float(text)
+            except ValueError:
+                raise InvalidValueError(
+                    f"{column.label} には数値を入力してください。"
+                ) from None
+
+    # inf / nan は int にも float8 にも「値」として入れてはいけない。
+    # PostgreSQL の float8 は Infinity / NaN を**格納できてしまう**ので、
+    # int 側と違って 500 にすらならず静かに入る。target_weight_g /
+    # actual_weight_g に NaN が入ると services/progress_tree.py の
+    # _resolve_weight() が子の合計を取る際に伝播し、重量ツリーが静かに壊れる。
+    # ADR 0021 は未計測を 0.0 に丸めず None のまま扱うと決めているので、
+    # 「値でない値」を第3の状態として通さない。
+    if isinstance(number, float) and not math.isfinite(number):
+        raise InvalidValueError(
+            f"{column.label} が扱える範囲を超えています"
+            "（inf / nan は保存できません）。"
+        )
+
+    if column.number_type == "int":
+        # 2.0 のような「小数点付きの整数」は受ける（丸めではなく等価変換）
+        if isinstance(number, float) and not number.is_integer():
+            raise InvalidValueError(
+                f"{column.label} には整数を入力してください（小数は使えません）。"
+            )
+        number = int(number)
+        # 丸めない・切り詰めない。範囲外は 400 にして入れ直してもらう
+        if not _INT32_MIN <= number <= _INT32_MAX:
+            raise InvalidValueError(
+                f"{column.label} が扱える範囲を超えています"
+                f"（{_INT32_MIN} 〜 {_INT32_MAX}）。"
+            )
+        return number
+
+    try:
+        return float(number)
+    except OverflowError:
+        # 任意精度の int（"9" * 400 など）は float8 にできない
+        raise InvalidValueError(
+            f"{column.label} が扱える範囲を超えています。"
+        ) from None
+
+
+def _coerce(column: Column, value: Any) -> Any:
+    """列の型に合わせて値を正規化する。合わない値は InvalidValueError。"""
+    if value is None:
+        return None
+    if column.type == "number":
+        return _coerce_number(column, value)
+    if column.type == "bool":
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            return 1 if value else 0
+        text = str(value).strip().lower()
+        if text in _TRUE_VALUES:
+            return 1
+        if text in _FALSE_VALUES:
+            return 0
+        raise InvalidValueError(f"{column.label} には ON / OFF（1 または 0）を指定してください。")
+    if column.type == "progress":
+        text = str(value).strip()
+        if not text:
+            return None
+        parsed = parse_progress(value)
+        if parsed is None:
+            raise InvalidValueError(
+                f"{column.label} には 0.5 または 50% の形式で入力してください。"
+            )
+        return parsed
+    return value
 
 
 class TableRepository(BaseRepository):
@@ -392,7 +613,9 @@ class TableRepository(BaseRepository):
         )
         return [dict(r) for r in rows]
 
-    async def list_all_rows(self, guild_id: int, table_key: str) -> list[dict[str, Any]]:
+    async def list_all_rows(
+        self, guild_id: int, table_key: str, *, sheet_id: str | None = None
+    ) -> list[dict[str, Any]]:
         """指定テーブルの全行を返す（エクスポート用）。
 
         list_rows は画面表示用に MAX_LIMIT の上限を持つため、
@@ -401,18 +624,21 @@ class TableRepository(BaseRepository):
         out: list[dict[str, Any]] = []
         offset = 0
         while True:
-            chunk = await self.list_rows(guild_id, table_key, limit=MAX_LIMIT, offset=offset)
+            chunk = await self.list_rows(
+                guild_id, table_key, limit=MAX_LIMIT, offset=offset, sheet_id=sheet_id
+            )
             out.extend(chunk)
             if len(chunk) < MAX_LIMIT:
                 return out
             offset += MAX_LIMIT
 
     async def get_row(self, guild_id: int, table_key: str, row_id: Any) -> dict[str, Any] | None:
+        """1行を返す。行 ID が主キーの型に変換できなければ UnknownRowError。"""
         spec = get_spec(table_key)
         row = await self.db.fetchone(
             f"SELECT {', '.join(spec.column_names)} FROM {spec.table}"
             f" WHERE guild_id = ? AND {spec.pk} = ?",
-            (guild_id, row_id),
+            (guild_id, coerce_row_id(spec, row_id)),
         )
         return dict(row) if row else None
 
@@ -422,18 +648,23 @@ class TableRepository(BaseRepository):
         """編集可能な列だけを更新する（P2-5）。
 
         編集不可・未知の列が含まれていれば UnknownColumnError。
+        列の型に合わない値は InvalidValueError。
+        行 ID が主キーの型に変換できなければ UnknownRowError。
         更新した行があれば True。
         """
         spec = get_spec(table_key)
-        editable = set(spec.editable_columns)
-        unknown = [name for name in values if name not in editable]
+        # 変換は列の検査より前に行う（UPDATE へ到達させない）
+        row_id = coerce_row_id(spec, row_id)
+        by_name = {c.name: c for c in spec.columns if c.editable}
+        unknown = [name for name in values if name not in by_name]
         if unknown:
             raise UnknownColumnError(", ".join(sorted(unknown)))
         if not values:
             return False
-        assignments = ", ".join(f"{name} = ?" for name in values)
+        coerced = {name: _coerce(by_name[name], value) for name, value in values.items()}
+        assignments = ", ".join(f"{name} = ?" for name in coerced)
         cur = await self.db.execute(
             f"UPDATE {spec.table} SET {assignments} WHERE guild_id = ? AND {spec.pk} = ?",
-            (*values.values(), guild_id, row_id),
+            (*coerced.values(), guild_id, row_id),
         )
         return cur.rowcount > 0
