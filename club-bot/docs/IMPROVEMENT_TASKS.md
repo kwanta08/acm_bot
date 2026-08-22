@@ -310,7 +310,7 @@
       - (3) の DM→チャンネルのフォールバックは `cogs/schedule.py:689-701` に既存実装があるので
         `utils/` のヘルパに切り出して共用する
 
-- [ ] **G2-4** タイムアウトした View を画面に反映する。
+- [x] **G2-4** タイムアウトした View を画面に反映する。
       `cogs/progress.py:478-480` ほか5箇所の `on_timeout` は `item.disabled = True` するだけで
       `message.edit(view=self)` を呼んでいない。`cogs/season.py` の `RolloverView` には
       `on_timeout` すら無い。`/season rollover` は選択途中で5分経つと確定ボタンが無反応になる。
@@ -1229,3 +1229,59 @@ fell_back / failed）で「誰に届かなかったか」を呼び出し側が�
   出したくなったら数行で足せる
 - 週次の遅延通知など他のリマインダー種別は「送れなかった」を
   どう扱っているか未調査（同じ嘘成功があるかもしれない）
+
+---
+
+### 2026-08-22 — G2-4: タイムアウトした View を画面に反映（ブランチ `fix/g2-4`）
+
+6箇所の `on_timeout` は `item.disabled = True` するだけで `message.edit` を
+呼んでいなかった。discord.py の View はサーバー側を編集しない限り表示が
+変わらないため、利用者には「ボタンはあるのに無反応」に見えていた。
+
+`utils/views.py` に **`TimeoutAwareView`** を新設し、タイムアウト時に
+「時間切れです。もう一度コマンドを実行してください。」の Embed へ
+差し替える（`view=None` で押せないボタンを画面に残さない）。
+
+#### 適用箇所
+
+| View | コマンド | 送信側の message 捕捉 |
+|---|---|---|
+| `ConfirmView`（G2-1 で新設） | `/progress remove`・`/schedule delete`・`/season new`・`/season rollover` | `followup.send` の戻り値 |
+| `ProgressView` | `/progress view` | 同上 |
+| `ProjectSetupWizard` | `/progress setup` | 同上 |
+| `SectionSelectView` | `/task add` | 同上 |
+| `SetupWizardView` | `/setup` | `original_response()` |
+| `TodoistSetupView` | `/todoist setup` | `original_response()` |
+
+タスク本文の「6箇所」に対し、`RolloverView` は G2-1 で `ConfirmView` に
+吸収済みのため、**基底クラス1つ＋既存5 View の継承変更**で全てが片付いた
+（G2-1 完了ログの申し送りどおり）。
+
+`RolloverView` の timeout は受入基準どおり **300 → 900 秒**
+（卒業者を最大25名選ぶ操作は5分では足りない）。
+
+#### 設計判断
+
+- `on_timeout` の上書きを許さず、文言は `timeout_title` / `timeout_message` の
+  上書きで変える。**「disabled にするだけ」の再発をテストで検出する**
+  （`cls.on_timeout is TimeoutAwareView.on_timeout` を全対象クラスで検査）
+- `message` を覚えさせ損ねた View は従来と同じ挙動に落ちるだけで例外にしない。
+  編集失敗（メッセージ削除済み等）も握りつぶす — タイムアウト処理で
+  例外を出しても誰も見ていない
+- `response.send_message` は戻り値が無いので `original_response()` で取り直す
+  （`/setup`・`/todoist setup` の2箇所）
+
+#### 検証
+
+- `ruff check .`: パス
+- `pytest tests/ -q -rs`: **824 passed, 9 skipped**（skip は PG ライブ9件）
+- 実装を戻す（7ファイル checkout）と `tests/test_views_timeout.py` が赤
+  （collection error: TimeoutAwareView が存在しない）
+
+#### 申し送り
+
+- `HelpView`（`cogs/help.py`）は対象に含めなかった。閲覧専用でタイムアウト
+  しても実害が無く、タスク本文の6箇所にも入っていない。統一したくなったら
+  継承を1行変えるだけ
+- G2-1 の ConfirmView 申し送り（「放置でボタンが生きたまま無反応」）は
+  これで解消

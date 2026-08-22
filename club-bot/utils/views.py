@@ -1,5 +1,12 @@
 """コマンドをまたいで使う共通 View。
 
+## TimeoutAwareView
+
+タイムアウトを**画面に反映する** View の基底クラス。
+`discord.ui.View.on_timeout` でボタンを disabled にしても、
+`message.edit` を呼ばない限りサーバー側の表示は変わらない。利用者には
+「ボタンはあるのに押しても無反応」に見える（6箇所で再発していた。G2-4）。
+
 ## ConfirmView
 
 破壊的操作の前に一度確認を挟む。取り返しのつかない操作に確認があるものと
@@ -29,7 +36,41 @@ DEFAULT_CONFIRM_TIMEOUT = 300.0
 ConfirmCallback = Callable[[discord.Interaction], Awaitable[None]]
 
 
-class ConfirmView(discord.ui.View):
+class TimeoutAwareView(discord.ui.View):
+    """タイムアウト時に「時間切れ」をメッセージへ反映する View。
+
+    使い方::
+
+        view = MyView(...)          # TimeoutAwareView を継承
+        view.message = await interaction.followup.send(..., view=view)
+
+    `message` を覚えさせ損ねた場合は表示を差し替えられない（従来と同じ
+    挙動に落ちるだけで例外にはしない）。`on_timeout` を上書きせず、
+    文言を変えたいときは `timeout_title` / `timeout_message` を上書きする。
+    """
+
+    #: 表示を差し替える対象。送信側が代入する
+    message: discord.Message | None = None
+    timeout_title = "時間切れです"
+    timeout_message = "もう一度コマンドを実行してください。"
+
+    async def on_timeout(self) -> None:
+        for item in self.children:
+            if hasattr(item, "disabled"):
+                item.disabled = True
+        if self.message is None:
+            return
+        try:
+            # 押せないボタンを残さない（view=None で丸ごと外す）
+            await self.message.edit(
+                embed=info_embed(self.timeout_title, self.timeout_message), view=None
+            )
+        except discord.HTTPException as e:
+            # メッセージが削除済み等。タイムアウト処理なので静かに諦める
+            log.warning("タイムアウト表示の反映に失敗: %s", e)
+
+
+class ConfirmView(TimeoutAwareView):
     """「確定する / やめる」の2択を出し、確定時だけ処理を走らせる View。
 
     使い方::

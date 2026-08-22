@@ -33,7 +33,9 @@ from utils.views import ConfirmView
 
 log = get_logger("season")
 
-_VIEW_TIMEOUT = 300.0
+# 卒業者の選択（最大25名）は5分では足りないことがあるため長めに取る。
+# タイムアウト時の画面反映は ConfirmView（TimeoutAwareView）が行う
+_VIEW_TIMEOUT = 900.0
 
 
 def snapshot_filename(guild_id: int) -> str:
@@ -207,7 +209,9 @@ class Season(commands.Cog):
             _do_start,
             cancel_message="年度は変更していません。",
         )
-        await interaction.followup.send(embed=view.preview_embed, view=view, ephemeral=True)
+        view.message = await interaction.followup.send(
+            embed=view.preview_embed, view=view, ephemeral=True
+        )
 
     @group.command(
         name="rollover", description="年度を切り替え、卒業者の仕分けと班長リセットを行います。"
@@ -241,7 +245,7 @@ class Season(commands.Cog):
         )
         view = RolloverView(self, guild_id, name, interaction.user.id)
         try:
-            await interaction.followup.send(
+            view.message = await interaction.followup.send(
                 embed=info_embed("年度替わり", body), view=view, ephemeral=True
             )
         except discord.HTTPException as e:

@@ -26,6 +26,7 @@ from utils.logger import get_logger
 from utils.notify import dm_each_with_channel_fallback
 from utils.parser import fmt_jp, from_iso, parse_datetime, to_iso
 from utils.permissions import Level, ensure_guild, is_self_or_level, require
+from utils.views import TimeoutAwareView
 
 
 async def _deny_not_owner(interaction: discord.Interaction, task: dict, verb: str) -> None:
@@ -78,7 +79,7 @@ def task_choices(rows: list[dict], current: str, limit: int = 25) -> list[tuple[
     return out
 
 
-class SectionSelectView(discord.ui.View):
+class SectionSelectView(TimeoutAwareView):
     def __init__(self, cog: Tasks, candidates: list[dict], owner_id: int, **task_kwargs):
         super().__init__(timeout=120)
         self.cog = cog
@@ -112,9 +113,6 @@ class SectionSelectView(discord.ui.View):
         await self.cog._finalize_add_task(interaction, section_id=section_id, **self.task_kwargs)
         self.stop()
 
-    async def on_timeout(self) -> None:
-        for item in self.children:
-            item.disabled = True
 
 
 class Tasks(commands.Cog):
@@ -297,7 +295,7 @@ class Tasks(commands.Cog):
 
         # 2件以上あれば選択メニューを表示（B案）
         view = SectionSelectView(self, candidates, interaction.user.id, **task_kwargs)
-        await interaction.followup.send(
+        view.message = await interaction.followup.send(
             embed=info_embed(
                 "配置先セクションを選択してください",
                 f"{team_name}班には複数のセクションが紐付いています。",

@@ -585,7 +585,9 @@ class Schedule(commands.Cog):
             _do_delete,
             cancel_message="日程調整は削除していません。",
         )
-        await interaction.followup.send(embed=view.preview_embed, view=view, ephemeral=True)
+        view.message = await interaction.followup.send(
+            embed=view.preview_embed, view=view, ephemeral=True
+        )
 
     @group.command(name="edit-deadline", description="開催中の日程調整の締切を変更します。")
     @app_commands.describe(
