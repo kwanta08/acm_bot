@@ -21,7 +21,7 @@ from repositories.section_repository import SectionRepository
 from repositories.task_repository import TaskRepository
 from services import team_service
 from services.todoist_service import TodoistError
-from utils.embeds import error_embed, info_embed, success_embed, task_embed
+from utils.embeds import empty_state_embed, error_embed, info_embed, success_embed, task_embed
 from utils.logger import get_logger
 from utils.notify import dm_each_with_channel_fallback
 from utils.parser import fmt_jp, from_iso, parse_datetime, to_iso
@@ -932,7 +932,7 @@ class Tasks(commands.Cog):
         self, title: str, tasks: list[dict], guild: discord.Guild | None
     ) -> discord.Embed:
         if not tasks:
-            return info_embed(title, "該当するタスクはありません。")
+            return empty_state_embed(title, "該当するタスクはありません。", "/task add")
         embed = task_embed(title)
         for t in tasks[:25]:
             assignee = "未割当"
@@ -952,7 +952,7 @@ class Tasks(commands.Cog):
 
     def _build_todoist_task_list_embed(self, title: str, tasks: list) -> discord.Embed:
         if not tasks:
-            return info_embed(title, "該当するタスクはありません。")
+            return empty_state_embed(title, "該当するタスクはありません。", "/task add")
         embed = task_embed(title)
         for t in tasks[:25]:
             due_str = getattr(getattr(t, "due", None), "string", None) or "期限なし"

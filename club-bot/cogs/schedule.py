@@ -24,6 +24,7 @@ from services.schedule_service import build_emoji_maps
 from utils.embeds import (
     MAX_EMBED_FIELDS,
     add_truncation_note,
+    empty_state_embed,
     error_embed,
     info_embed,
     schedule_embed,
@@ -406,7 +407,9 @@ class Schedule(commands.Cog):
         schedules = await self.repo.list_open_schedules(guild_id)
         if not schedules:
             await interaction.followup.send(
-                embed=info_embed("開催中の日程調整", "現在、開催中の投票はありません。"),
+                embed=empty_state_embed(
+                    "開催中の日程調整", "現在、開催中の投票はありません。", "/schedule create"
+                ),
                 ephemeral=True,
             )
             return
