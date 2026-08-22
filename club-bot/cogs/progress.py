@@ -71,7 +71,7 @@ from utils.permissions import (
     require,
     require_manage_guild_or,
 )
-from utils.views import ConfirmView
+from utils.views import ConfirmView, TimeoutAwareView
 
 if TYPE_CHECKING:
     from utils.db import Database
@@ -390,7 +390,7 @@ def due_items(tasks: list, until, category: str) -> list[dict]:
 # ---------------------------------------------------------------------
 # ドリルダウン View
 # ---------------------------------------------------------------------
-class ProgressView(discord.ui.View):
+class ProgressView(TimeoutAwareView):
     """階層ドリルダウン用の View。
 
     「選択ノードの子を取得して表示」を再帰的に繰り返すだけの実装で、
@@ -488,15 +488,12 @@ class ProgressView(discord.ui.View):
         else:
             await interaction.response.edit_message(embed=embed, attachments=[], view=self)
 
-    async def on_timeout(self) -> None:
-        for item in self.children:
-            item.disabled = True
 
 
 # ---------------------------------------------------------------------
 # /progress setup ウィザード View
 # ---------------------------------------------------------------------
-class ProjectSetupWizard(discord.ui.View):
+class ProjectSetupWizard(TimeoutAwareView):
     """Todoist プロジェクトを進捗ツリーへ紐付けるセルフサービスウィザード。
 
     ステップ: ①プロジェクト選択 → ②紐付け先ノード選択
@@ -706,9 +703,6 @@ class ProjectSetupWizard(discord.ui.View):
         )
         self.stop()
 
-    async def on_timeout(self) -> None:
-        for item in self.children:
-            item.disabled = True
 
 
 # ---------------------------------------------------------------------
@@ -1062,7 +1056,9 @@ class Progress(commands.Cog):
             _do_remove,
             cancel_message="進捗ノードは削除していません。",
         )
-        await interaction.followup.send(embed=view.preview_embed, view=view, ephemeral=True)
+        view.message = await interaction.followup.send(
+            embed=view.preview_embed, view=view, ephemeral=True
+        )
 
     # ---------- /progress spar-link ----------
     @group.command(
@@ -1211,7 +1207,7 @@ class Progress(commands.Cog):
             return
 
         view = ProjectSetupWizard(self, guild_id, interaction.user.id, candidates, tree)
-        await interaction.followup.send(
+        view.message = await interaction.followup.send(
             embed=info_embed(
                 "プロジェクト登録ウィザード",
                 "紐付ける Todoist プロジェクトを選択してください。\n"
@@ -1246,7 +1242,7 @@ class Progress(commands.Cog):
 
         embed = build_level_embed(tree, None)
         view = ProgressView(self, tree, None, interaction.user.id, guild_id)
-        await interaction.followup.send(embed=embed, view=view)
+        view.message = await interaction.followup.send(embed=embed, view=view)
 
     # ---------- /weight ----------
     weight_group = app_commands.Group(name="weight", description="機体重量の記録と集計")
