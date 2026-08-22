@@ -269,7 +269,7 @@
 
 ## Phase G2: 事故を防ぐ / 迷わせない（全89コマンドに効く共通改善）
 
-- [ ] **G2-1** 破壊的操作に共通の確認ステップを入れる。
+- [x] **G2-1** 破壊的操作に共通の確認ステップを入れる。
       確認があるのは `/data delete`・`/season rollover`・`/team-remove` の3つだけ。
       無いもの: `cogs/progress.py:1001-1011`（`/progress remove` は**配下ごと**削除し、
       実行後に件数を報告するだけ）、`cogs/schedule.py:446-473`（`/schedule delete` は
@@ -1045,3 +1045,77 @@ DDL 側にしか無い。今回は「編集できる int 列は int4」をテス
 **B. 同じ「大きさ」の穴は text 列にもある（未調査）。**
 `title` などの TEXT 列に長さ上限が無い。PostgreSQL の TEXT に上限は無いので
 500 にはならないが、Discord の埋め込み文字数制限に当たる可能性はある。別件。
+
+---
+
+### 2026-08-22 — G2-1: 破壊的操作に共通の確認ステップ（ブランチ `fix/g2-1`）
+
+確認があったのは `/data delete`・`/season rollover`・`/team-remove` の3つだけで、
+同じくらい取り返しのつかない操作が確認なしで走っていた。
+`utils/views.py` に `ConfirmView` を新設し、確認の作法を1箇所へ集約した。
+
+#### 確認を付けたコマンド
+
+| コマンド | 何が消えるか | 確認前に見せるもの |
+|---|---|---|
+| `/progress remove` | ノードと**配下すべて**（進捗・重量・マイルストーン） | 配下の件数と合計件数 |
+| `/schedule delete` | 投票メッセージ＋票データ（CASCADE） | イベント名・候補数・回答した人数 |
+| `/season new` | 現年度が**即終了** | 終了する年度名 |
+
+`/season rollover` の `RolloverView` は `ConfirmView` のサブクラスへ切り出した
+（卒業者を選ぶ `UserSelect` はそのまま。確認の作法だけを親へ移した）。
+
+#### ConfirmView に入れた性質
+
+- **実行者チェックを既定動作にした。** View のボタンは interaction を受け取れば
+  誰でも押せうるので、所有者の一致を `_is_owner()` で毎回見る。
+  「呼び出し側が毎回きちんと書く」に依存しない形にした（ADR 0008 / 0016 の
+  「規律ではなく構造で守る」軸）
+- **連打で二重に走らせない。** 削除が2回走ると報告する件数も嘘になるため、
+  `confirmed` を立ててから処理へ入り、ボタンは即座に無効化する
+- **コールバックが例外を投げても `stop()` する**（押しっぱなしにしない）
+
+#### 設計判断
+
+**A. 削除の「方式」は変えていない。**
+`/schedule delete` の論理削除化はタスク本文どおり **G3-3 へ回した**。
+ADR 0018 / 0024 の「既存データを動かさない」軸に沿い、
+このタスクで足したのは**確認ステップだけ**。DB スキーマは無変更でマイグレーション不要。
+
+**B. `count_subtree()` は `delete_subtree()` と辿り方を共有する。**
+プレビューの件数と実際に消える件数がずれると、確認の意味がなくなる。
+共通の `_subtree_ids()` を切り出して両者が同じ結果を返すようにし、
+`test_count_subtree_matches_what_delete_subtree_removes` で固定した。
+ついでに `delete_subtree()` は**存在しないノードなら空**を返すようになった
+（従来は未知の ID でもその ID 自体を削除対象に数えていたが、
+`delete_node()` が 0 件を返すので実害は無かった）。
+
+**C. `on_timeout` は入れていない（G2-4 の範囲）。**
+`ConfirmView` は放置されるとボタンが生きたまま無反応になる。これは
+G2-4「`on_timeout` がメッセージを編集していない6箇所」と同じ論点なので、
+ADR 0014（1タスク＝1ブランチ）に従い混ぜなかった。
+**G2-4 は対象が6箇所から変わる**: `RolloverView` は `ConfirmView` に吸収されたので、
+`ConfirmView` 1箇所を直せば `/progress remove`・`/schedule delete`・
+`/season new`・`/season rollover` の4つが同時に片付く。
+
+#### 検証
+
+- `ruff check .`: パス
+- `pytest tests/ -q -rs`: **781 passed, 9 skipped**
+  （skip は PG ライブテスト9件。`CLUB_TEST_PG_DSN` 未設定のため）
+- 実装を戻すとテストが落ちること:
+
+| 戻した実装 | 落ちたテスト |
+|---|---|
+| 3コマンドの確認ステップと `count_subtree()` | 13 |
+| `ConfirmView` の所有者チェックのみ | 5 |
+
+#### 申し送り
+
+**A. 確認の無い破壊的操作はまだ残っている可能性がある。**
+今回はタスクが名指しした3つを塞いだ。`/milestone remove`・`/layer` 系・
+`/task delete` などは未調査。`ConfirmView` ができたので、追加は数行で済む。
+
+**B. gotcha `progress-subtree-disappears` とは別件。**
+あちらは親の付け替えで循環を作るとツリーから部分木が落ちる話で、
+`/progress remove` の確認欠如とは原因が違う。今回の変更では解消しない。
