@@ -414,16 +414,30 @@ class Tasks(commands.Cog):
             await _deny_not_owner(interaction, task, "完了に")
             return
         svc = await self._todoist_svc(guild_id)
+        sync_note = ""
         if task.get("todoist_task_id") and svc.enabled:
             try:
                 await svc.close_task(task["todoist_task_id"])
-            except TodoistError:
-                pass  # ローカルは完了扱いにする
+            except TodoistError as e:
+                # ローカルは完了扱いにするが、黙らない。Todoist 側は未完了の
+                # まま残り、翌朝の通知に出続ける（G2-7。gotcha
+                # `todoist-completed-tasks-not-detected` の同期の片方向性）
+                log.warning(
+                    "Todoist 側の完了に失敗 (guild=%s, task=%s, todoist=%s): %s",
+                    guild_id,
+                    task_id,
+                    task["todoist_task_id"],
+                    e,
+                )
+                sync_note = (
+                    "\n⚠️ Todoist 側の完了に失敗しました。"
+                    "Todoist 上で直接完了にしてください。"
+                )
         await self.repo.complete_task(guild_id, task_id)
         await interaction.followup.send(
             embed=success_embed(
                 "完了にしました",
-                f"`{task_id}` {task['title']}",
+                f"`{task_id}` {task['title']}{sync_note}",
                 executor=interaction.user.display_name,
             ),
             ephemeral=True,
@@ -445,16 +459,28 @@ class Tasks(commands.Cog):
             )
             return
         svc = await self._todoist_svc(guild_id)
+        sync_note = ""
         if task.get("todoist_task_id") and svc.enabled:
             try:
                 await svc.delete_task(task["todoist_task_id"])
-            except TodoistError:
-                pass
+            except TodoistError as e:
+                # ローカルは削除（archived）するが、黙らない（G2-7）
+                log.warning(
+                    "Todoist 側の削除に失敗 (guild=%s, task=%s, todoist=%s): %s",
+                    guild_id,
+                    task_id,
+                    task["todoist_task_id"],
+                    e,
+                )
+                sync_note = (
+                    "\n⚠️ Todoist 側の削除に失敗しました。"
+                    "Todoist 上で直接削除してください。"
+                )
         await self.repo.delete_task(guild_id, task_id)
         await interaction.followup.send(
             embed=success_embed(
                 "削除しました",
-                f"`{task_id}` {task['title']}",
+                f"`{task_id}` {task['title']}{sync_note}",
                 executor=interaction.user.display_name,
             ),
             ephemeral=True,
@@ -705,8 +731,14 @@ class Tasks(commands.Cog):
                     )
                     return
                 section_name = match.name
-            except TodoistError:
-                pass
+            except TodoistError as e:
+                # 名前解決だけの失敗なので紐付けは続行するが、黙らない（G2-7）
+                log.warning(
+                    "Todoist セクション名の解決に失敗 (guild=%s, section=%s): %s",
+                    guild_id,
+                    section_id,
+                    e,
+                )
         await self.section_repo.link(guild_id, str(section_id), team, section_name)
         await interaction.followup.send(
             embed=success_embed(
