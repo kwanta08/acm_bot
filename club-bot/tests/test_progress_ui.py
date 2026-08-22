@@ -243,3 +243,146 @@ def test_embed_contains_text_bar_instead_of_image():
     assert embed.image.url is None
     assert progress_bar.FILLED in (embed.description or "")
     assert BAR_WIDTH >= 8
+
+# ---------------------------------------------------------------------
+# /progress edit・add の進捗率検証（G2-6）
+#
+# parse_progress は「解釈不能なら None」を返す（移行スクリプト用の仕様。
+# 変えない）。コマンド側がそれを素通しすると、
+# `/progress edit node:主桁 progress:半分` で**既存の進捗率が消えて**
+# 緑の成功 Embed が出ていた。コマンド側で None を弾く。
+# 解釈規則はダッシュボード側（repositories/table_repository.py の
+# progress 列検証。G0-2 の 8b9c0f4）と同じ: 0.5 / 50% / 50 を受け、
+# 空はクリア、解釈不能はエラー。
+# ---------------------------------------------------------------------
+import asyncio
+import tempfile
+from types import SimpleNamespace
+
+from utils.db import Database
+
+_G1 = 111
+
+
+def _tmp_db_path() -> str:
+    fd, path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
+    os.unlink(path)
+    return path
+
+
+class _Interaction:
+    def __init__(self):
+        self.guild = SimpleNamespace(id=_G1)
+        self.user = SimpleNamespace(id=501, display_name="tester")
+        self.sent: list[dict] = []
+        self.response = SimpleNamespace(defer=self._defer)
+        self.followup = SimpleNamespace(send=self._send)
+
+    async def _defer(self, *args, **kwargs):
+        return None
+
+    async def _send(self, **kwargs):
+        self.sent.append(kwargs)
+
+    def text(self) -> str:
+        embed = self.sent[-1]["embed"]
+        return f"{embed.title or ''} {embed.description or ''}"
+
+
+def _progress_cog(db):
+    from cogs.progress import Progress
+
+    return Progress(SimpleNamespace(db=db, guilds=[]))
+
+
+def _run_edit(db, **kwargs):
+    from cogs.progress import Progress
+
+    interaction = _Interaction()
+    asyncio.run(Progress.progress_edit.callback(_progress_cog(db), interaction, **kwargs))
+    return interaction
+
+
+def test_edit_with_unparsable_progress_is_an_error_and_keeps_the_value():
+    """`progress:半分` で既存の進捗率が消えないこと。"""
+
+    async def _seed(db):
+        from repositories.progress_repository import ProgressRepository
+
+        repo = ProgressRepository(db)
+        await repo.upsert_node(_G1, "spar", name="主桁", manual_progress=0.4)
+        return repo
+
+    async def _main():
+        db = Database(_tmp_db_path())
+        await db.connect()
+        try:
+            repo = await _seed(db)
+            interaction = _Interaction()
+            from cogs.progress import Progress
+
+            await Progress.progress_edit.callback(
+                _progress_cog(db), interaction, node="spar", progress="半分"
+            )
+            text = interaction.text()
+            assert "0.5" in text and "50%" in text and "形式" in text, text
+            assert "変更しました" not in text, "解釈不能なのに成功と表示している"
+
+            row = await repo.get_node(_G1, "spar")
+            assert row["manual_progress"] == 0.4, "既存の進捗率が消えている"
+        finally:
+            await db.close()
+
+    asyncio.run(_main())
+
+
+def test_edit_accepts_the_three_documented_forms():
+    """0.5 / 50% / 50 はダッシュボード側と同じ解釈で受けること。"""
+
+    async def _main():
+        from cogs.progress import Progress
+        from repositories.progress_repository import ProgressRepository
+
+        db = Database(_tmp_db_path())
+        await db.connect()
+        try:
+            repo = ProgressRepository(db)
+            for raw, expected in (("0.5", 0.5), ("50%", 0.5), ("50", 0.5), ("１００％", 1.0)):
+                await repo.upsert_node(_G1, "spar", name="主桁", manual_progress=0.1)
+                interaction = _Interaction()
+                await Progress.progress_edit.callback(
+                    _progress_cog(db), interaction, node="spar", progress=raw
+                )
+                row = await repo.get_node(_G1, "spar")
+                assert row["manual_progress"] == expected, (raw, row["manual_progress"])
+        finally:
+            await db.close()
+
+    asyncio.run(_main())
+
+
+def test_add_with_unparsable_progress_is_an_error_not_a_silent_none():
+    """/progress add も同じ穴（進捗が黙って未入力になる）を塞ぐこと。"""
+
+    async def _main():
+        from cogs.progress import Progress
+        from repositories.progress_repository import ProgressRepository
+
+        db = Database(_tmp_db_path())
+        await db.connect()
+        try:
+            interaction = _Interaction()
+            await Progress.progress_add.callback(
+                _progress_cog(db), interaction, name="主桁", parent=None, progress="半分"
+            )
+            text = interaction.text()
+            assert "形式" in text, text
+            assert not await ProgressRepository(db).list_nodes(_G1), (
+                "エラーなのにノードが作成されている"
+            )
+        finally:
+            await db.close()
+
+    asyncio.run(_main())
+
