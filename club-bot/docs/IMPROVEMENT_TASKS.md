@@ -340,7 +340,7 @@
         G0-2 で取り込む `8b9c0f4` がダッシュボード側に同じ検証を入れているので、
         **解釈規則をそちらと揃える**
 
-- [ ] **G2-7** Todoist の同期失敗を利用者に見せる。
+- [x] **G2-7** Todoist の同期失敗を利用者に見せる。
       `cogs/tasks.py:293-299` / `:324-330` / `:572-573` が `except TodoistError: pass` で、
       `log.warning` すら出していない。`/task done` は必ず「完了にしました」と返るのに
       Todoist 側は未完了のまま残り、翌朝の通知に出続ける。
@@ -1376,3 +1376,42 @@ edit だけ直すと2つの入口で挙動が食い違う。
   エコーと `50` の例示がある）。文言まで一本化したくなったら
   `_invalid_progress_embed` とテーブル側 `InvalidValueError` を共通化する
 - gotcha `progress-stops-after-dashboard-edit` とは別件（あちらは同期停止）
+
+---
+
+### 2026-08-22 — G2-7: Todoist の同期失敗を利用者に見せる（ブランチ `fix/g2-7`）
+
+`/task done`・`/task delete` は Todoist 側の操作が `except TodoistError: pass`
+で握りつぶされ、`log.warning` すら出ていなかった。`/task done` は必ず
+「完了にしました」と返るのに Todoist 側は未完了のまま残り、翌朝の通知に
+出続ける（gotcha `todoist-completed-tasks-not-detected` の同期の片方向性と関連）。
+
+#### 変更
+
+- **ローカルの完了・削除は従来どおり維持**（受入基準どおり。Todoist が
+  落ちていても Discord 側の運用は止めない）
+- 成功 Embed に同期結果を明記:
+  「⚠️ Todoist 側の完了に失敗しました。Todoist 上で直接完了にしてください。」
+  （delete は「直接削除してください」）
+- `log.warning` に guild_id・task_id・todoist_task_id を出す
+- 3つ目の握りつぶし（`/task section-link` のセクション名解決）にも
+  `log.warning` を追加（名前解決だけの失敗なので紐付けは続行。
+  利用者向けの文言は変えない）
+
+#### 検証
+
+- `ruff check .`: パス
+- `pytest tests/ -q -rs`: **839 passed, 9 skipped**（skip は PG ライブ9件）
+- `tests/test_todoist_guild_scope.py` に3ケース追加（受入基準の指定どおり）。
+  実装を戻すと2件が赤（成功側の「⚠️ が出ない」は戻しても緑＝回帰検出は
+  失敗側の2件が担う）
+- テスト前提の訂正: `/task delete` は物理削除ではなく **archived への論理削除**
+  だったため、テストの検証を `status == "archived"` に合わせた
+
+#### 申し送り
+
+- gotcha `todoist-completed-tasks-not-detected` は**未解消**（あちらは
+  Todoist→bot 方向の同期の話。今回は bot→Todoist 方向の失敗可視化）
+- `/task add` 系の TodoistError は元からエラー表示があり触っていない。
+  定期同期（`cogs/progress.py` の periodic_sync）の失敗は #bot-log へ
+  通知される既存実装がある
