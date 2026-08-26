@@ -36,14 +36,15 @@
 
 ## スキーマバージョンの割り当て（衝突防止）
 
-現行は `SCHEMA_VERSION = 15`（`migrations/014_discord_name_cache.sql` まで）。
+現行は `SCHEMA_VERSION = 16`（`migrations/015_layer_session_layer_num_text.sql` まで）。
 
 | 版 | migration | タスク |
 |---|---|---|
-| v16 | `015_schedule_confirmed.sql` | G3-4（確定日程） |
-| v17 | `016_progress_snapshots.sql` | G4-1（進捗履歴） |
-| v18 | `017_stock.sql` | G4-2（在庫・工具） |
-| v19 | `018_incidents.sql` | G4-4（ヒヤリハット） |
+| v16 | `015_layer_session_layer_num_text.sql` | 適用済み（`/layer start` の PG DataError 修正） |
+| v17 | `016_schedule_confirmed.sql` | G3-4（確定日程） |
+| v18 | `017_progress_snapshots.sql` | G4-7（進捗履歴） |
+| v19 | `018_stock.sql` | G4-8（在庫・工具） |
+| v20 | `019_incidents.sql` | G4-10（ヒヤリハット） |
 
 ---
 
@@ -380,7 +381,7 @@
 - [ ] **G3-3** `/schedule delete` を論理削除にする。
       現状は投票メッセージを削除してから DB を CASCADE 削除しており、票データが完全消失する。
       `/team-remove` `/skill-remove` `/layer keta-remove` は既に論理削除方式なので方針統一にもなる。
-      - **受入**: `schedules` に `deleted_flag` を追加（マイグレーション必要。v16 は G3-4 が使うので
+      - **受入**: `schedules` に `deleted_flag` を追加（マイグレーション必要。v17 は G3-4 が使うので
         **同じマイグレーションにまとめる**）。一覧・集計から除外し、`/schedule restore` で戻せる
       - **検証**: `tests/test_schedule_delete.py`（新規）
       - **注意**: 既存の CASCADE 削除に依存しているテストがあれば併せて直す
@@ -388,7 +389,7 @@
 - [ ] **G3-4** `/schedule confirm` — 確定日程の登録と当日リマインド。
       `finalize_schedule`（`cogs/schedule.py:704`）は集計サマリーを投稿して終わりで、
       **「結局いつに決まったのか」がどこにも残らない**。前日・当日のリマインドも無い。
-      - **受入**: スキーマ v16（`015_schedule_confirmed.sql`。G3-3 の `deleted_flag` と同じ版にまとめる）で
+      - **受入**: スキーマ v17（`016_schedule_confirmed.sql`。G3-3 の `deleted_flag` と同じ版にまとめる）で
         `schedules.confirmed_option_id TEXT NULL` を追加。`/schedule confirm schedule_id option_id`（L2）で
         確定を保存し対象ロールへ告知。`/schedule list` に確定日を表示。
         前日20時と当日朝に「本日 18:00 ◯◯（場所）」を通知
@@ -510,7 +511,7 @@
       `services/milestone_service.py:9-14` が自ら書いているとおり、履歴が無いため
       ペースが「作成日→最終更新日の平均」でしか出せず判定不能が多発する。
       「先週から何%進んだか」も分からない。
-      - **受入**: スキーマ v17（`016_progress_snapshots.sql`）で
+      - **受入**: スキーマ v18（`017_progress_snapshots.sql`）で
         `progress_snapshots(guild_id, node_id, snapshot_date, aggregated, actual_weight_g)`、
         UNIQUE `(guild_id, node_id, snapshot_date)`。
         `cogs/progress.py:776` の20分同期ループ末尾で、その日まだ書いていなければ1回だけ保存する。
@@ -526,7 +527,7 @@
       人力飛行機で最も痛いのは「プリプレグが無くて桁が巻けない」。
       カーボンプリプレグは納期が数週間で、切れてから気づくと工程が1ヶ月ずれる。
       発注判断は「残量が閾値を割った」という bot が自動で見張れる条件。
-      - **受入**: スキーマ v18（`017_stock.sql`）で `stock_items` / `stock_movements`。
+      - **受入**: スキーマ v19（`018_stock.sql`）で `stock_items` / `stock_movements`。
         `/stock list`（閾値割れを強調）/ `/stock add`（L2）/ `/stock use`（L1）/
         `/stock set-threshold`（L2）。閾値を割ったら即1回通知し、以降は朝の通知に含める
       - **検証**: `tests/test_stock.py`（新規）
@@ -542,7 +543,7 @@
 - [ ] **G4-10** `/incident` — ヒヤリハット・事故報告。
       工房での切削・溶剤・高所作業・機体運搬・テストフライトと危険度が高く、
       大学から安全管理体制の提示を求められることもある。今は雑談に流れて消える。
-      - **受入**: スキーマ v19（`018_incidents.sql`）。`/incident report`（L1）が Modal
+      - **受入**: スキーマ v20（`019_incidents.sql`）。`/incident report`（L1）が Modal
         （発生日時 / 場所 / 何が起きたか / けがの有無 / 再発防止案）を開き、幹部ロールへ通知する。
         `/incident list`（L3）。**匿名フラグ**を持ち、報告者IDは DB に保持するが表示しない
       - **検証**: `tests/test_incident.py`（新規）。匿名時に報告者名が Embed に出ないことを検査
