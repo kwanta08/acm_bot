@@ -241,13 +241,15 @@ CREATE TABLE IF NOT EXISTS todoist_sections (
     PRIMARY KEY (guild_id, section_id)
 );
 """,
+    # layer_num は TEXT。/layer start の層番号は数字のほか「シュリンク」等の
+    # テキストを受け付ける仕様（layer_records.layer_num と同じ）。
     "layer_sessions": f"""
 CREATE TABLE IF NOT EXISTS layer_sessions (
     session_id INTEGER PRIMARY KEY AUTOINCREMENT,
     {_GUILD_COL},
     user_id    TEXT NOT NULL,
     keta       TEXT NOT NULL,
-    layer_num  INTEGER NOT NULL,
+    layer_num  TEXT NOT NULL,
     started_at TEXT NOT NULL,
     UNIQUE (guild_id, user_id)
 );
@@ -581,7 +583,10 @@ POSTGRES_VIEW_DDL = "\n".join(
 #    （年度替わり。既存メンバーはすべて active。migrations/013）
 # 15: discord_name_cache を追加（ダッシュボードの ID → 表示名解決用。
 #    bot がギルドキャッシュから書き、Web 側が読む。migrations/014）
-SCHEMA_VERSION = 15
+# 16: layer_sessions.layer_num を INTEGER から TEXT へ変更（/layer start は
+#    「シュリンク」等のテキスト層番号を受け付ける仕様。PostgreSQL では
+#    asyncpg の DataError になっていた。migrations/015）
+SCHEMA_VERSION = 16
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
@@ -1012,6 +1017,9 @@ class Database:
         if version < 15:
             await self._migrate_v15_name_cache()
 
+        if version < 16:
+            await self._migrate_v16_layer_num_text()
+
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
 
@@ -1226,6 +1234,70 @@ class Database:
         ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
         await self._executescript(ddl_map["discord_name_cache"])
         log.info("discord_name_cache テーブルを作成しました（v15）。")
+
+    async def _migrate_v16_layer_num_text(self) -> None:
+        """
+        v16: layer_sessions.layer_num を INTEGER から TEXT へ変更する（冪等）。
+
+        /layer start の層番号は数字のほか「シュリンク」等のテキストを受け付ける
+        仕様（layer_records.layer_num は当初から TEXT）だが、layer_sessions 側
+        だけ INTEGER で作られていた。SQLite は動的型付けでテキストも保存できる
+        ため顕在化しなかったが、PostgreSQL では asyncpg の DataError
+        （'str' object cannot be interpreted as an integer）で /layer start が
+        失敗する。
+
+        - PostgreSQL: ALTER TABLE ... TYPE TEXT USING layer_num::text。
+          既存の数値は '3' のような文字列になる（表示にしか使わない列で、
+          数値として比較・集計する箇所は無い）
+        - SQLite: INTEGER 親和性が数字文字列を整数へ丸めるため、宣言型を
+          揃える目的でテーブル再作成方式により移行する（_migrate_v8 と同じ手順）
+        """
+        if self._is_pg:
+            row = await self.fetchone(
+                "SELECT data_type FROM information_schema.columns"
+                " WHERE table_name = 'layer_sessions' AND column_name = 'layer_num'"
+            )
+            if row is None or row["data_type"] == "text":
+                return
+            await self.execute(
+                "ALTER TABLE layer_sessions ALTER COLUMN layer_num TYPE TEXT"
+                " USING layer_num::text"
+            )
+            log.info("layer_sessions.layer_num を TEXT に変更しました（v16）。")
+            return
+
+        assert self._conn is not None
+        cur = await self._conn.execute("PRAGMA table_info(layer_sessions)")
+        rows = await cur.fetchall()
+        await cur.close()
+        if not rows:
+            return
+        declared = {row[1]: (row[2] or "").upper() for row in rows}
+        if declared.get("layer_num") == "TEXT":
+            return
+
+        cols = [row[1] for row in rows]
+        col_list = ", ".join(cols)
+        await self._conn.execute("PRAGMA foreign_keys = OFF;")
+        await self._conn.commit()
+        try:
+            await self._conn.execute("ALTER TABLE layer_sessions RENAME TO layer_sessions_legacy")
+            await self._conn.execute(TABLE_DDL["layer_sessions"])
+            await self._conn.execute(
+                f"INSERT INTO layer_sessions ({col_list})"
+                f" SELECT {col_list} FROM layer_sessions_legacy"
+            )
+            await self._conn.execute("DROP TABLE layer_sessions_legacy")
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            raise
+        finally:
+            await self._conn.execute("PRAGMA foreign_keys = ON;")
+        log.info(
+            "layer_sessions.layer_num を TEXT に変更しました（v16, %d 行）。",
+            await self._count("layer_sessions"),
+        )
 
     async def _migrate_v8_members_surrogate_pk(self) -> None:
         """
