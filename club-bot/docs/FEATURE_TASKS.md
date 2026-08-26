@@ -29,7 +29,7 @@
 
 ## スキーマバージョンの割り当て（衝突防止）
 
-現行は `SCHEMA_VERSION = 15`（`migrations/014_discord_name_cache.sql` まで）。
+現行は `SCHEMA_VERSION = 16`（`migrations/015_layer_session_layer_num_text.sql` まで）。
 
 | 版 | migration | フェーズ |
 |---|---|---|
@@ -38,6 +38,7 @@
 | v13 | `012_progress_milestones.sql` | F4（大会逆算） |
 | v14 | `013_seasons.sql` | F5（年度替わり） |
 | v15 | `014_discord_name_cache.sql` | F6（ダッシュボード改修） |
+| v16 | `015_layer_session_layer_num_text.sql` | 不具合修正（`/layer start` の PG DataError） |
 
 ---
 

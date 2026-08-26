@@ -542,6 +542,57 @@ def test_pg_live_dashboard_row_id_accepts_string():
     run(_main())
 
 
+def test_pg_live_layer_start_accepts_text_layer_num():
+    """/layer start の層番号にテキスト（「シュリンク」等）を渡せること。
+
+    回帰: layer_sessions.layer_num が INTEGER で作成されており、
+    /layer start layer_num:test が
+        DataError: invalid input for query argument $4: 'test'
+        ('str' object cannot be interpreted as an integer)
+    で失敗していた（スキーマ v16 で TEXT 化。SQLite は動的型付けのため
+    再現しない）。
+    """
+    dsn = _guarded_dsn()
+
+    async def _main():
+        from repositories.layer_session_repository import LayerSessionRepository
+
+        db = Database("./unused.db", database_url=dsn)
+        await db.connect()
+        try:
+            # v16 適用後は text になっている
+            col = await db.fetchone(
+                "SELECT data_type FROM information_schema.columns"
+                " WHERE table_name = 'layer_sessions' AND column_name = 'layer_num'"
+            )
+            assert col is not None and col["data_type"] == "text"
+
+            repo = LayerSessionRepository(db)
+            # ここが DataError になっていた（$4 = layer_num）
+            await repo.start(G1, "u1", "主桁1", "シュリンク", "2026-08-26 10:00:00")
+            row = await repo.get_by_user(G1, "u1")
+            assert row is not None and row["layer_num"] == "シュリンク"
+
+            # 数字入力も文字列のまま保持される
+            await repo.start(G1, "u2", "主桁1", "3", "2026-08-26 10:00:00")
+            assert (await repo.get_by_user(G1, "u2"))["layer_num"] == "3"
+
+            # /layer end 相当（完了記録への引き渡し）も通る
+            rid = await repo.add_record(
+                G1, "u1", "主桁1", "シュリンク",
+                "2026-08-26 10:00:00", "2026-08-26 11:00:00", 60,
+            )
+            assert rid
+            await repo.end(G1, "u1")
+            assert await repo.get_by_user(G1, "u1") is None
+        finally:
+            await db.execute("DELETE FROM layer_sessions WHERE guild_id = ?", (G1,))
+            await db.execute("DELETE FROM layer_records WHERE guild_id = ?", (G1,))
+            await db.close()
+
+    run(_main())
+
+
 if __name__ == "__main__":
     test_to_pg_ddl_autoincrement_and_guild_id()
     print("test_to_pg_ddl_autoincrement_and_guild_id: OK")
@@ -570,6 +621,8 @@ if __name__ == "__main__":
         print("test_pg_live_bigint_migration_sql: OK")
         test_pg_live_dashboard_row_id_accepts_string()
         print("test_pg_live_dashboard_row_id_accepts_string: OK")
+        test_pg_live_layer_start_accepts_text_layer_num()
+        print("test_pg_live_layer_start_accepts_text_layer_num: OK")
     else:
         print("ライブ PG テストは CLUB_TEST_PG_DSN 未設定のためスキップ")
     print("全テスト成功")

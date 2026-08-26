@@ -73,6 +73,18 @@ def error_embed(message: str, code: str | None = None) -> discord.Embed:
     return _base(title, message, COLOR_ERROR, None)
 
 
+def empty_state_embed(title: str, situation: str, next_command: str) -> discord.Embed:
+    """空状態の Embed。「〜はありません」で終わらせず、次の1コマンドを必ず添える。
+
+    初めて使う人にとって空の一覧は行き止まりに見える（G2-5）。
+    next_command は `/task add` のようなコマンド1つ。複数の選択肢を
+    並べたい場合は situation 側に書き、next_command には最初に打つ
+    1つだけを渡す。
+    """
+    description = f"{situation}\n`{next_command}` から始めてください。"
+    return _base(title, description, COLOR_INFO, None)
+
+
 def add_truncation_note(
     embed: discord.Embed, total: int, shown: int, hint: str | None = None
 ) -> discord.Embed:

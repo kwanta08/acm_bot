@@ -29,6 +29,7 @@ from utils import crypto
 from utils.embeds import error_embed, info_embed, success_embed
 from utils.logger import get_logger
 from utils.permissions import ensure_guild, is_admin
+from utils.views import TimeoutAwareView
 
 log = get_logger("todoist_admin")
 
@@ -105,7 +106,7 @@ class TodoistSetupModal(discord.ui.Modal, title="Todoist トークン登録"):
             pass
 
 
-class TodoistSetupView(discord.ui.View):
+class TodoistSetupView(TimeoutAwareView):
     """/todoist-setup の ephemeral メッセージに付けるボタン View。"""
 
     def __init__(self, cog: TodoistAdmin, guild_id: int, owner_id: int, existing: dict | None):
@@ -126,9 +127,6 @@ class TodoistSetupView(discord.ui.View):
             TodoistSetupModal(self.cog, self.guild_id, self.owner_id, self.existing)
         )
 
-    async def on_timeout(self) -> None:
-        for item in self.children:
-            item.disabled = True
 
 
 class TodoistAdmin(commands.Cog):
@@ -176,6 +174,10 @@ class TodoistAdmin(commands.Cog):
         await interaction.response.send_message(
             embed=info_embed("Todoist トークン登録", desc), view=view, ephemeral=True
         )
+        try:
+            view.message = await interaction.original_response()
+        except discord.HTTPException as e:
+            log.warning("Todoist 設定 View のメッセージ取得に失敗: %s", e)
 
     async def register_token(
         self,

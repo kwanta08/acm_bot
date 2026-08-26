@@ -29,10 +29,13 @@ from services.season_service import (
 from utils.embeds import error_embed, info_embed, success_embed
 from utils.logger import get_logger
 from utils.permissions import Level, ensure_guild, is_admin, require
+from utils.views import ConfirmView
 
 log = get_logger("season")
 
-_VIEW_TIMEOUT = 300.0
+# 卒業者の選択（最大25名）は5分では足りないことがあるため長めに取る。
+# タイムアウト時の画面反映は ConfirmView（TimeoutAwareView）が行う
+_VIEW_TIMEOUT = 900.0
 
 
 def snapshot_filename(guild_id: int) -> str:
@@ -56,16 +59,25 @@ def rollover_result_embed(result: RolloverResult, executor: str | None = None) -
     return success_embed("年度を切り替えました", "\n".join(lines), executor=executor)
 
 
-class RolloverView(discord.ui.View):
-    """卒業者を選んでから確定するウィザード。"""
+class RolloverView(ConfirmView):
+    """卒業者を選んでから確定するウィザード。
+
+    確認の作法（実行者チェック・確定 / やめる・二重実行の防止）は
+    `ConfirmView` に集約したので、ここは**卒業者を選ぶ UI** だけを足す。
+    """
 
     def __init__(self, cog: Season, guild_id: int, new_season_name: str, owner_id: int):
-        super().__init__(timeout=_VIEW_TIMEOUT)
         self._cog = cog
         self._guild_id = guild_id
         self._name = new_season_name
-        self._owner_id = owner_id
         self._selected: list[str] = []
+        super().__init__(
+            owner_id,
+            self._build_preview(),
+            self._run_rollover,
+            timeout=_VIEW_TIMEOUT,
+            cancel_message="年度は切り替えていません。",
+        )
 
         self.picker = discord.ui.UserSelect(
             placeholder="卒業する人を選ぶ（選ばなければ全員が継続）",
@@ -75,24 +87,17 @@ class RolloverView(discord.ui.View):
         self.picker.callback = self._on_pick
         self.add_item(self.picker)
 
-    async def _guard(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id != self._owner_id:
-            await interaction.response.send_message(
-                embed=error_embed("この操作は実行者のみ行えます。"), ephemeral=True
-            )
-            return False
-        return True
-
     async def _on_pick(self, interaction: discord.Interaction) -> None:
-        if not await self._guard(interaction):
+        if not await self._is_owner(interaction):
             return
         self._selected = [str(u.id) for u in self.picker.values]
+        self.preview_embed = self._build_preview()
         try:
-            await interaction.response.edit_message(embed=self._preview_embed(), view=self)
+            await interaction.response.edit_message(embed=self.preview_embed, view=self)
         except discord.HTTPException as e:
             log.warning("/season rollover の選択反映に失敗: %s", e)
 
-    def _preview_embed(self) -> discord.Embed:
+    def _build_preview(self) -> discord.Embed:
         body = (
             f"新しい年度: **{self._name}**\n"
             f"卒業として仕分ける人数: **{len(self._selected)} 名**\n\n"
@@ -101,29 +106,8 @@ class RolloverView(discord.ui.View):
         )
         return info_embed("年度替わりの確認", body)
 
-    @discord.ui.button(label="確定する", style=discord.ButtonStyle.danger)
-    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        if not await self._guard(interaction):
-            return
-        try:
-            await interaction.response.defer(ephemeral=True)
-        except discord.HTTPException as e:
-            log.warning("/season rollover の defer に失敗: %s", e)
-            return
+    async def _run_rollover(self, interaction: discord.Interaction) -> None:
         await self._cog.finish_rollover(interaction, self._guild_id, self._name, self._selected)
-        self.stop()
-
-    @discord.ui.button(label="やめる", style=discord.ButtonStyle.secondary)
-    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button) -> None:
-        if not await self._guard(interaction):
-            return
-        try:
-            await interaction.response.edit_message(
-                embed=info_embed("中止しました", "年度は切り替えていません。"), view=None
-            )
-        except discord.HTTPException as e:
-            log.warning("/season rollover の中止表示に失敗: %s", e)
-        self.stop()
 
 
 class Season(commands.Cog):
@@ -179,21 +163,54 @@ class Season(commands.Cog):
             )
             return
         repo = SeasonRepository(self.db)
-        try:
-            ended, _ = await repo.start_new(guild_id, name)
-        except ValueError:
+        if await repo.get_by_name(guild_id, name):
             await interaction.followup.send(
                 embed=error_embed(f"「{name}」はすでに登録されています。"), ephemeral=True
             )
             return
 
-        await self._audit(guild_id, interaction, "season.new", name, f"前年度: {ended or 'なし'}")
-        desc = f"新しい年度: **{name}**"
-        if ended:
-            desc = f"**{ended}** を終了しました。\n" + desc
-        await interaction.followup.send(
-            embed=success_embed("年度を開始しました", desc, executor=interaction.user.display_name),
-            ephemeral=True,
+        # 現年度を**即終了**するコマンドなので、何が終わるかを先に見せる
+        current = await repo.current(guild_id)
+        body = f"新しい年度: **{name}**\n"
+        if current:
+            body += f"終了する年度: **{current['name']}**\n"
+        else:
+            body += "終了する年度: なし（最初の年度）\n"
+        body += (
+            "\n卒業者の仕分けと班長リセットは行いません"
+            "（まとめて行う場合は `/season rollover`）。"
+        )
+
+        async def _do_start(confirm_interaction: discord.Interaction) -> None:
+            try:
+                ended, _ = await repo.start_new(guild_id, name)
+            except ValueError:
+                await confirm_interaction.followup.send(
+                    embed=error_embed(f"「{name}」はすでに登録されています。"), ephemeral=True
+                )
+                return
+
+            await self._audit(
+                guild_id, confirm_interaction, "season.new", name, f"前年度: {ended or 'なし'}"
+            )
+            desc = f"新しい年度: **{name}**"
+            if ended:
+                desc = f"**{ended}** を終了しました。\n" + desc
+            await confirm_interaction.followup.send(
+                embed=success_embed(
+                    "年度を開始しました", desc, executor=confirm_interaction.user.display_name
+                ),
+                ephemeral=True,
+            )
+
+        view = ConfirmView(
+            interaction.user.id,
+            info_embed("年度の開始を確認してください", body),
+            _do_start,
+            cancel_message="年度は変更していません。",
+        )
+        view.message = await interaction.followup.send(
+            embed=view.preview_embed, view=view, ephemeral=True
         )
 
     @group.command(
@@ -228,7 +245,7 @@ class Season(commands.Cog):
         )
         view = RolloverView(self, guild_id, name, interaction.user.id)
         try:
-            await interaction.followup.send(
+            view.message = await interaction.followup.send(
                 embed=info_embed("年度替わり", body), view=view, ephemeral=True
             )
         except discord.HTTPException as e:

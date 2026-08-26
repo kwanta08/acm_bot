@@ -25,6 +25,7 @@ from repositories.settings_repository import SettingsRepository
 from utils.embeds import error_embed, info_embed, success_embed
 from utils.logger import get_logger
 from utils.permissions import ensure_guild, is_admin
+from utils.views import TimeoutAwareView
 
 if TYPE_CHECKING:
     from utils.db import Database
@@ -265,7 +266,7 @@ class TeamBulkCreateModal(discord.ui.Modal, title="班の一括作成"):
             pass
 
 
-class SetupWizardView(discord.ui.View):
+class SetupWizardView(TimeoutAwareView):
     """/setup の ephemeral メッセージに付ける対話 View（5分で無効化）。"""
 
     def __init__(self, cog: SetupWizard, guild_id: int, owner_id: int):
@@ -358,9 +359,6 @@ class SetupWizardView(discord.ui.View):
         log.info("/setup で保存 (guild=%s): %s=%s", self.guild_id, self.selected_key, role.id)
         await self._refresh(interaction)
 
-    async def on_timeout(self) -> None:
-        for item in self.children:
-            item.disabled = True
 
 
 class SetupWizard(commands.Cog):
@@ -428,6 +426,7 @@ class SetupWizard(commands.Cog):
             embed = build_setup_embed(gconf)
             view = SetupWizardView(self, guild_id, interaction.user.id)
             await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            view.message = await interaction.original_response()
         except Exception:
             log.exception("/setup 表示エラー")
             embed = error_embed("セットアップ画面の表示に失敗しました")

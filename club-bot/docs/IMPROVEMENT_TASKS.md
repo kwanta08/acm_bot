@@ -36,14 +36,15 @@
 
 ## スキーマバージョンの割り当て（衝突防止）
 
-現行は `SCHEMA_VERSION = 15`（`migrations/014_discord_name_cache.sql` まで）。
+現行は `SCHEMA_VERSION = 16`（`migrations/015_layer_session_layer_num_text.sql` まで）。
 
 | 版 | migration | タスク |
 |---|---|---|
-| v16 | `015_schedule_confirmed.sql` | G3-4（確定日程） |
-| v17 | `016_progress_snapshots.sql` | G4-1（進捗履歴） |
-| v18 | `017_stock.sql` | G4-2（在庫・工具） |
-| v19 | `018_incidents.sql` | G4-4（ヒヤリハット） |
+| v16 | `015_layer_session_layer_num_text.sql` | 適用済み（`/layer start` の PG DataError 修正） |
+| v17 | `016_schedule_confirmed.sql` | G3-4（確定日程） |
+| v18 | `017_progress_snapshots.sql` | G4-7（進捗履歴） |
+| v19 | `018_stock.sql` | G4-8（在庫・工具） |
+| v20 | `019_incidents.sql` | G4-10（ヒヤリハット） |
 
 ---
 
@@ -269,7 +270,7 @@
 
 ## Phase G2: 事故を防ぐ / 迷わせない（全89コマンドに効く共通改善）
 
-- [ ] **G2-1** 破壊的操作に共通の確認ステップを入れる。
+- [x] **G2-1** 破壊的操作に共通の確認ステップを入れる。
       確認があるのは `/data delete`・`/season rollover`・`/team-remove` の3つだけ。
       無いもの: `cogs/progress.py:1001-1011`（`/progress remove` は**配下ごと**削除し、
       実行後に件数を報告するだけ）、`cogs/schedule.py:446-473`（`/schedule delete` は
@@ -283,7 +284,7 @@
       - **注意**: ADR 0018 / 0024 の「既存データを動かさない」軸に沿う。
         `/schedule delete` の論理削除化は破壊的なので **このタスクには含めない**（G3-3 で扱う）
 
-- [ ] **G2-2** ID を手で写させるのをやめる（オートコンプリート追加）。
+- [x] **G2-2** ID を手で写させるのをやめる（オートコンプリート追加）。
       `cogs/schedule.py:347,393,416,441,482` の5コマンドが素の `schedule_id: str`、
       `cogs/tasks.py:280,311,342,369` が素の `task_id: int`。
       一方 `cogs/progress.py:1482-1491` は10箇所に階層字下げ付きオートコンプリートを一括登録している。
@@ -292,7 +293,7 @@
         `/task done|delete|assign|priority` は `app_commands.Choice[int]` で未完了タスクを出す
       - **検証**: `tests/test_autocomplete.py`（新規）で、候補が25件以内・guild_id でスコープされることを検査
 
-- [ ] **G2-3** 通知の抜けを塞ぐ（3件まとめて1タスク）。
+- [x] **G2-3** 通知の抜けを塞ぐ（3件まとめて1タスク）。
       1. `cogs/schedule.py:670-678` — `target_role_id` が無いと `return 0` なのに、
          呼び出し側（`:430-438`）が緑の成功 Embed で「対象: 0 名」と表示する。
          さらに `cogs/reminders.py:157-164` は 0 名でも `mark_reminder_sent` を打つので、
@@ -310,7 +311,7 @@
       - (3) の DM→チャンネルのフォールバックは `cogs/schedule.py:689-701` に既存実装があるので
         `utils/` のヘルパに切り出して共用する
 
-- [ ] **G2-4** タイムアウトした View を画面に反映する。
+- [x] **G2-4** タイムアウトした View を画面に反映する。
       `cogs/progress.py:478-480` ほか5箇所の `on_timeout` は `item.disabled = True` するだけで
       `message.edit(view=self)` を呼んでいない。`cogs/season.py` の `RolloverView` には
       `on_timeout` すら無い。`/season rollover` は選択途中で5分経つと確定ボタンが無反応になる。
@@ -319,7 +320,7 @@
         `RolloverView` の timeout を 300 → 900 に延ばす
       - **検証**: `tests/test_views_timeout.py`（新規）で `on_timeout` が `message.edit` を呼ぶことを検査
 
-- [ ] **G2-5** 空状態に「次の1コマンド」を必ず添える。
+- [x] **G2-5** 空状態に「次の1コマンド」を必ず添える。
       良い例（`cogs/progress.py:75-78` / `cogs/teams.py:165-169` / `cogs/season.py:147-155`）と
       悪い例（`cogs/tasks.py:794` / `cogs/schedule.py:331` / `cogs/layer_tracking.py:101` /
       `cogs/reports.py:180,202`）が混在している。
@@ -330,7 +331,7 @@
         「まだデータがありません。`/task add` `/schedule create` から始めてください」に切り替える
       - **検証**: `tests/test_empty_states.py`（新規）で、各コマンドの空状態にコマンド名が含まれることを検査
 
-- [ ] **G2-6** `/progress edit` の進捗率を検証する。
+- [x] **G2-6** `/progress edit` の進捗率を検証する。
       `services/progress_tree.py:82-107` の `parse_progress` は解釈不能なら `None` を返し、
       `cogs/progress.py:977-979` がそれをそのまま `manual_progress` に代入する。
       `/progress edit node:主桁 progress:半分` で**既存の進捗率が消え**、緑の成功 Embed が出る。
@@ -340,7 +341,7 @@
         G0-2 で取り込む `8b9c0f4` がダッシュボード側に同じ検証を入れているので、
         **解釈規則をそちらと揃える**
 
-- [ ] **G2-7** Todoist の同期失敗を利用者に見せる。
+- [x] **G2-7** Todoist の同期失敗を利用者に見せる。
       `cogs/tasks.py:293-299` / `:324-330` / `:572-573` が `except TodoistError: pass` で、
       `log.warning` すら出していない。`/task done` は必ず「完了にしました」と返るのに
       Todoist 側は未完了のまま残り、翌朝の通知に出続ける。
@@ -380,7 +381,7 @@
 - [ ] **G3-3** `/schedule delete` を論理削除にする。
       現状は投票メッセージを削除してから DB を CASCADE 削除しており、票データが完全消失する。
       `/team-remove` `/skill-remove` `/layer keta-remove` は既に論理削除方式なので方針統一にもなる。
-      - **受入**: `schedules` に `deleted_flag` を追加（マイグレーション必要。v16 は G3-4 が使うので
+      - **受入**: `schedules` に `deleted_flag` を追加（マイグレーション必要。v17 は G3-4 が使うので
         **同じマイグレーションにまとめる**）。一覧・集計から除外し、`/schedule restore` で戻せる
       - **検証**: `tests/test_schedule_delete.py`（新規）
       - **注意**: 既存の CASCADE 削除に依存しているテストがあれば併せて直す
@@ -388,7 +389,7 @@
 - [ ] **G3-4** `/schedule confirm` — 確定日程の登録と当日リマインド。
       `finalize_schedule`（`cogs/schedule.py:704`）は集計サマリーを投稿して終わりで、
       **「結局いつに決まったのか」がどこにも残らない**。前日・当日のリマインドも無い。
-      - **受入**: スキーマ v16（`015_schedule_confirmed.sql`。G3-3 の `deleted_flag` と同じ版にまとめる）で
+      - **受入**: スキーマ v17（`016_schedule_confirmed.sql`。G3-3 の `deleted_flag` と同じ版にまとめる）で
         `schedules.confirmed_option_id TEXT NULL` を追加。`/schedule confirm schedule_id option_id`（L2）で
         確定を保存し対象ロールへ告知。`/schedule list` に確定日を表示。
         前日20時と当日朝に「本日 18:00 ◯◯（場所）」を通知
@@ -510,7 +511,7 @@
       `services/milestone_service.py:9-14` が自ら書いているとおり、履歴が無いため
       ペースが「作成日→最終更新日の平均」でしか出せず判定不能が多発する。
       「先週から何%進んだか」も分からない。
-      - **受入**: スキーマ v17（`016_progress_snapshots.sql`）で
+      - **受入**: スキーマ v18（`017_progress_snapshots.sql`）で
         `progress_snapshots(guild_id, node_id, snapshot_date, aggregated, actual_weight_g)`、
         UNIQUE `(guild_id, node_id, snapshot_date)`。
         `cogs/progress.py:776` の20分同期ループ末尾で、その日まだ書いていなければ1回だけ保存する。
@@ -526,7 +527,7 @@
       人力飛行機で最も痛いのは「プリプレグが無くて桁が巻けない」。
       カーボンプリプレグは納期が数週間で、切れてから気づくと工程が1ヶ月ずれる。
       発注判断は「残量が閾値を割った」という bot が自動で見張れる条件。
-      - **受入**: スキーマ v18（`017_stock.sql`）で `stock_items` / `stock_movements`。
+      - **受入**: スキーマ v19（`018_stock.sql`）で `stock_items` / `stock_movements`。
         `/stock list`（閾値割れを強調）/ `/stock add`（L2）/ `/stock use`（L1）/
         `/stock set-threshold`（L2）。閾値を割ったら即1回通知し、以降は朝の通知に含める
       - **検証**: `tests/test_stock.py`（新規）
@@ -542,7 +543,7 @@
 - [ ] **G4-10** `/incident` — ヒヤリハット・事故報告。
       工房での切削・溶剤・高所作業・機体運搬・テストフライトと危険度が高く、
       大学から安全管理体制の提示を求められることもある。今は雑談に流れて消える。
-      - **受入**: スキーマ v19（`018_incidents.sql`）。`/incident report`（L1）が Modal
+      - **受入**: スキーマ v20（`019_incidents.sql`）。`/incident report`（L1）が Modal
         （発生日時 / 場所 / 何が起きたか / けがの有無 / 再発防止案）を開き、幹部ロールへ通知する。
         `/incident list`（L3）。**匿名フラグ**を持ち、報告者IDは DB に保持するが表示しない
       - **検証**: `tests/test_incident.py`（新規）。匿名時に報告者名が Embed に出ないことを検査
@@ -1045,3 +1046,373 @@ DDL 側にしか無い。今回は「編集できる int 列は int4」をテス
 **B. 同じ「大きさ」の穴は text 列にもある（未調査）。**
 `title` などの TEXT 列に長さ上限が無い。PostgreSQL の TEXT に上限は無いので
 500 にはならないが、Discord の埋め込み文字数制限に当たる可能性はある。別件。
+
+---
+
+### 2026-08-22 — G2-1: 破壊的操作に共通の確認ステップ（ブランチ `fix/g2-1`）
+
+確認があったのは `/data delete`・`/season rollover`・`/team-remove` の3つだけで、
+同じくらい取り返しのつかない操作が確認なしで走っていた。
+`utils/views.py` に `ConfirmView` を新設し、確認の作法を1箇所へ集約した。
+
+#### 確認を付けたコマンド
+
+| コマンド | 何が消えるか | 確認前に見せるもの |
+|---|---|---|
+| `/progress remove` | ノードと**配下すべて**（進捗・重量・マイルストーン） | 配下の件数と合計件数 |
+| `/schedule delete` | 投票メッセージ＋票データ（CASCADE） | イベント名・候補数・回答した人数 |
+| `/season new` | 現年度が**即終了** | 終了する年度名 |
+
+`/season rollover` の `RolloverView` は `ConfirmView` のサブクラスへ切り出した
+（卒業者を選ぶ `UserSelect` はそのまま。確認の作法だけを親へ移した）。
+
+#### ConfirmView に入れた性質
+
+- **実行者チェックを既定動作にした。** View のボタンは interaction を受け取れば
+  誰でも押せうるので、所有者の一致を `_is_owner()` で毎回見る。
+  「呼び出し側が毎回きちんと書く」に依存しない形にした（ADR 0008 / 0016 の
+  「規律ではなく構造で守る」軸）
+- **連打で二重に走らせない。** 削除が2回走ると報告する件数も嘘になるため、
+  `confirmed` を立ててから処理へ入り、ボタンは即座に無効化する
+- **コールバックが例外を投げても `stop()` する**（押しっぱなしにしない）
+
+#### 設計判断
+
+**A. 削除の「方式」は変えていない。**
+`/schedule delete` の論理削除化はタスク本文どおり **G3-3 へ回した**。
+ADR 0018 / 0024 の「既存データを動かさない」軸に沿い、
+このタスクで足したのは**確認ステップだけ**。DB スキーマは無変更でマイグレーション不要。
+
+**B. `count_subtree()` は `delete_subtree()` と辿り方を共有する。**
+プレビューの件数と実際に消える件数がずれると、確認の意味がなくなる。
+共通の `_subtree_ids()` を切り出して両者が同じ結果を返すようにし、
+`test_count_subtree_matches_what_delete_subtree_removes` で固定した。
+ついでに `delete_subtree()` は**存在しないノードなら空**を返すようになった
+（従来は未知の ID でもその ID 自体を削除対象に数えていたが、
+`delete_node()` が 0 件を返すので実害は無かった）。
+
+**C. `on_timeout` は入れていない（G2-4 の範囲）。**
+`ConfirmView` は放置されるとボタンが生きたまま無反応になる。これは
+G2-4「`on_timeout` がメッセージを編集していない6箇所」と同じ論点なので、
+ADR 0014（1タスク＝1ブランチ）に従い混ぜなかった。
+**G2-4 は対象が6箇所から変わる**: `RolloverView` は `ConfirmView` に吸収されたので、
+`ConfirmView` 1箇所を直せば `/progress remove`・`/schedule delete`・
+`/season new`・`/season rollover` の4つが同時に片付く。
+
+#### 検証
+
+- `ruff check .`: パス
+- `pytest tests/ -q -rs`: **781 passed, 9 skipped**
+  （skip は PG ライブテスト9件。`CLUB_TEST_PG_DSN` 未設定のため）
+- 実装を戻すとテストが落ちること:
+
+| 戻した実装 | 落ちたテスト |
+|---|---|
+| 3コマンドの確認ステップと `count_subtree()` | 13 |
+| `ConfirmView` の所有者チェックのみ | 5 |
+
+#### 申し送り
+
+**A. 確認の無い破壊的操作はまだ残っている可能性がある。**
+今回はタスクが名指しした3つを塞いだ。`/milestone remove`・`/layer` 系・
+`/task delete` などは未調査。`ConfirmView` ができたので、追加は数行で済む。
+
+**B. gotcha `progress-subtree-disappears` とは別件。**
+あちらは親の付け替えで循環を作るとツリーから部分木が落ちる話で、
+`/progress remove` の確認欠如とは原因が違う。今回の変更では解消しない。
+
+---
+
+### 2026-08-22 — G2-2: schedule_id / task_id のオートコンプリート（ブランチ `fix/g2-2`）
+
+5コマンドが素の `schedule_id: str`、4コマンドが素の `task_id: int` で、
+利用者は一覧の出力から ID を手で写していた。`cogs/progress.py` の一括登録の
+作法（クラス定義後に `Class.command.autocomplete("param")(Class._method)`）を
+そのまま踏襲した。
+
+#### 追加した候補
+
+| コマンド | 候補 | 表示名 |
+|---|---|---|
+| `/schedule close` / `remind` / `edit-deadline` | **開催中のみ** | `イベント名（〜MM/DD HH:MM）` |
+| `/schedule status` / `delete` | 締切済みも含む | 締切済みは `[終了]` を前置 |
+| `/task done` / `delete` / `assign` / `priority` | 未完了のみ（`Choice[int]`） | `#ID タイトル` |
+
+締切済みに close は意味がなく remind は嘘の通知になるため、開催中のみに絞る。
+絞り込みは名前・ID の部分一致。候補は25件以内・表示名は100文字以内
+（Discord の制約）。guild_id でスコープし、DM（guild None）では空を返す。
+
+#### 設計判断
+
+- 純粋関数 `schedule_choices()` / `task_choices()` に切り出し、DB 行 → 候補の
+  変換を Discord なしでテストできるようにした（`node_choices()` と同型）
+- 補完コールバックは例外を握りつぶして空を返す（補完の失敗で入力を妨げない。
+  `_node_autocomplete` と同じ判断）
+- 登録先コマンドの検査は `command.get_parameter("schedule_id").autocomplete` の
+  有無で行う（gotcha `test-asserts-permission-but-decorator-missing` と同じ
+  「実装ではなく登録を見る」形）
+
+#### 検証
+
+- `ruff check .`: パス
+- `pytest tests/ -q -rs`: **799 passed, 9 skipped**（skip は PG ライブ9件）
+- 実装を戻す（2ファイルを checkout）と `tests/test_autocomplete.py` が
+  collection error で赤になることを確認
+
+#### 申し送り
+
+- `/schedule remind` の嘘成功（対象0名でも緑）は **G2-3 の範囲**。
+  ここでは候補に出す・出さないだけを直した
+- 候補が25件を超えるサーバーでは古い投票が候補から落ちる。
+  絞り込み入力で到達できるので実害は小さいが、`/schedule status` を
+  日付降順で出しているのはそのため（新しいものが先に出る）
+
+---
+
+### 2026-08-22 — G2-3: 通知の抜け3件（ブランチ `fix/g2-3`）
+
+#### 塞いだ抜け
+
+**1. `/schedule remind` の嘘成功と、定期リマインドの永久沈黙。**
+`notify_unanswered()` は「対象ロール未設定」と「未回答0名」をどちらも 0 で
+返していたため、呼び出し側は緑の成功 Embed で「対象: 0 名」と表示し、
+定期リマインドは送っていないのに `mark_reminder_sent` を打っていた
+（後からロールを付けても永久に再送されない）。
+戻り値を `int | None` に分離: **None = 対象を特定できない**（ロール未設定・
+ロール削除済み・ギルド不可視）、0 = 特定できて0名。
+- `/schedule remind`: None ならエラー Embed（target_role の指定方法を案内）
+- 定期リマインド: None なら `reminders_log` に **skipped** を記録し、
+  送信済みフラグは立てない（ロールを付けた次の tick で送られる）
+
+**2. 作成時のロールメンション。**
+対象ロールを指定しても投票メッセージに誰のメンションも無く、対象者は
+投票の開始に気付けなかった。**先頭の1通だけ**に
+`content=f"{target_role.mention} 日程調整「{title}」の投票が始まりました。"`
+を付ける。候補の数だけメンションを鳴らさない（受入基準の `content=...` は
+満たしつつ、5候補で5回鳴る形は避けた）。
+
+**3. タスク担当者への通知。**
+作成時に担当者を指定しても本人に何も届かなかった。DM →
+`discord.Forbidden` なら班チャンネル（`teams.channel_id`）→ 無ければ
+既定タスクチャンネル、の順でフォールバックする。
+**`/task assign` にも同じ通知を入れた**（タスク本文が名指しするのは
+作成フローだが、担当者が決まる入口は assign も同じで、抜けの原因も同じ。
+ヘルパ共用で数行の差分。スコープ判断として完了ログに残す）。
+
+#### 切り出したもの
+
+`utils/notify.py` の `dm_each_with_channel_fallback()`。
+未回答リマインドにあった「DM を1人ずつ試し、拒否された人はチャンネルで
+**1通にまとめて**メンションする」実装を切り出し、`notify_unanswered()` と
+タスク割り当て通知の両方が使う。戻り値 `NotifyOutcome`（dm_sent /
+fell_back / failed）で「誰に届かなかったか」を呼び出し側が判断できる。
+
+#### 留めたこと（スコープ判断）
+
+- **未回答判定の台帳ベース化（ADR 0025 の覆す条件）は G3-2 へ。**
+  ここではエラー表示と skipped 記録まで。Bot トークンを Web 層に
+  置かない方針（ADR 0015）はそのまま
+- skipped はウィンドウ内の tick ごとに1行記録される（送信済みフラグを
+  立てない設計の帰結）。ログ量は締切前1時間 × tick 間隔だけなので許容した
+
+#### 検証
+
+- `ruff check .`: パス
+- `pytest tests/ -q -rs`: **815 passed, 9 skipped**（skip は PG ライブ9件）
+- 実装を戻す（cogs 3ファイルを checkout、utils/notify.py は残す）と
+  `test_schedule_notify.py` / `test_tasks_notify.py` の **8件が赤**
+
+#### 申し送り
+
+- `/schedule remind` の成功 Embed の「対象: N 名」は**通知を試みた人数**で、
+  実際に届いた人数ではない（DM 全滅でもチャンネルにまとめて出れば届いている）。
+  届いた/届かないの内訳表示は `NotifyOutcome` が持っているので、
+  出したくなったら数行で足せる
+- 週次の遅延通知など他のリマインダー種別は「送れなかった」を
+  どう扱っているか未調査（同じ嘘成功があるかもしれない）
+
+---
+
+### 2026-08-22 — G2-4: タイムアウトした View を画面に反映（ブランチ `fix/g2-4`）
+
+6箇所の `on_timeout` は `item.disabled = True` するだけで `message.edit` を
+呼んでいなかった。discord.py の View はサーバー側を編集しない限り表示が
+変わらないため、利用者には「ボタンはあるのに無反応」に見えていた。
+
+`utils/views.py` に **`TimeoutAwareView`** を新設し、タイムアウト時に
+「時間切れです。もう一度コマンドを実行してください。」の Embed へ
+差し替える（`view=None` で押せないボタンを画面に残さない）。
+
+#### 適用箇所
+
+| View | コマンド | 送信側の message 捕捉 |
+|---|---|---|
+| `ConfirmView`（G2-1 で新設） | `/progress remove`・`/schedule delete`・`/season new`・`/season rollover` | `followup.send` の戻り値 |
+| `ProgressView` | `/progress view` | 同上 |
+| `ProjectSetupWizard` | `/progress setup` | 同上 |
+| `SectionSelectView` | `/task add` | 同上 |
+| `SetupWizardView` | `/setup` | `original_response()` |
+| `TodoistSetupView` | `/todoist setup` | `original_response()` |
+
+タスク本文の「6箇所」に対し、`RolloverView` は G2-1 で `ConfirmView` に
+吸収済みのため、**基底クラス1つ＋既存5 View の継承変更**で全てが片付いた
+（G2-1 完了ログの申し送りどおり）。
+
+`RolloverView` の timeout は受入基準どおり **300 → 900 秒**
+（卒業者を最大25名選ぶ操作は5分では足りない）。
+
+#### 設計判断
+
+- `on_timeout` の上書きを許さず、文言は `timeout_title` / `timeout_message` の
+  上書きで変える。**「disabled にするだけ」の再発をテストで検出する**
+  （`cls.on_timeout is TimeoutAwareView.on_timeout` を全対象クラスで検査）
+- `message` を覚えさせ損ねた View は従来と同じ挙動に落ちるだけで例外にしない。
+  編集失敗（メッセージ削除済み等）も握りつぶす — タイムアウト処理で
+  例外を出しても誰も見ていない
+- `response.send_message` は戻り値が無いので `original_response()` で取り直す
+  （`/setup`・`/todoist setup` の2箇所）
+
+#### 検証
+
+- `ruff check .`: パス
+- `pytest tests/ -q -rs`: **824 passed, 9 skipped**（skip は PG ライブ9件）
+- 実装を戻す（7ファイル checkout）と `tests/test_views_timeout.py` が赤
+  （collection error: TimeoutAwareView が存在しない）
+
+#### 申し送り
+
+- `HelpView`（`cogs/help.py`）は対象に含めなかった。閲覧専用でタイムアウト
+  しても実害が無く、タスク本文の6箇所にも入っていない。統一したくなったら
+  継承を1行変えるだけ
+- G2-1 の ConfirmView 申し送り（「放置でボタンが生きたまま無反応」）は
+  これで解消
+
+---
+
+### 2026-08-22 — G2-5: 空状態に「次の1コマンド」（ブランチ `fix/g2-5`）
+
+`utils/embeds.py` に `empty_state_embed(title, situation, next_command)` を追加し、
+「〜はありません。」で行き止まりだった空状態に次のコマンドを添えた。
+
+| 箇所 | 従来 | 次の1コマンド |
+|---|---|---|
+| `/task list`（Todoist 一覧含む） | 該当するタスクはありません。 | `/task add` |
+| `/schedule list` | 現在、開催中の投票はありません。 | `/schedule create` |
+| `/layer keta-list` | 登録済みの桁名はありません。 | `/layer keta-add` |
+| `/report audit` | ログがありません。 | `/schedule create`（通知が発生する運用の起点） |
+| `/report attendance-rate` | 集計対象の投票がありません。 | `/schedule create` |
+| `/report weekly` | 未完了 0 / 超過 0 / 投票 0 | 下記 |
+
+`/report weekly` はタスク・超過・投票がすべて0件のとき、0/0/0 のサマリーを
+出す代わりに「まだデータがありません。`/task add` でタスクを、
+`/schedule create` で日程調整を作成できます。」へ切り替えた
+（**健全な運用と未開始を見分けられない**問題への対処）。
+1件でもデータがあれば従来どおり集計を出す（テストで固定）。
+
+#### 設計判断
+
+- `next_command` は**1つだけ**受け取る。複数の選択肢は situation 側の文に
+  書く（`/report weekly` がその形）。「次はこれ」を1つに絞るのが趣旨で、
+  選択肢を並べ直すと元の迷いが戻る
+- タスク本文の「悪い例」の行番号は現行コードとずれていたため、
+  該当コマンドの空状態表示を実体として特定して直した
+  （`tasks.py:794` は実際には `/task push` の行で空状態ではない。
+  タスク一覧の空状態 `_build_task_list_embed` / `_build_todoist_task_list_embed` を対象にした）
+
+#### 検証
+
+- `ruff check .`: パス
+- `pytest tests/ -q -rs`: **833 passed, 9 skipped**（skip は PG ライブ9件）
+- 実装を戻す（5ファイル checkout）と `tests/test_empty_states.py` が赤
+
+#### 申し送り
+
+- `/schedule list-closed`（締切済み一覧）の空状態は触っていない。
+  「まだ締め切られた投票が無い」は初心者の行き止まりではないため対象外とした
+- 空状態が残っている可能性のある他コマンドは未調査（`/member list` 等）。
+  `empty_state_embed` ができたので追加は1行
+
+---
+
+### 2026-08-22 — G2-6: `/progress edit` の進捗率検証（ブランチ `fix/g2-6`）
+
+`parse_progress` は解釈不能なら None を返し（移行スクリプト用の仕様。
+**変えていない**）、コマンド側がそれをそのまま `manual_progress` へ代入して
+いた。`/progress edit node:主桁 progress:半分` で**既存の進捗率が消え**、
+緑の成功 Embed が出る。
+
+`Progress._parse_progress_input()` を挟み、(成立したか, 値) に分けて
+コマンド側で弾く。エラーは
+「進捗率「{入力}」を解釈できません。`0.5` `50%` `50` の形式で指定してください。」
+
+#### 解釈規則（ダッシュボード側と揃えた）
+
+G0-2 で取り込んだ `8b9c0f4` がダッシュボード側
+（`repositories/table_repository.py` の progress 列検証）に入れた規則と同一:
+
+| 入力 | 結果 |
+|---|---|
+| `0.5` / `50%` / `50` / `１００％` | 受理（1 より大きい数値は % とみなす） |
+| 空・空白のみ | クリア（None を保存） |
+| `半分` など解釈不能 | エラー（既存値は変更しない） |
+
+#### スコープ判断
+
+**`/progress add` にも同じ検証を入れた。** タスク本文は edit を名指しするが、
+add も同じ `parse_progress(progress)` 素通しで「progress:半分 が黙って
+未入力になり緑が出る」形（既存値が無いぶん実害が軽いだけで、原因は同一行）。
+edit だけ直すと2つの入口で挙動が食い違う。
+
+#### 検証
+
+- `ruff check .`: パス
+- `pytest tests/ -q -rs`: **836 passed, 9 skipped**（skip は PG ライブ9件）
+- 実装を戻す（progress.py を checkout）と新テスト2件が赤
+  （既存値の保持・add のエラー化）
+
+#### 申し送り
+
+- エラー文言はダッシュボード側（「には 0.5 または 50% の形式で入力して
+  ください。」）と**基調は同じだが完全一致ではない**（コマンド側は入力値の
+  エコーと `50` の例示がある）。文言まで一本化したくなったら
+  `_invalid_progress_embed` とテーブル側 `InvalidValueError` を共通化する
+- gotcha `progress-stops-after-dashboard-edit` とは別件（あちらは同期停止）
+
+---
+
+### 2026-08-22 — G2-7: Todoist の同期失敗を利用者に見せる（ブランチ `fix/g2-7`）
+
+`/task done`・`/task delete` は Todoist 側の操作が `except TodoistError: pass`
+で握りつぶされ、`log.warning` すら出ていなかった。`/task done` は必ず
+「完了にしました」と返るのに Todoist 側は未完了のまま残り、翌朝の通知に
+出続ける（gotcha `todoist-completed-tasks-not-detected` の同期の片方向性と関連）。
+
+#### 変更
+
+- **ローカルの完了・削除は従来どおり維持**（受入基準どおり。Todoist が
+  落ちていても Discord 側の運用は止めない）
+- 成功 Embed に同期結果を明記:
+  「⚠️ Todoist 側の完了に失敗しました。Todoist 上で直接完了にしてください。」
+  （delete は「直接削除してください」）
+- `log.warning` に guild_id・task_id・todoist_task_id を出す
+- 3つ目の握りつぶし（`/task section-link` のセクション名解決）にも
+  `log.warning` を追加（名前解決だけの失敗なので紐付けは続行。
+  利用者向けの文言は変えない）
+
+#### 検証
+
+- `ruff check .`: パス
+- `pytest tests/ -q -rs`: **839 passed, 9 skipped**（skip は PG ライブ9件）
+- `tests/test_todoist_guild_scope.py` に3ケース追加（受入基準の指定どおり）。
+  実装を戻すと2件が赤（成功側の「⚠️ が出ない」は戻しても緑＝回帰検出は
+  失敗側の2件が担う）
+- テスト前提の訂正: `/task delete` は物理削除ではなく **archived への論理削除**
+  だったため、テストの検証を `status == "archived"` に合わせた
+
+#### 申し送り
+
+- gotcha `todoist-completed-tasks-not-detected` は**未解消**（あちらは
+  Todoist→bot 方向の同期の話。今回は bot→Todoist 方向の失敗可視化）
+- `/task add` 系の TodoistError は元からエラー表示があり触っていない。
+  定期同期（`cogs/progress.py` の periodic_sync）の失敗は #bot-log へ
+  通知される既存実装がある

@@ -71,6 +71,7 @@ from utils.permissions import (
     require,
     require_manage_guild_or,
 )
+from utils.views import ConfirmView, TimeoutAwareView
 
 if TYPE_CHECKING:
     from utils.db import Database
@@ -97,6 +98,14 @@ def _todoist_task_url(task_id: str) -> str:
 def new_node_id() -> str:
     """手入力ノードの ID を採番する（ギルド内で衝突しない十分な長さ）。"""
     return f"{MANUAL_ID_PREFIX}{uuid.uuid4().hex[:10]}"
+
+
+def _invalid_progress_embed(raw: str | None) -> discord.Embed:
+    """進捗率が解釈できなかったときのエラー（ダッシュボード側と同じ文言基調）。"""
+    return error_embed(
+        f"進捗率「{raw}」を解釈できません。"
+        "`0.5` `50%` `50` の形式で指定してください。"
+    )
 
 
 # ---------------------------------------------------------------------
@@ -389,7 +398,7 @@ def due_items(tasks: list, until, category: str) -> list[dict]:
 # ---------------------------------------------------------------------
 # ドリルダウン View
 # ---------------------------------------------------------------------
-class ProgressView(discord.ui.View):
+class ProgressView(TimeoutAwareView):
     """階層ドリルダウン用の View。
 
     「選択ノードの子を取得して表示」を再帰的に繰り返すだけの実装で、
@@ -487,15 +496,12 @@ class ProgressView(discord.ui.View):
         else:
             await interaction.response.edit_message(embed=embed, attachments=[], view=self)
 
-    async def on_timeout(self) -> None:
-        for item in self.children:
-            item.disabled = True
 
 
 # ---------------------------------------------------------------------
 # /progress setup ウィザード View
 # ---------------------------------------------------------------------
-class ProjectSetupWizard(discord.ui.View):
+class ProjectSetupWizard(TimeoutAwareView):
     """Todoist プロジェクトを進捗ツリーへ紐付けるセルフサービスウィザード。
 
     ステップ: ①プロジェクト選択 → ②紐付け先ノード選択
@@ -705,9 +711,6 @@ class ProjectSetupWizard(discord.ui.View):
         )
         self.stop()
 
-    async def on_timeout(self) -> None:
-        for item in self.children:
-            item.disabled = True
 
 
 # ---------------------------------------------------------------------
@@ -743,6 +746,23 @@ class Progress(commands.Cog):
     async def _run_sync(self, guild_id: int):
         svc = await self.bot.todoist_manager.for_guild(guild_id)
         return await progress_sync_service.sync_guild_db(self.db, guild_id, svc)
+
+    @staticmethod
+    def _parse_progress_input(progress: str | None) -> tuple[bool, float | None]:
+        """コマンド引数の進捗率を検証つきで解釈する。
+
+        `parse_progress` の「解釈不能は None」仕様は移行スクリプト用なので
+        変えず、コマンド側で (成立したか, 値) に分けて弾く（G2-6）。
+        解釈規則はダッシュボード側（repositories/table_repository.py の
+        progress 列検証）と同じ: 0.5 / 50% / 50 を受け、空はクリア（None）、
+        解釈不能はエラー。
+        """
+        if progress is None or not progress.strip():
+            return True, None
+        parsed = pt.parse_progress(progress)
+        if parsed is None:
+            return False, None
+        return True, parsed
 
     async def _resolve_node(
         self, interaction: discord.Interaction, guild_id: int, node_id: str
@@ -915,6 +935,12 @@ class Progress(commands.Cog):
             return
         if parent and not await self._resolve_node(interaction, guild_id, parent):
             return
+        ok, progress_value = self._parse_progress_input(progress)
+        if not ok:
+            await interaction.followup.send(
+                embed=_invalid_progress_embed(progress), ephemeral=True
+            )
+            return
 
         node_id = new_node_id()
         siblings = await self.repo.list_children(guild_id, parent or None)
@@ -926,7 +952,7 @@ class Progress(commands.Cog):
             name=name,
             assignee=assignee,
             status=status,
-            manual_progress=pt.parse_progress(progress),
+            manual_progress=progress_value,
             now_text=progress_sync_service._now_text(),
         )
 
@@ -1000,7 +1026,15 @@ class Progress(commands.Cog):
         if status is not None:
             fields["status"] = status
         if progress is not None:
-            fields["manual_progress"] = pt.parse_progress(progress)
+            ok, progress_value = self._parse_progress_input(progress)
+            if not ok:
+                # 従来は None が manual_progress へそのまま入り、
+                # 既存の進捗率が消えたうえで緑の成功 Embed が出ていた
+                await interaction.followup.send(
+                    embed=_invalid_progress_embed(progress), ephemeral=True
+                )
+                return
+            fields["manual_progress"] = progress_value
             fields["source"] = pt.SOURCE_MANUAL  # 手入力に戻す
         if parent is not None:
             fields["parent_id"] = parent
@@ -1033,14 +1067,36 @@ class Progress(commands.Cog):
             return
         if not await self._resolve_node(interaction, guild_id, node):
             return
-        deleted = await self.repo.delete_subtree(guild_id, node)
-        await interaction.followup.send(
-            embed=success_embed(
-                "進捗ノードを削除しました",
-                f"`{node}` とその配下 合計 **{deleted}** 件を削除しました。",
-                executor=interaction.user.display_name,
-            ),
-            ephemeral=True,
+
+        # 消える件数を**消す前に**見せる。配下ごと消えることは説明文にしか
+        # 書かれておらず、実行後に件数を報告するだけでは手遅れだった
+        total = await self.repo.count_subtree(guild_id, node)
+        descendants = max(total - 1, 0)
+        body = (
+            f"`{node}` を削除します。\n"
+            f"配下のノード: **{descendants}** 件（自身を含めて合計 **{total}** 件）\n\n"
+            "削除したノードの進捗・重量・マイルストーンは戻せません。"
+        )
+
+        async def _do_remove(confirm_interaction: discord.Interaction) -> None:
+            deleted = await self.repo.delete_subtree(guild_id, node)
+            await confirm_interaction.followup.send(
+                embed=success_embed(
+                    "進捗ノードを削除しました",
+                    f"`{node}` とその配下 合計 **{deleted}** 件を削除しました。",
+                    executor=confirm_interaction.user.display_name,
+                ),
+                ephemeral=True,
+            )
+
+        view = ConfirmView(
+            interaction.user.id,
+            info_embed("進捗ノードの削除を確認してください", body),
+            _do_remove,
+            cancel_message="進捗ノードは削除していません。",
+        )
+        view.message = await interaction.followup.send(
+            embed=view.preview_embed, view=view, ephemeral=True
         )
 
     # ---------- /progress spar-link ----------
@@ -1190,7 +1246,7 @@ class Progress(commands.Cog):
             return
 
         view = ProjectSetupWizard(self, guild_id, interaction.user.id, candidates, tree)
-        await interaction.followup.send(
+        view.message = await interaction.followup.send(
             embed=info_embed(
                 "プロジェクト登録ウィザード",
                 "紐付ける Todoist プロジェクトを選択してください。\n"
@@ -1225,7 +1281,7 @@ class Progress(commands.Cog):
 
         embed = build_level_embed(tree, None)
         view = ProgressView(self, tree, None, interaction.user.id, guild_id)
-        await interaction.followup.send(embed=embed, view=view)
+        view.message = await interaction.followup.send(embed=embed, view=view)
 
     # ---------- /weight ----------
     weight_group = app_commands.Group(name="weight", description="機体重量の記録と集計")

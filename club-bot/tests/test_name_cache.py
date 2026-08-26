@@ -23,7 +23,7 @@ from repositories.name_cache_repository import (
     ENTITY_USER,
     NameCacheRepository,
 )
-from utils.db import Database
+from utils.db import SCHEMA_VERSION, Database
 
 GUILD_A = 100000000000000001
 GUILD_B = 200000000000000002
@@ -73,9 +73,11 @@ def test_migration_from_v14_keeps_existing_rows():
 
     async def _reopen():
         db = Database(db_path)
-        await db.connect()  # ここで v15 マイグレーションが走る
+        await db.connect()  # ここで v15 以降のマイグレーションが走る
         try:
-            assert await db._user_version() == 15
+            # 15 と直書きすると以後のバージョン上げのたびに割れるため、
+            # 他のマイグレーションテストと同じく最新版まで到達したことを見る
+            assert await db._user_version() == SCHEMA_VERSION
             member = await MemberRepository(db).get_member(GUILD_A, "42")
             assert member is not None
             assert member["display_name"] == "山田太郎"

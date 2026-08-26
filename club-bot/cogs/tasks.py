@@ -15,15 +15,18 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from config import config
 from repositories.member_repository import MemberRepository
 from repositories.section_repository import SectionRepository
 from repositories.task_repository import TaskRepository
 from services import team_service
 from services.todoist_service import TodoistError
-from utils.embeds import error_embed, info_embed, success_embed, task_embed
+from utils.embeds import empty_state_embed, error_embed, info_embed, success_embed, task_embed
 from utils.logger import get_logger
+from utils.notify import dm_each_with_channel_fallback
 from utils.parser import fmt_jp, from_iso, parse_datetime, to_iso
 from utils.permissions import Level, ensure_guild, is_self_or_level, require
+from utils.views import TimeoutAwareView
 
 
 async def _deny_not_owner(interaction: discord.Interaction, task: dict, verb: str) -> None:
@@ -57,7 +60,26 @@ log = get_logger("tasks")
 PRIORITY_LABELS = {1: "低", 2: "中", 3: "高", 4: "最優先"}
 
 
-class SectionSelectView(discord.ui.View):
+def task_choices(rows: list[dict], current: str, limit: int = 25) -> list[tuple[str, int]]:
+    """オートコンプリート用の (表示名, local_task_id) 一覧を返す。
+
+    表示名は「#ID タイトル」。ID を手で写させない（G2-2）。
+    current による絞り込みはタイトル・ID の部分一致。
+    """
+    needle = (current or "").strip().lower()
+    out: list[tuple[str, int]] = []
+    for row in rows:
+        task_id = int(row["local_task_id"])
+        label = f"#{task_id} {row.get('title') or ''}".rstrip()
+        if needle and needle not in label.lower():
+            continue
+        out.append((label[:100], task_id))
+        if len(out) >= limit:
+            break
+    return out
+
+
+class SectionSelectView(TimeoutAwareView):
     def __init__(self, cog: Tasks, candidates: list[dict], owner_id: int, **task_kwargs):
         super().__init__(timeout=120)
         self.cog = cog
@@ -91,9 +113,6 @@ class SectionSelectView(discord.ui.View):
         await self.cog._finalize_add_task(interaction, section_id=section_id, **self.task_kwargs)
         self.stop()
 
-    async def on_timeout(self) -> None:
-        for item in self.children:
-            item.disabled = True
 
 
 class Tasks(commands.Cog):
@@ -112,6 +131,24 @@ class Tasks(commands.Cog):
         if interaction.guild is None:
             return []
         return await team_service.team_choices(self.bot.db, interaction.guild.id, current)
+
+    async def _task_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[int]]:
+        """未完了タスクの候補（done / delete / assign / priority 用）。
+
+        task_id: int の引数に合わせて Choice[int] を返す。
+        """
+        if interaction.guild is None:
+            return []
+        try:
+            rows = await self.repo.list_tasks(interaction.guild.id, status="open")
+        except Exception:  # noqa: BLE001  (補完は失敗しても致命的でない)
+            return []
+        return [
+            app_commands.Choice(name=label, value=value)
+            for label, value in task_choices(rows, current)
+        ]
 
     async def _resolve_team(
         self, interaction: discord.Interaction, guild_id: int, team_key: str
@@ -132,6 +169,51 @@ class Tasks(commands.Cog):
     async def _todoist_svc(self, guild_id: int):
         """ギルド別の TodoistService を返す（未登録なら enabled=False）。"""
         return await self.bot.todoist_manager.for_guild(guild_id)
+
+    async def _notify_assignee(
+        self,
+        guild_id: int,
+        assignee: discord.Member,
+        task_id: int,
+        title: str,
+        *,
+        due_iso: str | None = None,
+        team_key: str | None = None,
+        assigned_by: str | None = None,
+    ) -> None:
+        """担当者本人へ割り当てを知らせる（G2-3）。
+
+        DM を試み、拒否されたら班チャンネル（無ければ既定のタスク
+        チャンネル）でメンションする。通知の失敗でタスク作成・変更を
+        巻き戻さない（登録は済んでいる）。
+        """
+        lines = [f"【タスク割り当て】「{title}」（#{task_id}）の担当になりました。"]
+        if due_iso:
+            lines.append(f"期限: {fmt_jp(from_iso(due_iso))}")
+        if assigned_by:
+            lines.append(f"登録: {assigned_by}")
+        text = "\n".join(lines)
+
+        channel = None
+        if team_key:
+            team = await self.member_repo.get_team(guild_id, team_key)
+            if team and team.get("channel_id"):
+                channel = self.bot.get_channel(int(team["channel_id"]))
+        if channel is None:
+            gconf = await config.for_guild(guild_id)
+            if gconf.default_task_channel_id:
+                channel = self.bot.get_channel(gconf.default_task_channel_id)
+
+        outcome = await dm_each_with_channel_fallback(
+            [assignee], text, channel, fallback_note="（DM不可のためこちらでお知らせします）"
+        )
+        if outcome.failed:
+            log.warning(
+                "担当者への割り当て通知が届きませんでした (guild=%s, task=%s, user=%s)",
+                guild_id,
+                task_id,
+                assignee.id,
+            )
 
     @staticmethod
     def _todoist_unconfigured_embed() -> discord.Embed:
@@ -213,7 +295,7 @@ class Tasks(commands.Cog):
 
         # 2件以上あれば選択メニューを表示（B案）
         view = SectionSelectView(self, candidates, interaction.user.id, **task_kwargs)
-        await interaction.followup.send(
+        view.message = await interaction.followup.send(
             embed=info_embed(
                 "配置先セクションを選択してください",
                 f"{team_name}班には複数のセクションが紐付いています。",
@@ -276,11 +358,22 @@ class Tasks(commands.Cog):
             location_key=location,
         )
 
+        if assignee:
+            await self._notify_assignee(
+                guild_id,
+                assignee,
+                local_id,
+                title,
+                due_iso=due_iso,
+                team_key=team_key,
+                assigned_by=interaction.user.display_name,
+            )
+
         desc = f"ローカル ID: `{local_id}`"
         if todoist_id:
             desc += "\nTodoist: 連携済み"
         if assignee:
-            desc += f"\n担当: {assignee.display_name}"
+            desc += f"\n担当: {assignee.display_name}（本人へ通知済み）"
         if due_iso:
             desc += f"\n期限: {fmt_jp(from_iso(due_iso))}"
         embed = success_embed(
@@ -321,16 +414,30 @@ class Tasks(commands.Cog):
             await _deny_not_owner(interaction, task, "完了に")
             return
         svc = await self._todoist_svc(guild_id)
+        sync_note = ""
         if task.get("todoist_task_id") and svc.enabled:
             try:
                 await svc.close_task(task["todoist_task_id"])
-            except TodoistError:
-                pass  # ローカルは完了扱いにする
+            except TodoistError as e:
+                # ローカルは完了扱いにするが、黙らない。Todoist 側は未完了の
+                # まま残り、翌朝の通知に出続ける（G2-7。gotcha
+                # `todoist-completed-tasks-not-detected` の同期の片方向性）
+                log.warning(
+                    "Todoist 側の完了に失敗 (guild=%s, task=%s, todoist=%s): %s",
+                    guild_id,
+                    task_id,
+                    task["todoist_task_id"],
+                    e,
+                )
+                sync_note = (
+                    "\n⚠️ Todoist 側の完了に失敗しました。"
+                    "Todoist 上で直接完了にしてください。"
+                )
         await self.repo.complete_task(guild_id, task_id)
         await interaction.followup.send(
             embed=success_embed(
                 "完了にしました",
-                f"`{task_id}` {task['title']}",
+                f"`{task_id}` {task['title']}{sync_note}",
                 executor=interaction.user.display_name,
             ),
             ephemeral=True,
@@ -352,16 +459,28 @@ class Tasks(commands.Cog):
             )
             return
         svc = await self._todoist_svc(guild_id)
+        sync_note = ""
         if task.get("todoist_task_id") and svc.enabled:
             try:
                 await svc.delete_task(task["todoist_task_id"])
-            except TodoistError:
-                pass
+            except TodoistError as e:
+                # ローカルは削除（archived）するが、黙らない（G2-7）
+                log.warning(
+                    "Todoist 側の削除に失敗 (guild=%s, task=%s, todoist=%s): %s",
+                    guild_id,
+                    task_id,
+                    task["todoist_task_id"],
+                    e,
+                )
+                sync_note = (
+                    "\n⚠️ Todoist 側の削除に失敗しました。"
+                    "Todoist 上で直接削除してください。"
+                )
         await self.repo.delete_task(guild_id, task_id)
         await interaction.followup.send(
             embed=success_embed(
                 "削除しました",
-                f"`{task_id}` {task['title']}",
+                f"`{task_id}` {task['title']}{sync_note}",
                 executor=interaction.user.display_name,
             ),
             ephemeral=True,
@@ -385,10 +504,20 @@ class Tasks(commands.Cog):
             )
             return
         await self.repo.set_assignee(guild_id, task_id, str(assignee.id))
+        # 担当になったことを本人へ知らせる（作成時と同じ抜け。G2-3）
+        await self._notify_assignee(
+            guild_id,
+            assignee,
+            task_id,
+            task["title"],
+            due_iso=task.get("due_date"),
+            team_key=task.get("team_key"),
+            assigned_by=interaction.user.display_name,
+        )
         await interaction.followup.send(
             embed=success_embed(
                 "担当者を変更しました",
-                f"`{task_id}` → {assignee.display_name}",
+                f"`{task_id}` → {assignee.display_name}（本人へ通知済み）",
                 executor=interaction.user.display_name,
             ),
             ephemeral=True,
@@ -602,8 +731,14 @@ class Tasks(commands.Cog):
                     )
                     return
                 section_name = match.name
-            except TodoistError:
-                pass
+            except TodoistError as e:
+                # 名前解決だけの失敗なので紐付けは続行するが、黙らない（G2-7）
+                log.warning(
+                    "Todoist セクション名の解決に失敗 (guild=%s, section=%s): %s",
+                    guild_id,
+                    section_id,
+                    e,
+                )
         await self.section_repo.link(guild_id, str(section_id), team, section_name)
         await interaction.followup.send(
             embed=success_embed(
@@ -829,7 +964,7 @@ class Tasks(commands.Cog):
         self, title: str, tasks: list[dict], guild: discord.Guild | None
     ) -> discord.Embed:
         if not tasks:
-            return info_embed(title, "該当するタスクはありません。")
+            return empty_state_embed(title, "該当するタスクはありません。", "/task add")
         embed = task_embed(title)
         for t in tasks[:25]:
             assignee = "未割当"
@@ -849,7 +984,7 @@ class Tasks(commands.Cog):
 
     def _build_todoist_task_list_embed(self, title: str, tasks: list) -> discord.Embed:
         if not tasks:
-            return info_embed(title, "該当するタスクはありません。")
+            return empty_state_embed(title, "該当するタスクはありません。", "/task add")
         embed = task_embed(title)
         for t in tasks[:25]:
             due_str = getattr(getattr(t, "due", None), "string", None) or "期限なし"
@@ -865,6 +1000,13 @@ class Tasks(commands.Cog):
         if len(tasks) > 25:
             embed.set_footer(text=f"他 {len(tasks) - 25} 件")
         return embed
+
+
+# task_id のオートコンプリートを一括登録する（cogs/progress.py と同じ作法）
+Tasks.done.autocomplete("task_id")(Tasks._task_autocomplete)
+Tasks.delete.autocomplete("task_id")(Tasks._task_autocomplete)
+Tasks.assign.autocomplete("task_id")(Tasks._task_autocomplete)
+Tasks.priority.autocomplete("task_id")(Tasks._task_autocomplete)
 
 
 async def setup(bot: commands.Bot):
