@@ -251,7 +251,8 @@ async def collect_setup_status(db, gconf: GuildConfig) -> list[SetupItem]:
         SetupItem(
             "班長ロール",
             bool(gconf.leader_role_ids),
-            "`/set_role role_type:リーダー` で設定してください",
+            "`/setup` の「班長ロール」で設定してください"
+            "（1つだけ外すときは `/set_role action:remove`）",
         ),
         SetupItem("班", len(teams) > 0, "`/team-add` で登録してください"),
         SetupItem("桁", len(ketas) > 0, "`/layer keta-add` で登録してください"),

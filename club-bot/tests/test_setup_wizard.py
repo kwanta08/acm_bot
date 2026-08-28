@@ -18,7 +18,9 @@ from types import SimpleNamespace
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cogs.setup_wizard import (
+    MAX_MULTI_ROLE_VALUES,
     SetupWizard,
+    SetupWizardView,
     build_setup_embed,
     parse_team_names,
 )
@@ -117,7 +119,7 @@ def test_build_setup_embed_marks_missing():
     desc = embed.description or ""
     assert "<#111>" in desc  # 設定済みはメンション表示
     assert "⚠️ 未設定" in desc  # 未設定項目を明示
-    assert "未設定が 7 件" in desc  # 全8項目中1件のみ設定済み
+    assert "未設定が 8 件" in desc  # 全9項目中1件のみ設定済み
 
     full = GuildConfig(
         guild_id=G1,
@@ -129,6 +131,7 @@ def test_build_setup_embed_marks_missing():
         today_label_channel_id=6,
         exec_role_id=7,
         admin_role_id=8,
+        leader_role_ids=[9],
     )
     embed_full = build_setup_embed(full)
     assert "未設定" not in (embed_full.description or "")
@@ -277,3 +280,176 @@ def test_setup_embed_shows_club_name():
     # 未設定でもフォールバック表示で例外にならない
     embed_default = build_setup_embed(GuildConfig(guild_id=G1))
     assert "サークル名" in (embed_default.description or "")
+
+
+# ------------------------------------------------------------------
+# 班長ロール（LEADER_ROLE_IDS）— G3-1
+#
+# L2 判定の唯一の根拠なのに /setup から設定できなかった。
+# 他のロール項目と違い **複数値**（カンマ区切り）を持つ。
+# ------------------------------------------------------------------
+
+
+class _SelectInteraction:
+    """コンポーネント操作の interaction（edit_message を記録する）。"""
+
+    def __init__(self, user_id: int = 501):
+        self.user = SimpleNamespace(id=user_id, display_name="tester")
+        self.edited: list[dict] = []
+        self.messages: list[dict] = []
+        self.response = SimpleNamespace(
+            edit_message=self._edit,
+            send_message=self._send,
+            is_done=lambda: False,
+        )
+
+    async def _edit(self, **kwargs):
+        self.edited.append(kwargs)
+
+    async def _send(self, **kwargs):
+        self.messages.append(kwargs)
+
+    @property
+    def edited_text(self) -> str:
+        embed = self.edited[-1].get("embed")
+        if embed is None:
+            return ""
+        return (embed.title or "") + "\n" + (embed.description or "")
+
+
+def _view(db: Database) -> SetupWizardView:
+    return SetupWizardView(_make_cog(db), G1, owner_id=501)
+
+
+def test_multi_role_limit_is_the_role_select_maximum():
+    """上限は RoleSelect の上限（25）であること。
+
+    シンボル参照だけのテストでは、5 に戻しても緑のままになる。
+    受入基準の 5 から意図的に広げた値なので、数値そのものを固定する
+    （5 だと班長ロールを6件以上運用しているギルドで L2 判定の根拠を
+    黙って切り捨てる）。
+    """
+    assert MAX_MULTI_ROLE_VALUES == 25
+
+
+def test_build_setup_embed_lists_every_leader_role():
+    """複数の班長ロールを並べて表示すること。"""
+    desc = build_setup_embed(GuildConfig(guild_id=G1, leader_role_ids=[7, 8])).description or ""
+    assert "<@&7>" in desc
+    assert "<@&8>" in desc
+
+
+def test_build_setup_embed_treats_empty_leader_roles_as_missing():
+    """空リストを「未設定」に落とすこと。
+
+    他の項目は None だが leader_role_ids は list[int] なので、
+    `value is None` の判定だけでは `<@&[]>` と描画され、
+    未設定カウントからも漏れる。
+    """
+    desc = build_setup_embed(GuildConfig(guild_id=G1)).description or ""
+    assert "<@&[]>" not in desc
+    assert "班長ロール**: ⚠️ 未設定" in desc
+
+
+def test_build_setup_embed_shows_the_selected_item():
+    """選択中の項目と「置き換わる」ことを画面に出す。"""
+    full = GuildConfig(
+        guild_id=G1,
+        bot_log_channel_id=1,
+        default_announce_channel_id=2,
+        default_schedule_channel_id=3,
+        default_progress_channel_id=4,
+        default_task_channel_id=5,
+        today_label_channel_id=6,
+        exec_role_id=7,
+        admin_role_id=8,
+        leader_role_ids=[9],
+    )
+    desc = build_setup_embed(full, selected_key="LEADER_ROLE_IDS").description or ""
+    assert "班長ロール" in desc
+    assert "置き換わ" in desc
+    # 「すべて設定済み」の検査（既存テスト）を壊さない文言であること
+    assert "未設定" not in desc
+
+
+def test_select_item_switches_max_values_on_the_sent_view():
+    """複数選択を**クライアントへ届く形で**有効にすること。
+
+    Python 側で max_values を変えても、元メッセージのコンポーネント定義は
+    max_values=1 のままなので複数選択は発生しない。edit_message で
+    View を送り直していることまで検査する。
+    """
+    db = run(_make_db())
+    try:
+        view = _view(db)
+        interaction = _SelectInteraction()
+        run(
+            SetupWizardView.select_item(
+                view, interaction, SimpleNamespace(values=["LEADER_ROLE_IDS"])
+            )
+        )
+        assert interaction.edited, "元メッセージを編集していない（View が送り直されていない）"
+        sent_view = interaction.edited[-1]["view"]
+        assert sent_view.select_role.max_values == MAX_MULTI_ROLE_VALUES
+
+        # 単数キーへ切り替えたら 1 に戻る
+        run(
+            SetupWizardView.select_item(view, interaction, SimpleNamespace(values=["ADMIN_ROLE_ID"]))
+        )
+        assert interaction.edited[-1]["view"].select_role.max_values == 1
+    finally:
+        run(db.close())
+        _cleanup_config()
+
+
+def test_select_role_overwrites_leader_role_ids():
+    """追記ではなく上書き（受入基準）。"""
+    db = run(_make_db())
+    try:
+        repo = SettingsRepository(db)
+        run(repo.set(G1, "LEADER_ROLE_IDS", "999"))
+        view = _view(db)
+        view.selected_key = "LEADER_ROLE_IDS"
+        interaction = _SelectInteraction()
+        roles = [SimpleNamespace(id=111), SimpleNamespace(id=222)]
+        run(SetupWizardView.select_role(view, interaction, SimpleNamespace(values=roles)))
+        assert run(repo.get(G1, "LEADER_ROLE_IDS")) == "111,222"
+    finally:
+        run(db.close())
+        _cleanup_config()
+
+
+def test_select_role_rejects_multiple_values_for_a_single_value_key():
+    db = run(_make_db())
+    try:
+        view = _view(db)
+        view.selected_key = "ADMIN_ROLE_ID"
+        interaction = _SelectInteraction()
+        roles = [SimpleNamespace(id=111), SimpleNamespace(id=222)]
+        run(SetupWizardView.select_role(view, interaction, SimpleNamespace(values=roles)))
+        assert run(SettingsRepository(db).get(G1, "ADMIN_ROLE_ID")) is None
+        assert interaction.messages, "エラーを返していない"
+    finally:
+        run(db.close())
+        _cleanup_config()
+
+
+def test_select_item_blocks_overwrite_when_saved_roles_exceed_the_limit():
+    """上限を超えて保存されているギルドでは、黙って切り捨てない。"""
+    db = run(_make_db())
+    try:
+        ids = ",".join(str(1000 + i) for i in range(MAX_MULTI_ROLE_VALUES + 1))
+        run(SettingsRepository(db).set(G1, "LEADER_ROLE_IDS", ids))
+        view = _view(db)
+        interaction = _SelectInteraction()
+        run(
+            SetupWizardView.select_item(
+                view, interaction, SimpleNamespace(values=["LEADER_ROLE_IDS"])
+            )
+        )
+        sent_view = interaction.edited[-1]["view"]
+        assert sent_view.select_role.disabled, "選ばせてから拒否しない"
+        assert "/set_role" in interaction.edited_text
+    finally:
+        run(db.close())
+        _cleanup_config()

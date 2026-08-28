@@ -108,6 +108,12 @@ def _get_team_role_map(name: str) -> dict[str, int]:
 # ギルド別設定 DATA_RETENTION_DAYS で上書きできる。
 DEFAULT_DATA_RETENTION_DAYS = 30
 
+# 複数のロールをカンマ区切りで保存する設定キー（GuildConfig 側は list[int]）。
+# 追加するときは GuildConfig の属性も list[int] にすること。
+# /setup（cogs/setup_wizard.py）と /set_role（cogs/settings.py）が
+# 同じ一覧を見るように、定義はここ1箇所に置く。
+MULTI_ROLE_KEYS: frozenset[str] = frozenset({"LEADER_ROLE_IDS"})
+
 
 @dataclass
 class GuildConfig:

@@ -18,7 +18,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import GuildConfig, config
+from config import MULTI_ROLE_KEYS, GuildConfig, config
 from repositories.audit_log_repository import AuditLogRepository
 from repositories.member_repository import MemberRepository
 from repositories.settings_repository import SettingsRepository
@@ -45,12 +45,21 @@ CHANNEL_SETTINGS: list[tuple[str, str]] = [
 ROLE_SETTINGS: list[tuple[str, str]] = [
     ("ADMIN_ROLE_ID", "Bot管理者ロール"),
     ("EXEC_ROLE_ID", "実行役ロール"),
+    # 班長（L2）の判定は LEADER_ROLE_IDS だけを根拠にしている
+    # （utils/permissions.has_level）のに、ウィザードから設定できなかった
+    ("LEADER_ROLE_IDS", "班長ロール"),
 ]
 ALL_SETUP_KEYS: set[str] = {k for k, _ in CHANNEL_SETTINGS + ROLE_SETTINGS}
 # セレクト以外（Modal 入力）で設定できるキー
 EXTRA_SETUP_KEYS: set[str] = {"CLUB_NAME"}
 _CHANNEL_KEYS: set[str] = {k for k, _ in CHANNEL_SETTINGS}
 _ROLE_KEYS: set[str] = {k for k, _ in ROLE_SETTINGS}
+
+# RoleSelect が一度に選べる上限。受入基準は 5 だが、/setup は**上書き**保存
+# なので、5 にすると班長ロールを6件以上運用しているギルドで L2 判定の根拠を
+# 黙って切り捨てることになる。上限まで広げ、それでも超える場合は
+# /setup からの上書きを断って /set_role へ誘導する。
+MAX_MULTI_ROLE_VALUES = 25
 
 # 班名の最大文字数（cogs/teams.py の MAX_NAME_LENGTH と揃える）
 MAX_TEAM_NAME_LENGTH = 50
@@ -78,10 +87,16 @@ def parse_team_names(text: str) -> list[str]:
     return names
 
 
-def build_setup_embed(gconf: GuildConfig) -> discord.Embed:
+def build_setup_embed(
+    gconf: GuildConfig, selected_key: str | None = None, notice: str | None = None
+) -> discord.Embed:
     """
     ギルド別設定の一覧 Embed を生成する。
     未設定項目には「未設定」を明示する。
+
+    selected_key を渡すと「いま何を設定しようとしているか」を添える。
+    班長ロールは**上書き**保存なので、現在値が見えたまま選び直させる
+    （案内文だけに頼らず、消えるものが画面に出ている状態にする）。
     """
     lines: list[str] = []
     # サークル名は任意設定（未設定時は汎用表現にフォールバックするため
@@ -90,6 +105,16 @@ def build_setup_embed(gconf: GuildConfig) -> discord.Embed:
     missing = 0
     for key, label in CHANNEL_SETTINGS + ROLE_SETTINGS:
         value = getattr(gconf, key.lower())
+        # 班長ロールだけ list[int]。空リストは「未設定」であって
+        # `value is None` では拾えない（<@&[]> と描画されてしまう）
+        if key in MULTI_ROLE_KEYS:
+            role_ids = list(value or [])
+            if role_ids:
+                lines.append(f"**{label}**: " + " ".join(f"<@&{rid}>" for rid in role_ids))
+            else:
+                lines.append(f"**{label}**: ⚠️ 未設定")
+                missing += 1
+            continue
         if value is None:
             lines.append(f"**{label}**: ⚠️ 未設定")
             missing += 1
@@ -103,6 +128,19 @@ def build_setup_embed(gconf: GuildConfig) -> discord.Embed:
     else:
         summary = "すべての項目が設定済みです。"
     summary += "\n「班を一括作成」ボタンで、班と対応ロールをまとめて登録できます。"
+
+    if selected_key:
+        label = dict(CHANNEL_SETTINGS + ROLE_SETTINGS).get(selected_key, selected_key)
+        if selected_key in MULTI_ROLE_KEYS:
+            summary += (
+                f"\n\n選択中: **{label}** — 選んだロールで**置き換わります**"
+                "（1つだけ外すときは `/set_role action:remove`）。"
+            )
+        else:
+            summary += f"\n\n選択中: **{label}** — 選んだロールで置き換わります。"
+    if notice:
+        summary += f"\n\n{notice}"
+
     embed = info_embed("セットアップ状況", "\n".join(lines) + "\n\n" + summary)
     return embed
 
@@ -303,7 +341,13 @@ class SetupWizardView(TimeoutAwareView):
     async def _refresh(self, interaction: discord.Interaction) -> None:
         """保存後に元メッセージの Embed を最新状態へ更新する。"""
         gconf = await config.for_guild(self.guild_id, db=self.cog.db, force_reload=True)
-        await interaction.response.edit_message(embed=build_setup_embed(gconf), view=self)
+        await interaction.response.edit_message(
+            embed=build_setup_embed(gconf, selected_key=self.selected_key), view=self
+        )
+
+    async def _current_role_ids(self, key: str) -> list[int]:
+        gconf = await config.for_guild(self.guild_id, db=self.cog.db, force_reload=True)
+        return list(getattr(gconf, key.lower(), None) or [])
 
     @discord.ui.select(
         placeholder="設定したい項目を選択…",
@@ -313,16 +357,42 @@ class SetupWizardView(TimeoutAwareView):
         ],
     )
     async def select_item(self, interaction: discord.Interaction, select: discord.ui.Select):
+        """設定する項目を選ぶ。
+
+        **元メッセージの View を送り直す**のが要点。Python 側で
+        max_values を変えても、クライアントが持っているコンポーネント定義は
+        max_values=1 のままなので複数選択が一生発生しない。
+        """
         self.selected_key = select.values[0]
-        label = dict(CHANNEL_SETTINGS + ROLE_SETTINGS)[self.selected_key]
-        kind = "チャンネル" if self.selected_key in _CHANNEL_KEYS else "ロール"
-        await interaction.response.send_message(
-            embed=info_embed(
-                "項目を選択しました",
-                f"**{label}** を設定します。\n下の{kind}セレクトで対象を選んでください。",
-            ),
-            ephemeral=True,
-        )
+        notice: str | None = None
+
+        if self.selected_key in MULTI_ROLE_KEYS:
+            self.select_role.max_values = MAX_MULTI_ROLE_VALUES
+            current = await self._current_role_ids(self.selected_key)
+            # 上限を超えて保存されているギルドでは、選ばせてから
+            # 黙って切り捨てない（選ぶ前に断る）
+            if len(current) > MAX_MULTI_ROLE_VALUES:
+                self.select_role.disabled = True
+                notice = (
+                    f"⚠️ この項目には {len(current)} 件が保存されており、"
+                    f"一度に選べる上限（{MAX_MULTI_ROLE_VALUES} 件）を超えています。"
+                    "ここで上書きすると一部が消えるため、`/set_role action:remove` で"
+                    "減らしてから設定してください。"
+                )
+            else:
+                self.select_role.disabled = False
+        else:
+            self.select_role.max_values = 1
+            self.select_role.disabled = False
+
+        gconf = await config.for_guild(self.guild_id, db=self.cog.db)
+        try:
+            await interaction.response.edit_message(
+                embed=build_setup_embed(gconf, selected_key=self.selected_key, notice=notice),
+                view=self,
+            )
+        except discord.HTTPException as e:
+            log.warning("/setup の項目選択の反映に失敗 (guild=%s): %s", self.guild_id, e)
 
     @discord.ui.select(
         cls=discord.ui.ChannelSelect,
@@ -354,9 +424,35 @@ class SetupWizardView(TimeoutAwareView):
                 ephemeral=True,
             )
             return
-        role = select.values[0]
-        await self.cog.save_setting(self.guild_id, self.selected_key, str(role.id))
-        log.info("/setup で保存 (guild=%s): %s=%s", self.guild_id, self.selected_key, role.id)
+
+        role_ids = [str(role.id) for role in select.values]
+        if self.selected_key in MULTI_ROLE_KEYS:
+            # 選び直しは上書き（受入基準）。上限超過は select_item で
+            # 断っているが、コンポーネント定義が古いまま送られる場合に
+            # 備えて保存側でも見る
+            current = await self._current_role_ids(self.selected_key)
+            if len(current) > MAX_MULTI_ROLE_VALUES:
+                await interaction.response.send_message(
+                    embed=error_embed(
+                        f"保存済みの {len(current)} 件が上限を超えているため、"
+                        "ここでは上書きできません。`/set_role action:remove` で"
+                        "減らしてから設定してください。"
+                    ),
+                    ephemeral=True,
+                )
+                return
+            value = ",".join(role_ids)
+        else:
+            if len(role_ids) > 1:
+                await interaction.response.send_message(
+                    embed=error_embed("この項目に指定できるロールは1つだけです。"),
+                    ephemeral=True,
+                )
+                return
+            value = role_ids[0]
+
+        await self.cog.save_setting(self.guild_id, self.selected_key, value)
+        log.info("/setup で保存 (guild=%s): %s=%s", self.guild_id, self.selected_key, value)
         await self._refresh(interaction)
 
 

@@ -46,7 +46,7 @@ Bot管理者」というラベルで出ます（`utils/permissions.LEVEL_LABELS`
 | `/settings_set key: value:` | L4 | 設定値の保存（`COMPETITION_DATE` `DATA_RETENTION_DAYS` など） |
 | `/settings_delete key:` | L4 | 設定値の削除 |
 | `/set_channel` | L4 | 通知チャンネルの設定 |
-| `/set_role` | L4 | ロール（幹部・管理者・班長）の設定 |
+| `/set_role` | L4 | ロール（幹部・管理者・班長）の設定。`action:add` / `action:remove` で班長ロールを1つだけ足す / 外せる（重複は保存時に除去） |
 | `/set_common` | L4 | 共通設定 |
 
 ### Data（エクスポート・削除）
@@ -286,7 +286,8 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 
 `role_type:leader` で設定する班長ロールは `/team-list` に表示するための情報です。
 **班長の権限（L2）は settings の `LEADER_ROLE_IDS` が唯一の根拠**なので、
-権限を与えるときは `/set_role role_type:リーダー` を使ってください。
+権限を与えるときは `/setup` の「班長ロール」、または
+`/set_role role_type:リーダー`（`action:remove` で1つだけ外せる）を使ってください。
 
 使用例:
 ```
