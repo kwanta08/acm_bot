@@ -36,12 +36,12 @@
 
 ## スキーマバージョンの割り当て（衝突防止）
 
-現行は `SCHEMA_VERSION = 16`（`migrations/015_layer_session_layer_num_text.sql` まで）。
+現行は `SCHEMA_VERSION = 17`（`migrations/016_schedule_confirmed.sql` まで）。
 
 | 版 | migration | タスク |
 |---|---|---|
 | v16 | `015_layer_session_layer_num_text.sql` | 適用済み（`/layer start` の PG DataError 修正） |
-| v17 | `016_schedule_confirmed.sql` | G3-4（確定日程） |
+| v17 | `016_schedule_confirmed.sql` | **G3-3（`deleted_flag`）＋ G3-4（`confirmed_option_id`）。1版に2列をまとめてある**（適用済み） |
 | v18 | `017_progress_snapshots.sql` | G4-7（進捗履歴） |
 | v19 | `018_stock.sql` | G4-8（在庫・工具） |
 | v20 | `019_incidents.sql` | G4-10（ヒヤリハット） |
@@ -387,7 +387,7 @@
       - **注意**: **ADR 0025 を更新する。** 完了ログに新 ADR の草案を書く。
         Bot トークンを Web 層に置かない方針（ADR 0015）は維持する
 
-- [ ] **G3-3** `/schedule delete` を論理削除にする。
+- [x] **G3-3** `/schedule delete` を論理削除にする。
       現状は投票メッセージを削除してから DB を CASCADE 削除しており、票データが完全消失する。
       `/team-remove` `/skill-remove` `/layer keta-remove` は既に論理削除方式なので方針統一にもなる。
       - **受入**: `schedules` に `deleted_flag` を追加（マイグレーション必要。v17 は G3-4 が使うので
@@ -398,8 +398,13 @@
 - [ ] **G3-4** `/schedule confirm` — 確定日程の登録と当日リマインド。
       `finalize_schedule`（`cogs/schedule.py:704`）は集計サマリーを投稿して終わりで、
       **「結局いつに決まったのか」がどこにも残らない**。前日・当日のリマインドも無い。
-      - **受入**: スキーマ v17（`016_schedule_confirmed.sql`。G3-3 の `deleted_flag` と同じ版にまとめる）で
-        `schedules.confirmed_option_id TEXT NULL` を追加。`/schedule confirm schedule_id option_id`（L2）で
+      - **⚠️ `confirmed_option_id` は G3-3 で追加済み（v17）。新しい migration を作らないこと。**
+        `_migrate_versioned()` は `version >= SCHEMA_VERSION` で早期 return するため、
+        v17 済みの DB は二度と v17 の処理を通らない。後から `_migrate_v17_*` へ ALTER を足しても
+        **新規 DB にだけ列がある**状態になり、本番だけ「column does not exist」で落ちる
+        （gotcha `bot-wont-start-undefined-column`）
+      - **受入**: スキーマ v17（`016_schedule_confirmed.sql`。G3-3 で適用済み）の
+        `schedules.confirmed_option_id TEXT NULL` を使う。`/schedule confirm schedule_id option_id`（L2）で
         確定を保存し対象ロールへ告知。`/schedule list` に確定日を表示。
         前日20時と当日朝に「本日 18:00 ◯◯（場所）」を通知
       - **検証**: `tests/test_schedule_confirm.py`（新規）。リマインドは `reminders_log` の
@@ -592,6 +597,30 @@
         ADR 0009 の未実装分と**同じイテレーションで**扱う
       - **出どころ**: G3-2 のゲート1・ゲート2（`build_option_embed` を同じ差分に混ぜると
         ADR 0014 に反するため分離した）
+
+- [ ] **G4-13** オートコンプリートの登録検査が空振りしている。
+      `tests/test_autocomplete.py:233` と `:309` の
+      `assert param is not None and param.autocomplete is not None` は、
+      discord.py の公開 API の `autocomplete` が **`bool` を返すプロパティ**なので
+      `False is not None` → `True` となり、**補完が1つも登録されていなくても必ず通る**。
+      G2-2 で追加した「オートコンプリートが正しいコマンドに付いていること」の2テストが
+      現在なにも担保していない（実測で確認済み。`/schedule create` の `title` で
+      `public=False` → 判定 `True`）。
+      - **受入**: `Command._params["<name>"].autocomplete.__name__` を検査する形へ書き換え、
+        登録行を消すと落ちることを実測する（G3-3 の
+        `test_restore_autocomplete_is_registered_on_the_command` が正しい書き方）
+      - **注意**: private 属性 `_params` に依存するが、公開 API では
+        「どのコールバックが束ねられているか」を取れない。消えたときは
+        `AttributeError` / `KeyError` で大きな音を立てて落ちるので、テスト専用の依存として許容する
+      - **出どころ**: G3-3 のゲート2（差分監査）
+
+- [ ] **G4-14** `/schedule remind` に締切済みのガードが無い。
+      `cogs/schedule.py` の `remind` は `closed_flag` を見ないため、L2 が ID を直打ちすれば
+      **締切済み・復元済みの予定でも未回答者へ DM が飛ぶ**（オートコンプリートは開催中のみなので
+      踏みにくい）。`edit-deadline` は既に `closed_flag` を見て断っている。
+      - **受入**: `remind` が締切済みを断る。文言は `edit-deadline` と揃える
+      - **注意**: 締切済み全般の挙動変更なので G3-3 には混ぜなかった（ADR 0014）
+      - **出どころ**: G3-3 のゲート2（差分監査）
 
 ---
 
@@ -1868,3 +1897,139 @@ G3-2 に混ぜると ADR 0014 に反する。**G4-12 として起票した。**
   `get_member` / `set_leader` のみ）。G3-2 は DM 送信経路をこれに2回依存させた
 - `cogs/schedule.py:86-88`（`schedule_choices` のシグネチャ）は `ruff format` 未適合だが
   **HEAD 時点から存在する既存差分**で、この差分の責任ではない
+
+### 2026-08-29 — G3-3: `/schedule delete` を論理削除に（ブランチ `fix/g3-3`・スキーマ v17）
+
+投票メッセージを削除してから DB を CASCADE 削除しており、**票データが完全に消えていた**。
+誰がいつ参加と答えたかは、Discord 側のメッセージを消した時点で他のどこにも残らない。
+
+- ruff: `All checks passed!`
+- pytest: **943 passed, 11 skipped**（着手前は 914 passed, 10 skipped）。
+  **skip が1件増えたのは PG ライブテストを1本追加したため**で、既存テストが skip に落ちたのではない。
+  内訳は `tests/test_dashboard_edit.py` 4件・`tests/test_db_postgres.py` 7件、
+  いずれも `CLUB_TEST_PG_DSN` 未設定
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `utils/db.py` / `migrations/016_schedule_confirmed.sql` | スキーマ v17。`deleted_flag INTEGER NOT NULL DEFAULT 0` と `confirmed_option_id TEXT` を**同じ版で**追加。`_table_columns` で存在確認してから ALTER |
+| `repositories/schedule_repository.py` | `soft_delete_schedule` / `restore_schedule` / `list_deleted_schedules`。全一覧に `AND deleted_flag = 0`。`get_schedule` に `include_deleted`（既定 False）。物理削除 `delete_schedule` は**置き換えて削除**した |
+| `cogs/schedule.py` | `/schedule restore`（L3）＋削除済みのみの候補（`[削除済み]` 表示）。削除できなかったメッセージの件数を報告。「見つかりません」を `_find_schedule` に集約 |
+| `repositories/table_repository.py` | `schedules` に `deleted_flag`（編集不可）。出欠回答のタブから削除済みを除外 |
+| `docs/` | `PRIVACY.md`（**公開ポリシーの変更**）/ `GUIDE.md` / `OPERATION.md` / `FEATURE_TASKS.md` |
+
+新規テスト `tests/test_schedule_delete.py`（29件）＋ `tests/test_db_postgres.py` に PG ライブ1件。
+
+#### 公開ポリシー（`docs/PRIVACY.md` §8.3）の変更前後
+
+| | 記述 |
+|---|---|
+| 変更前 | `| /schedule delete | 日程調整と、それに紐づく出欠回答 |` |
+| 変更後 | `| /schedule delete | 日程調整（無効化）。**出欠回答は残ります**（/schedule restore で戻せます） |` |
+
+あわせて「無効化した日程調整の出欠回答を**完全に消す**には、`/data delete`（8.1）で
+サーバー全体のデータを削除するか、8.2 の個人からの請求として運営者へご連絡ください。」を追記した。
+`/data delete` の purge は `TABLE_DDL` 由来で全行を消すので、8.1 の記述は従来どおり成立する。
+
+#### 設計判断
+
+**1. 削除時に `closed_flag` も立てる（ゲート1で方針を変えた）。**
+当初は「`restore` が `reminder_sent_flag = 1` を立てて催促を再開させない」案だった。却下の理由:
+- G2-3 が `cogs/reminders.py` に「**送っていないなら送信済みにしない**」という不変条件を
+  コメント付きで立てたばかりで、1通も送らずに 1 を立てるのは同じフラグへ逆向きの嘘を書く行為
+- `update_deadline` が `reminder_sent_flag` をリセットするので、抑止が
+  「誰も締切を触らない」という規律に依存する（ADR 0008 / 0016 の軸に反する）
+- `list_open_schedules` が `closed_flag = 0` で拾うため、投票メッセージが無い予定が
+  「開催中」に居座り、`close` / `remind` / `edit-deadline` の候補にも出続ける
+
+代わりに `soft_delete_schedule` を `deleted_flag = 1, closed_flag = 1` の1文にした。
+投票メッセージを消した時点で投票は現実に終わっているので**嘘ではなく**、
+自動催促・自動締切・開催中一覧が**既存の条件式だけで**止まる。
+`restore_schedule` は `deleted_flag = 0` だけを書くので、「復元は元の状態に戻す」が文字どおり成立する。
+
+**2. Discord の投票メッセージは従来どおり削除する。**
+タスクの目的は票データの保全であって画面の復元ではない。`edit` で「削除されました」に
+差し替える案は、削除したはずの投稿が残り続ける点で管理者の期待から外れる。
+ただし**削除できなかった件数を報告する**（残ったメッセージのリアクションは無反応になるため）。
+
+**3. `_migrate_versioned` の早期 return が、2列を1版にまとめる理由。**
+`version >= SCHEMA_VERSION` で return するので、G3-3 が v17 を切ったあとに G3-4 が
+同じ版へ ALTER を足しても**既存 DB では二度と実行されない**。
+規律に頼らないよう、(a) v16→v17 昇格テストで**両方の列**の存在を assert し、
+(b) G3-4 の本文に「新しい migration を作らない」を明記した。
+
+**4. `TableSpec.extra_where` は使わず、列を見せる側にした。**
+`extra_where`（`repositories/table_repository.py:90`）は「論理削除の除外」を想定した機構だが
+1箇所も使われていない。使わなかった理由: `/data export` の ZIP は `list_all_rows`
+（sheet 指定なし）なので、隠すと**保持されている行が export から消える**。
+`docs/PRIVACY.md` が export を持ち出し手段として案内しているため、
+「残っているものは出す。ただし削除済みと分かる」ほうが一貫する。
+`members.active_flag` / `teams.active_flag` も同じ扱い（行は隠さず列で示す）。
+
+ただし `list_sheets` からは削除済みを外したので**タブは消える**。結果として
+**ダッシュボード UI の CSV（シート単位）からは削除済み予定の票へ到達できない**が、
+`/data export` の ZIP には残る、という経路差がある。
+
+**5. `deleted_flag` を編集不可にした根拠は権限。**
+ダッシュボードの編集認可は L2 だが `/schedule delete` `/schedule restore` は L3。
+editable にすると **L2 が L3 の操作を取り消せる**（`members.is_leader` / `teams.leader_role_id` と同じ理由）。
+
+**6. `v_attendance` ビューは直していない（DB 面の残存）。**
+`utils/db.py` の `v_attendance` は `JOIN schedules` で `deleted_flag` を見ないため、
+削除済みが集計に残る。直さない理由: bot もダッシュボードも読んでいない
+（参照は `tests/`・`scripts/cleanup_test_pg.py`・NocoDB 系ドキュメントのみ）、
+`_VIEW_BODIES` だけ直すと**新規 DB とだけ挙動が変わる**、既存 DB へ反映するには
+v17 から `_migrate_v5_views()` を呼び直す必要があり無関係なビュー3つを作り直す副作用が出る。
+受入基準「集計から除外」に対する**既知の例外**として記録する。
+
+**7. `idx_schedules_guild` は拡張していない。**
+`(guild_id, closed_flag, deadline)` のままで `deleted_flag` には効かないが、
+日程調整は数百行規模なので走査コストが問題にならない。
+
+#### ゲートの判定
+
+| ゲート | 判定 | 経過 |
+|---|---|---|
+| ゲート1（acm-plan-reviewer） | REVISE ×2 → APPROVE 相当 | 1回目に A-1〜A-5・B-1〜B-7（**PRIVACY.md が嘘になる**／**既定除外で既存テストが素通りする**／メッセージ削除の失敗が無報告・無検証／復元後に自動処理が走る／v17 共有を規律に依存させない ほか）、2回目に A-4 の実装手段（`reminder_sent_flag` 案の却下と代替案） |
+| ゲート2（acm-diff-auditor） | FINDINGS → **CLEAN** ×2 | 1回目に4件（`FEATURE_TASKS.md` の割当表が v16 のまま／L1 に L3 のコマンドを案内／restore の文言が守れない約束／候補が全部 `[終了]`）。テスト書き直し後の再監査でも CLEAN |
+| ゲート2（acm-test-adversary） | **INEFFECTIVE → EFFECTIVE** | 詳細は下記 |
+
+**ゲート2は同時ではなく逐次で回した**（G3-1 / G3-2 と同じ意図的な逸脱）。
+
+#### test-adversary が見つけた「テストが何も担保していない」問題
+
+1巡目は **INEFFECTIVE**。`list_open_schedules` / `list_due_schedules` /
+`list_reminder_candidates` の `AND deleted_flag = 0` を外しても**1件も落ちなかった**。
+原因は `soft_delete_schedule` が必ず `closed_flag = 1` を立てるため、
+テストが削除経路でしか削除済み行を作らず、**`deleted_flag = 1 かつ closed_flag = 0` の行が
+一度も生まれない**こと。既存の assert は closed_flag の再確認にしかなっていなかった。
+`_handle_reaction` の削除済みガードも同じ理由で無検証だった。
+
+**この状態は机上の話ではない。** ダッシュボードの `schedules` 表は `list_rows` が
+guild_id しか絞らないので削除済みの行も並び、`closed_flag` は `editable=True`（L2）なので
+「締切済み」を外せる（差分監査が `update_row` で実際に到達可能なことを実測）。
+ガードが無ければ、投票メッセージを消した予定が開催中一覧へ復活し、自動締切と自動催促が動き出す。
+
+`_unclose_deleted()` でその状態を作るケースを4件足し、2巡目で **EFFECTIVE**（8項目すべて赤）。
+さらに2巡目で見つかった穴2件もその場で塞いだ:
+
+| 穴 | 対応 |
+|---|---|
+| `soft_delete_schedule` から `WHERE guild_id = ?` を外しても緑（`restore` 側は担保済みで**非対称**） | 「持ち主でないギルドから消しにいく」向きのテストを追加。同じ `schedule_id` を2ギルドに置く形では検査できない（`schedule_id` は PRIMARY KEY で schema 上作れない） |
+| `_schedule_ac_all` に削除済みを混ぜても緑（docstring は「含まない」と書いている） | `/schedule status` `/schedule delete` の候補から削除済みが消えることを検査 |
+
+#### 次タスクへの申し送り
+
+- **G3-4 は新しい migration を作らないこと**（`confirmed_option_id` は v17 で追加済み）。
+  G3-4 の本文にも明記した
+- **G4-13 / G4-14 を起票した**（オートコンプリート登録検査の空振り／`/schedule remind` の締切済みガード）
+- **PostgreSQL 実機で確認済み**（test-adversary が `postgres:16` の使い捨てコンテナで実行）。
+  DSN 付きのフルスイートは **945 passed, 0 skipped**。ただし
+  **v17 のマイグレーション経路は PG では検出できない**——新規 PG DB は `CREATE TABLE` 側から
+  両列を得るため、`_migrate_v17_*` を一度も通らない。「v17 に2列」を守っているのは
+  SQLite の `test_v17_adds_both_columns_to_an_existing_db` **だけ**。
+  v16 で止まっている既存 PG 本番 DB に対する昇格は未検証
+- 「見つかりません」の重複は **5件**（6ではない）。集約後は `_find_schedule` と
+  `restore`（`include_deleted=True` が要るため意図的に非集約）の2箇所
+- 適用前に `pg_dump -Fc` を取ること（down が無い）。手順の docs への追記は G3-7 で行う
