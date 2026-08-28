@@ -31,7 +31,7 @@ sys.modules.setdefault("dotenv", mock.MagicMock())  # config が読む
 import discord
 from discord.ext import tasks
 
-from cogs.reminders import CONFIRMED_REMINDER_TYPE, Reminders
+from cogs.reminders import CONFIRMED_REMINDER_TYPE, Reminders, phase_for_hour
 from cogs.schedule import Schedule
 from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.schedule_repository import ScheduleRepository
@@ -801,6 +801,91 @@ def test_confirmed_date_is_shown_in_both_lists():
             await Schedule.list_closed_cmd.callback(cog, interaction)
             values = " ".join(f.value or "" for f in interaction.sent[-1]["embed"].fields)
             assert "2026/10/01 18:00" in values, "締切済み一覧に確定日が出ていない"
+        finally:
+            await db.close()
+
+    run(_main())
+
+
+# =====================================================================
+# 7. ループ本体と範囲境界（test-adversary が見つけた穴）
+# =====================================================================
+def test_the_hour_maps_to_the_right_phase():
+    """時刻 → phase の対応づけ。
+
+    テストが `run_confirmed_reminders(phase, ...)` を phase 直指定で
+    しか呼んでいないと、ここを反転させても全部緑のまま通る
+    （朝に「明日◯◯」、夜に「もう終わった予定」を流す状態）。
+    """
+    assert phase_for_hour(8) == "day"
+    assert phase_for_hour(20) == "eve"
+    # ループが発火する2つの時刻が、別々の phase になること
+    times = Reminders.confirmed_schedule_reminders.time
+    phases = {phase_for_hour(t.hour) for t in times}
+    assert phases == {"day", "eve"}, f"2回の発火が同じ phase になっている: {phases}"
+
+
+def test_the_range_includes_midnight_and_excludes_the_next_day():
+    """`start_at` の範囲境界（`>=` / `<`）を SQLite で固定する。
+
+    00:00 ちょうど開始の予定を取りこぼす変更（`>` へ）も、翌日 00:00 を
+    巻き込む変更（`<=` へ）も、いまは PG ライブテストでしか見ておらず
+    DSN 未設定で skip される。**skip は緑ではない**（G1-0 / G1-9 と同型）。
+    """
+
+    async def _main():
+        db = await _make_db()
+        try:
+            repo = ScheduleRepository(db)
+            start = datetime(2026, 10, 1, 0, 0, tzinfo=TZ)
+            await repo.create_schedule(
+                G1, "sch_mid", "深夜", None, None, None, to_iso(start), "u1", "555"
+            )
+            # ちょうど 00:00（含む）と、翌日 00:00（含まない）
+            await repo.add_option(G1, "opt_mid", "sch_mid", "10/1", to_iso(start), None, None)
+            await repo.create_schedule(
+                G1, "sch_next", "翌日", None, None, None, to_iso(start), "u1", "555"
+            )
+            await repo.add_option(
+                G1,
+                "opt_next",
+                "sch_next",
+                "10/2",
+                to_iso(start + timedelta(days=1)),
+                None,
+                None,
+            )
+            await repo.set_confirmed_option(G1, "sch_mid", "opt_mid")
+            await repo.set_confirmed_option(G1, "sch_next", "opt_next")
+
+            rows = await repo.list_confirmed_between(
+                G1, to_iso(start), to_iso(start + timedelta(days=1))
+            )
+            ids = [r["schedule_id"] for r in rows]
+            assert ids == ["sch_mid"], f"境界の扱いが違う: {ids}"
+        finally:
+            await db.close()
+
+    run(_main())
+
+
+def test_a_successful_announcement_does_not_warn():
+    """告知が成功したときに「送れませんでした」を出さないこと。
+
+    失敗を伝える側だけを見ていると、常に警告を出す実装（`_announce_confirmation`
+    が常に None を返す形）が緑のまま通る。
+    """
+
+    async def _main():
+        db = await _make_db()
+        try:
+            await _seed(db)
+            cog = _cog(db, guild=_Guild(channel=_Channel()))
+            interaction = _Interaction()
+            await Schedule.confirm.callback(
+                cog, interaction, schedule_id="sch_1", option_id="sch_1_o1"
+            )
+            assert "告知は送れませんでした" not in interaction.text
         finally:
             await db.close()
 

@@ -54,6 +54,18 @@ CONFIRMED_REMINDER_TYPE = "schedule_confirmed"
 #: phase → (通知する日のオフセット, 本文の頭)
 CONFIRMED_PHASES = {"eve": (1, "明日"), "day": (0, "本日")}
 
+
+def phase_for_hour(hour: int) -> str:
+    """発火時刻から、どちらの回かを決める。
+
+    ループは 08:30 と 20:00 の2回発火する。午前の回はその日の予定
+    （`day`）、夜の回は翌日の予定（`eve`）を知らせる。
+    ここを取り違えると、朝に「明日◯◯」、夜に「もう終わった予定」を
+    流すことになる。
+    """
+    return "day" if hour < 12 else "eve"
+
+
 PRIORITY_LABELS = {1: "低", 2: "中", 3: "高", 4: "最優先"}
 PRIORITY_EMOJI = {4: "🔴", 3: "🟠", 2: "🔵", 1: "⚪"}
 PRIORITY_P_LABEL = {4: "P1", 3: "P2", 2: "P3", 1: "P4"}
@@ -380,9 +392,7 @@ class Reminders(commands.Cog):
     @tasks.loop(time=[time(hour=8, minute=30, tzinfo=TZ), time(hour=20, minute=0, tzinfo=TZ)])
     async def confirmed_schedule_reminders(self):
         current = now()
-        # 08:30 の回は当日分、20:00 の回は翌日分
-        phase = "day" if current.hour < 12 else "eve"
-        await self.run_confirmed_reminders(phase, current)
+        await self.run_confirmed_reminders(phase_for_hour(current.hour), current)
 
     @confirmed_schedule_reminders.before_loop
     async def _before_confirmed(self):
