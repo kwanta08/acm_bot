@@ -173,10 +173,10 @@ class ScheduleRepository(BaseRepository):
              WHERE guild_id = ? AND schedule_id = ? AND deleted_flag = 0
                AND EXISTS (
                    SELECT 1 FROM schedule_options
-                    WHERE option_id = ? AND schedule_id = ?
+                    WHERE guild_id = ? AND option_id = ? AND schedule_id = ?
                )
             """,
-            (option_id, guild_id, schedule_id, option_id, schedule_id),
+            (option_id, guild_id, schedule_id, guild_id, option_id, schedule_id),
         )
         return cur.rowcount > 0
 
