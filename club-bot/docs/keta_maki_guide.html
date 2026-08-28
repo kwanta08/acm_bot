@@ -11,11 +11,13 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     /* 第一候補は新ゴ R（モリサワ・要ライセンス）。無い環境では
-       近い雰囲気のフリーフォント M PLUS 1p → IPAゴシック へフォールバック */
+       字面の大きさと字間の均一さが新ゴに近い Noto Sans JP（源ノ角ゴシック）
+       → Zen Kaku Gothic New → IPAゴシック の順でフォールバック */
     font-family: "A-OTF 新ゴ Pro R", "A P-OTF 新ゴ ProN R", "新ゴ Pro R", "新ゴ R",
-      "Shin Go Pro R", "Shin Go", "M PLUS 1p", "IPAPGothic", "IPAGothic", sans-serif;
+      "Shin Go Pro R", "Shin Go", "Noto Sans JP", "Zen Kaku Gothic New",
+      "IPAPGothic", "IPAGothic", sans-serif;
     font-size: 10.5pt;
-    line-height: 1.65;
+    line-height: 1.7;
     color: #1f2933;
   }
   .page { page-break-after: always; }
@@ -63,7 +65,8 @@
 
   code, .cmd {
     font-family: "A-OTF 新ゴ Pro R", "A P-OTF 新ゴ ProN R", "新ゴ Pro R", "新ゴ R",
-      "Shin Go Pro R", "Shin Go", "M PLUS 1p", "IPAGothic", monospace;
+      "Shin Go Pro R", "Shin Go", "Noto Sans JP", "Zen Kaku Gothic New",
+      "IPAGothic", monospace;
     background: #eef4f6;
     border: 1px solid #d3e2e6;
     border-radius: 4px;
@@ -73,7 +76,8 @@
   }
   .cmdblock {
     font-family: "A-OTF 新ゴ Pro R", "A P-OTF 新ゴ ProN R", "新ゴ Pro R", "新ゴ R",
-      "Shin Go Pro R", "Shin Go", "M PLUS 1p", "IPAGothic", monospace;
+      "Shin Go Pro R", "Shin Go", "Noto Sans JP", "Zen Kaku Gothic New",
+      "IPAGothic", monospace;
     background: #f2f7f8;
     border: 1px solid #d3e2e6;
     border-left: 5px solid #048a81;
