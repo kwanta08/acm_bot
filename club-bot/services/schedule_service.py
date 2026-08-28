@@ -40,6 +40,47 @@ def parse_options(options_str: str) -> list[str]:
     return [p.strip() for p in options_str.split(";") if p.strip()]
 
 
+def select_unanswered_targets(
+    *,
+    role_member_ids: set[str] | None,
+    roster_active_ids: set[str],
+    roster_retired_ids: set[str],
+    answered_ids: set[str],
+) -> set[str] | None:
+    """催促の対象になるユーザー ID を返す（純関数）。
+
+    - ``role_member_ids`` は **「対象ロール指定なし」を None** で表す。
+      ロールを解決できなかった場合（ギルド不可視・ロール削除済み）と、
+      **ロールは解決できたが保持者が0名の場合**は、呼び出し側がこの関数を
+      呼ぶ前に「特定できない」を返すこと。空集合を渡すとこの関数は
+      空集合（＝未回答0名）を返すので、偽の 0 になる
+    - 戻り値 ``None`` は「対象を特定できない」。空集合は「対象は特定でき、
+      未回答が0名」。**0 と None を混ぜない**（0 は「全員回答済み」という
+      主張になる。ADR 0021 / 0022）
+
+    対象ロールがあるときは、ロール保持者から **名簿で退部・休止と分かって
+    いる人だけ** を差し引く。名簿に無い人は「退部か未登録か区別できない」
+    ので残す。積集合にすると、``/member register`` がまだ進んでいない
+    ギルドで今日届いている催促が止まる（ADR 0024）。
+
+    ID は TEXT 列（名簿）と int（discord.Member.id）が混ざるため、
+    ここで文字列へ正規化する。
+    """
+
+    def _norm(ids) -> set[str]:
+        return {str(i) for i in ids}
+
+    answered = _norm(answered_ids)
+    if role_member_ids is None:
+        candidates = _norm(roster_active_ids)
+        if not candidates:
+            # 対象ロールも名簿も無い。誰が回答すべきかを知る手段がない
+            return None
+    else:
+        candidates = _norm(role_member_ids) - _norm(roster_retired_ids)
+    return candidates - answered
+
+
 def get_schedule_emojis(gconf, guild: discord.Guild | None = None) -> dict[str, Any]:
     """スケジュール用絵文字を返す（ステータス → 絵文字）。
 

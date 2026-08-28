@@ -6,8 +6,11 @@ Schedule モジュール（仕様 11.2）。
 Bot 再起動後も on_raw_reaction_add/remove で処理可能。
 
 マルチテナント版: 全データを interaction.guild.id（または payload.guild_id）
-でスコープする。services/schedule_service.py には変更を加えないため、
-Embed 生成には guild 固定プロキシ repo.for_guild(guild_id) を渡す。
+でスコープする。Embed 生成には guild 固定プロキシ repo.for_guild(guild_id)
+を渡す（services/schedule_service.py の Embed 生成側は guild_id を
+受け取らないまま。ADR 0009 の完了条件2は未実施）。未回答者の母集団を
+決める select_unanswered_targets は、ギルドも DB も触らない純関数として
+同じモジュールに置いてある。
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import config
+from repositories.member_repository import MemberRepository
 from repositories.schedule_repository import ScheduleRepository
 from repositories.settings_repository import SettingsRepository
 from services import schedule_service as svc
@@ -137,7 +141,7 @@ class Schedule(commands.Cog):
         deadline="締切日時（例: 2026-07-02 または 2026-07-02 23:59）",
         description="詳細（任意）",
         place="場所（任意）",
-        target_role="対象ロール（任意）",
+        target_role="対象ロール（任意。未指定なら名簿の現役メンバーが催促の対象になります）",
         channel="投稿先チャンネル（任意）",
     )
     @require(Level.L2)
@@ -513,9 +517,22 @@ class Schedule(commands.Cog):
             # 従来はここで「対象: 0 名」の緑 Embed が出ていた（嘘の成功）
             await interaction.followup.send(
                 embed=error_embed(
-                    "対象ロールが設定されていないため、未回答者を特定できません。\n"
-                    "`/schedule create` の `target_role` で対象ロールを指定した投票のみ"
-                    "再通知できます。"
+                    "未回答者を特定できません。\n"
+                    "`/schedule create` の `target_role` で対象ロールを指定するか、"
+                    "`/member register` で名簿を登録してください。\n"
+                    "対象ロールに誰も付いていない場合もこのエラーになります。"
+                    "ロールの付与状況も確認してください。"
+                ),
+                ephemeral=True,
+            )
+            return
+        if count == 0:
+            # 1通も送っていないので「再通知しました」とは言わない
+            # （G2-3 が潰した嘘の成功と同じ形になる）
+            await interaction.followup.send(
+                embed=info_embed(
+                    "未回答者は居ませんでした",
+                    "対象者は全員回答済みです。DM は送っていません。",
                 ),
                 ephemeral=True,
             )
@@ -780,24 +797,94 @@ class Schedule(commands.Cog):
     # ====================================================================
     # 締切・通知ヘルパー（Reminders から呼ばれる）
     # ====================================================================
+    async def _roster_ids(self, guild_id: int) -> tuple[set[str], set[str]]:
+        """名簿の (現役, 退部・休止と分かっている人) の ID 集合を返す。
+
+        既存クエリ2回の差で作る（新しいクエリを足さない）。現役の条件は
+        ダッシュボード側（ADR 0025）と同じ active_flag=1 かつ status='active'。
+        """
+        repo = MemberRepository(self.bot.db)
+        active = {str(m["user_id"]) for m in await repo.list_members(guild_id)}
+        everyone = {
+            str(m["user_id"])
+            for m in await repo.list_members(guild_id, active_only=False, include_alumni=True)
+        }
+        return active, everyone - active
+
+    @staticmethod
+    def _member_of(guild: discord.Guild, user_id: str):
+        """名簿の user_id（TEXT 列）を Member へ解決する。数字でなければ None。"""
+        try:
+            return guild.get_member(int(user_id))
+        except (TypeError, ValueError):
+            log.warning("数字でない user_id を名簿で見つけました (guild=%s): %r", guild.id, user_id)
+            return None
+
     async def notify_unanswered(self, schedule: dict) -> int | None:
         """未回答者へ DM 通知。DM 不可ならチャンネルでメンション（仕様 11.2.5）。
 
-        **None は「対象を特定できない」**（対象ロール未設定・ロール削除済み・
-        ギルド不可視）。0 は「対象は特定でき、未回答が0名」。従来はどちらも
-        0 を返していたため、呼び出し側が緑の成功 Embed で「対象: 0 名」と
-        表示し、定期リマインドは送っていないのに送信済みフラグを立てていた。
+        **None は「対象を特定できない」**（ギルド不可視・対象ロール削除済み・
+        対象ロールの保持者が1人も見えない・対象ロールが無く名簿も空・
+        候補は居るが1人も解決できない）。
+        0 は「対象は特定でき、未回答が0名」。従来はどちらも 0 を返していたため、
+        呼び出し側が緑の成功 Embed で「対象: 0 名」と表示していた。
+
+        母集団は select_unanswered_targets が決める（G3-2 / ADR 0025 の更新）。
+        対象ロールがあるときはロール基準から名簿で退部と分かっている人を除き、
+        無いときは名簿の現役を対象にする。
         """
         guild_id = schedule["guild_id"]
         guild = self.bot.get_guild(guild_id)
-        if not guild or not schedule.get("target_role_id"):
-            return None
-        role = guild.get_role(int(schedule["target_role_id"]))
-        if not role:
+        if not guild:
             return None
 
+        role_member_ids: set[str] | None = None
+        if schedule.get("target_role_id"):
+            role = guild.get_role(int(schedule["target_role_id"]))
+            if not role:
+                return None
+            role_member_ids = {str(m.id) for m in role.members if not m.bot}
+            if not role_member_ids:
+                # ロールは生きているのに保持者が見えない。誰も付けていない
+                # ロール（正常）とメンバーキャッシュの欠落を区別できないので、
+                # 0 =「全員回答済み」とは主張しない。**名簿へフォールバック
+                # しない**（班限定の予定で名簿全員へ飛ぶほうが被害が大きい）
+                log.info(
+                    "対象ロールにメンバーが居ません (guild=%s, schedule=%s, role=%s)",
+                    guild_id,
+                    schedule["schedule_id"],
+                    schedule["target_role_id"],
+                )
+                return None
+
+        roster_active, roster_retired = await self._roster_ids(guild_id)
         answered = await self.repo.list_voters_for_schedule(guild_id, schedule["schedule_id"])
-        targets = [m for m in role.members if not m.bot and str(m.id) not in answered]
+        target_ids = svc.select_unanswered_targets(
+            role_member_ids=role_member_ids,
+            roster_active_ids=roster_active,
+            roster_retired_ids=roster_retired,
+            answered_ids=answered,
+        )
+        if target_ids is None:
+            return None
+
+        targets = []
+        for user_id in sorted(target_ids):
+            member = self._member_of(guild, user_id)
+            if member is not None and not member.bot:
+                targets.append(member)
+        if target_ids and not targets:
+            # 候補は居るのに1人も解決できなかった。0 を返すと
+            # 「全員回答済み」という嘘になり、送信済みにもされてしまう
+            log.warning(
+                "未回答者を1人も解決できませんでした"
+                " (guild=%s, schedule=%s, 候補=%d名, 名簿の現役=%d名)",
+                guild_id,
+                schedule["schedule_id"],
+                len(target_ids),
+                len(roster_active),
+            )
+            return None
 
         deadline = fmt_jp(from_iso(schedule["deadline"]))
         text = (

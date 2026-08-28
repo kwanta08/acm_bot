@@ -158,7 +158,7 @@ class Reminders(commands.Cog):
             try:
                 count = await schedule_cog.notify_unanswered(s)
                 if count is None:
-                    # 対象ロール未設定などで催促できない。送信済みフラグを
+                    # 対象を特定できないので催促できない。送信済みフラグを
                     # 立てない（立てると後からロールを付けても永久に再送
                     # されない。G2-3）。ウィンドウ内は毎tick ここへ来るが、
                     # skipped の記録だけで送信は発生しない
@@ -169,12 +169,24 @@ class Reminders(commands.Cog):
                         None,
                         None,
                         "skipped",
-                        "対象ロール未設定のため未回答者を特定できません",
+                        "対象ロールも名簿も解決できないため未回答者を特定できません",
                     )
                     log.info(
-                        "締切前催促をスキップ: %s（対象ロール未設定, guild=%s）",
+                        "締切前催促をスキップ: %s（対象を特定できない, guild=%s）",
                         s["title"],
                         guild_id,
+                    )
+                    continue
+                if count == 0:
+                    # 未回答が0名。**1通も送っていないので送信済みにしない**
+                    # （G2-3 の「送っていないなら送信済みにしない」を 0 にも
+                    # 適用する）。立てると、キャッシュ欠落で一瞬 0 になった
+                    # ときや、回答を取り消した人が出たときに二度と催促されない。
+                    # 窓は締切の1時間前までなので tick は有限
+                    log.debug(
+                        "締切前催促: 未回答0名のため送信なし (guild=%s, schedule=%s)",
+                        guild_id,
+                        s["schedule_id"],
                     )
                     continue
                 await self.schedule_repo.mark_reminder_sent(guild_id, s["schedule_id"])

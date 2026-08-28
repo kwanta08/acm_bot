@@ -330,7 +330,7 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
   title: 第N回定例会
   options: 2026-07-03 18:30
   deadline: 2026-07-03 12:00
-  target_role: @全員    （任意。指定すると未回答者通知の対象になる）
+  target_role: @全員    （任意。指定するとそのロールが未回答者通知の対象になる。未指定なら名簿の現役メンバーが対象）
   channel: #出欠管理     （任意。未指定なら DEFAULT_SCHEDULE_CHANNEL_ID）
 ```
 → 締切1時間前に未回答者へ自動 DM。締切を過ぎると自動でクローズし結果要約を投稿。
