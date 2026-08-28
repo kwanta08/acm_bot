@@ -169,9 +169,15 @@ def test_full_multiguild_isolation():
             assert await todoist.get(G1) is None
             assert await todoist.get(G2) is not None
 
-            await schedules.delete_schedule(G1, "sch-A")
+            # 論理削除（G3-3）。既定の get_schedule からは消えるが行は残る。
+            # include_deleted=True まで見ないと「消えたつもり」で素通りする
+            await schedules.soft_delete_schedule(G1, "sch-A")
             assert await schedules.get_schedule(G1, "sch-A") is None
-            assert await schedules.get_schedule(G2, "sch-B") is not None
+            kept = await schedules.get_schedule(G1, "sch-A", include_deleted=True)
+            assert kept is not None and kept["deleted_flag"] == 1
+            other = await schedules.get_schedule(G2, "sch-B", include_deleted=True)
+            assert other is not None
+            assert other["deleted_flag"] == 0, "他ギルドの予定まで削除済みになっている"
         finally:
             await db.close()
 

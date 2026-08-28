@@ -174,7 +174,12 @@ CREATE TABLE IF NOT EXISTS schedules (
     channel_id         TEXT NOT NULL,
     closed_flag        INTEGER NOT NULL DEFAULT 0,
     reminder_sent_flag INTEGER NOT NULL DEFAULT 0,
-    sheet_title        TEXT
+    sheet_title        TEXT,
+    -- 論理削除（v17）。1 なら一覧・集計・催促から外す。票は消さない
+    -- （/schedule delete は投票メッセージを消すが、票データは残す）
+    deleted_flag       INTEGER NOT NULL DEFAULT 0,
+    -- 確定した候補（v17。schedule_options.option_id）。NULL は未確定
+    confirmed_option_id TEXT
 );
 """,
     "schedule_options": f"""
@@ -586,7 +591,7 @@ POSTGRES_VIEW_DDL = "\n".join(
 # 16: layer_sessions.layer_num を INTEGER から TEXT へ変更（/layer start は
 #    「シュリンク」等のテキスト層番号を受け付ける仕様。PostgreSQL では
 #    asyncpg の DataError になっていた。migrations/015）
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
@@ -1020,6 +1025,9 @@ class Database:
         if version < 16:
             await self._migrate_v16_layer_num_text()
 
+        if version < 17:
+            await self._migrate_v17_schedule_confirmed()
+
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
 
@@ -1234,6 +1242,33 @@ class Database:
         ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
         await self._executescript(ddl_map["discord_name_cache"])
         log.info("discord_name_cache テーブルを作成しました（v15）。")
+
+    async def _migrate_v17_schedule_confirmed(self) -> None:
+        """
+        v17: schedules に deleted_flag と confirmed_option_id を追加する（冪等）。
+
+        **1つの版に2列をまとめてあるのは意図的。** deleted_flag は G3-3
+        （/schedule delete の論理削除）、confirmed_option_id は G3-4
+        （/schedule confirm の確定日程）が使う。_migrate_versioned() は
+        version >= SCHEMA_VERSION で早期 return するため、G3-3 が v17 を
+        切ったあとに G3-4 が同じ版へ ALTER を足しても**既存 DB では二度と
+        実行されない**（新規 DB にだけ列がある状態になる。gotcha
+        `bot-wont-start-undefined-column` と同型）。だから先に両方入れる。
+
+        どちらも既定値つき・NULL 許容の追加のみで、既存行の値は変わらない
+        （deleted_flag は 0 = 削除されていない、confirmed_option_id は
+        NULL = 未確定）。ALTER 前に列の有無を確認するのは、PostgreSQL で
+        素の ADD COLUMN が DuplicateColumn になり起動できなくなるため。
+        """
+        cols = await self._table_columns("schedules")
+        if "deleted_flag" not in cols:
+            await self.execute(
+                "ALTER TABLE schedules ADD COLUMN deleted_flag INTEGER NOT NULL DEFAULT 0"
+            )
+            log.info("schedules テーブルに deleted_flag カラムを追加しました（v17）。")
+        if "confirmed_option_id" not in cols:
+            await self.execute("ALTER TABLE schedules ADD COLUMN confirmed_option_id TEXT")
+            log.info("schedules テーブルに confirmed_option_id カラムを追加しました（v17）。")
 
     async def _migrate_v16_layer_num_text(self) -> None:
         """

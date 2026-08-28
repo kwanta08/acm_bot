@@ -73,7 +73,8 @@ Bot管理者」というラベルで出ます（`utils/permissions.LEVEL_LABELS`
 | `/schedule remind <id>` | L2 | 未回答者へ再通知 |
 | `/schedule edit-deadline <id>` | L2 | 開催中の日程調整の締切を変更 |
 | `/schedule list-closed` | L1 | 締切済みの一覧 |
-| `/schedule delete <id>` | L3 | 投票削除 |
+| `/schedule delete <id>` | L3 | 投票を削除（投票メッセージも削除し締切扱いにする。**票データは残る**） |
+| `/schedule restore <id>` | L3 | 削除した投票を戻す（締切済みとして戻り、自動の催促・自動締切は走らない） |
 | `/schedule emoji set` | L4 | 出欠リアクションにサーバーのカスタム絵文字を設定（ステータス選択 + 絵文字名のオートコンプリート） |
 | `/schedule emoji show` | L4 | 現在の絵文字設定を表示 |
 | `/schedule emoji reset` | L4 | 絵文字設定を既定（✅❓❌）に戻す（ステータス指定可・省略で全部） |

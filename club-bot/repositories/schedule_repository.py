@@ -50,16 +50,27 @@ class ScheduleRepository(BaseRepository):
             ),
         )
 
-    async def get_schedule(self, guild_id: int, schedule_id: str) -> dict[str, Any] | None:
-        row = await self.db.fetchone(
-            "SELECT * FROM schedules WHERE guild_id = ? AND schedule_id = ?",
-            (guild_id, schedule_id),
-        )
+    async def get_schedule(
+        self, guild_id: int, schedule_id: str, include_deleted: bool = False
+    ) -> dict[str, Any] | None:
+        """予定を1件返す。
+
+        **既定では削除済みを返さない。** これにより /schedule status や
+        /schedule close などが個別の条件を書かずに削除済みを除外できる
+        （安全側を既定にする）。削除済みを見たい呼び出し
+        （/schedule restore・「削除されています」の案内）だけが
+        include_deleted=True を渡す。
+        """
+        sql = "SELECT * FROM schedules WHERE guild_id = ? AND schedule_id = ?"
+        if not include_deleted:
+            sql += " AND deleted_flag = 0"
+        row = await self.db.fetchone(sql, (guild_id, schedule_id))
         return dict(row) if row else None
 
     async def list_open_schedules(self, guild_id: int) -> list[dict[str, Any]]:
         rows = await self.db.fetchall(
-            "SELECT * FROM schedules WHERE guild_id = ? AND closed_flag = 0 ORDER BY deadline",
+            "SELECT * FROM schedules WHERE guild_id = ? AND closed_flag = 0 AND deleted_flag = 0"
+            " ORDER BY deadline",
             (guild_id,),
         )
         return [dict(r) for r in rows]
@@ -67,7 +78,8 @@ class ScheduleRepository(BaseRepository):
     async def list_due_schedules(self, guild_id: int, deadline_iso: str) -> list[dict[str, Any]]:
         """締切を過ぎた未クローズの投票を返す。"""
         rows = await self.db.fetchall(
-            "SELECT * FROM schedules WHERE guild_id = ? AND closed_flag = 0 AND deadline <= ?",
+            "SELECT * FROM schedules WHERE guild_id = ? AND closed_flag = 0 AND deleted_flag = 0"
+            " AND deadline <= ?",
             (guild_id, deadline_iso),
         )
         return [dict(r) for r in rows]
@@ -79,7 +91,8 @@ class ScheduleRepository(BaseRepository):
         rows = await self.db.fetchall(
             """
             SELECT * FROM schedules
-            WHERE guild_id = ? AND closed_flag = 0 AND reminder_sent_flag = 0
+            WHERE guild_id = ? AND closed_flag = 0 AND deleted_flag = 0
+              AND reminder_sent_flag = 0
               AND deadline >= ? AND deadline <= ?
             """,
             (guild_id, from_iso, to_iso_),
@@ -98,10 +111,42 @@ class ScheduleRepository(BaseRepository):
             (guild_id, schedule_id),
         )
 
-    async def delete_schedule(self, guild_id: int, schedule_id: str) -> None:
+    async def soft_delete_schedule(self, guild_id: int, schedule_id: str) -> None:
+        """予定を論理削除する（票は消さない）。
+
+        **同時に closed_flag も立てる。** 投票メッセージを消した時点で
+        投票は現実に終わっているので嘘ではなく、こうしておくと自動催促
+        （list_reminder_candidates）・自動締切（list_due_schedules）・
+        開催中の候補（list_open_schedules）が**既存の条件式だけで**止まる。
+        復元用の抑止フラグを別に足す必要がなく、restore は deleted_flag を
+        戻すだけで済む。
+        """
         await self.db.execute(
-            "DELETE FROM schedules WHERE guild_id = ? AND schedule_id = ?", (guild_id, schedule_id)
+            "UPDATE schedules SET deleted_flag = 1, closed_flag = 1"
+            " WHERE guild_id = ? AND schedule_id = ?",
+            (guild_id, schedule_id),
         )
+
+    async def restore_schedule(self, guild_id: int, schedule_id: str) -> bool:
+        """論理削除を取り消す。**deleted_flag しか書き換えない。**
+
+        締切済みとして戻る（closed_flag は削除時に立っている）。投票
+        メッセージは戻らないので、投票を再開しないほうが実態に合う。
+        """
+        cur = await self.db.execute(
+            "UPDATE schedules SET deleted_flag = 0"
+            " WHERE guild_id = ? AND schedule_id = ? AND deleted_flag = 1",
+            (guild_id, schedule_id),
+        )
+        return cur.rowcount > 0
+
+    async def list_deleted_schedules(self, guild_id: int) -> list[dict[str, Any]]:
+        rows = await self.db.fetchall(
+            "SELECT * FROM schedules WHERE guild_id = ? AND deleted_flag = 1"
+            " ORDER BY deadline DESC",
+            (guild_id,),
+        )
+        return [dict(r) for r in rows]
 
     # ---------- options ----------
     async def add_option(
@@ -213,15 +258,18 @@ class ScheduleRepository(BaseRepository):
 
     async def list_closed_schedules(self, guild_id: int) -> list[dict[str, Any]]:
         rows = await self.db.fetchall(
-            "SELECT * FROM schedules WHERE guild_id = ? AND closed_flag = 1 ORDER BY deadline DESC",
+            "SELECT * FROM schedules WHERE guild_id = ? AND closed_flag = 1 AND deleted_flag = 0"
+            " ORDER BY deadline DESC",
             (guild_id,),
         )
         return [dict(r) for r in rows]
 
     async def list_all(self, guild_id: int) -> list[dict[str, Any]]:
-        """クローズ済みも含む全スケジュールを返す（集計用）。"""
+        """クローズ済みも含む全スケジュールを返す（集計用）。削除済みは除く。"""
         rows = await self.db.fetchall(
-            "SELECT * FROM schedules WHERE guild_id = ? ORDER BY deadline DESC", (guild_id,)
+            "SELECT * FROM schedules WHERE guild_id = ? AND deleted_flag = 0"
+            " ORDER BY deadline DESC",
+            (guild_id,),
         )
         return [dict(r) for r in rows]
 

@@ -175,8 +175,11 @@
 | `/data delete` | このサーバーの全データ（管理者のみ。8.1 参照） |
 | `/todoist-remove` | 当該サーバーの Todoist トークン（暗号文ごと削除） |
 | `/task delete` | タスク |
-| `/schedule delete` | 日程調整と、それに紐づく出欠回答 |
+| `/schedule delete` | 日程調整（無効化）。**出欠回答は残ります**（`/schedule restore` で戻せます） |
 | `/layer keta-remove` | 桁名（無効化） |
+
+無効化した日程調整の出欠回答を**完全に消す**には、`/data delete`（8.1）で
+サーバー全体のデータを削除するか、8.2 の個人からの請求として運営者へご連絡ください。
 
 データの持ち出しは `/data export`（管理者のみ）または Web ダッシュボードの
 CSV 出力で行えます。書き出した CSV にサーバーIDや Todoist トークンは含まれません。

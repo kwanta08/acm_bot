@@ -367,8 +367,11 @@ def test_progress_remove_confirmation_is_owner_only():
 # ---------------------------------------------------------------------
 # /schedule delete — 票が消える前に確認すること
 #
-# 削除の**方式**はこのタスクでは変えない（論理削除化は G3-3）。
-# ここで足すのは確認ステップだけ。
+# G3-3 で削除は**論理削除**になった（票データは残る）。ここで見るのは
+# 確認ステップの有無だけなので、削除されたことの検査は
+# `deleted_flag` で行う。`get_schedule(...) is None` だけを見ると、
+# 既定除外のせいで物理削除でも論理削除でも緑になり、何も担保しない。
+# 票が残ることは tests/test_schedule_delete.py が見る。
 # ---------------------------------------------------------------------
 async def _seed_schedule(db: Database) -> str:
     from repositories.schedule_repository import ScheduleRepository
@@ -433,7 +436,11 @@ def test_schedule_delete_deletes_after_confirmation():
             view = interaction.sent[-1]["view"]
             await view.confirm.callback(_Interaction(OWNER))
 
-            assert await ScheduleRepository(db).get_schedule(G1, "sch_1") is None
+            repo = ScheduleRepository(db)
+            assert await repo.get_schedule(G1, "sch_1") is None, "一覧から消えていない"
+            row = await repo.get_schedule(G1, "sch_1", include_deleted=True)
+            assert row is not None, "行ごと消えている（論理削除になっていない）"
+            assert row["deleted_flag"] == 1
         finally:
             await db.close()
 

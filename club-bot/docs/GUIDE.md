@@ -175,8 +175,13 @@ Bot に `ロールの管理` と `チャンネルの管理` が付いている�
 ```
 /member setup               所属班・班長をまとめて設定
 /report audit               直近の操作履歴
-/schedule delete            日程調整の削除
+/schedule delete            日程調整の削除（票データは残ります）
+/schedule restore           削除した日程調整を戻す
 ```
+
+`/schedule delete` は投票メッセージを消して締切扱いにしますが、**誰が何と答えたかは残します**。
+消してから「やっぱり集計を見たい」となったら `/schedule restore` で戻せます
+（投票メッセージは戻らないので、取り直すときは `/schedule create` で作り直してください）。
 
 ### 管理者
 

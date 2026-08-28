@@ -593,6 +593,55 @@ def test_pg_live_layer_start_accepts_text_layer_num():
     run(_main())
 
 
+def test_pg_live_schedule_soft_delete_columns():
+    """スキーマ v17 の2列が PostgreSQL にも存在し、論理削除が通ること。
+
+    deleted_flag は G3-3（/schedule delete の論理削除）、
+    confirmed_option_id は G3-4（確定日程）が使う。1つの版に2列を
+    まとめてあるので、**両方**の存在をここで見る（v17 済みの DB は
+    二度と v17 の処理を通らないため、後から足しても既存 DB には入らない）。
+    """
+    dsn = _guarded_dsn()
+
+    async def _main():
+        from repositories.schedule_repository import ScheduleRepository
+
+        db = Database("./unused.db", database_url=dsn)
+        await db.connect()
+        try:
+            cols = {
+                r["column_name"]: r["data_type"]
+                for r in await db.fetchall(
+                    "SELECT column_name, data_type FROM information_schema.columns"
+                    " WHERE table_name = 'schedules'"
+                )
+            }
+            assert "deleted_flag" in cols, "v17 の deleted_flag が無い"
+            assert "confirmed_option_id" in cols, "v17 の confirmed_option_id が無い"
+
+            repo = ScheduleRepository(db)
+            await db.execute("DELETE FROM schedules WHERE guild_id = ?", (G1,))
+            await repo.create_schedule(
+                G1, "pg_sch", "PG 用", None, None, None, "2026-10-01T23:59:00", "u1", "1"
+            )
+            await repo.add_option(G1, "pg_opt", "pg_sch", "10/1", "2026-10-01T18:00:00", None, None)
+            await repo.set_vote(G1, "pg_opt", "u9", "ok")
+
+            await repo.soft_delete_schedule(G1, "pg_sch")
+            assert await repo.get_schedule(G1, "pg_sch") is None
+            row = await repo.get_schedule(G1, "pg_sch", include_deleted=True)
+            assert row is not None and row["deleted_flag"] == 1
+            assert len(await repo.list_schedule_votes(G1, "pg_sch")) == 1, "票が消えている"
+
+            assert await repo.restore_schedule(G1, "pg_sch") is True
+            assert await repo.get_schedule(G1, "pg_sch") is not None
+        finally:
+            await db.execute("DELETE FROM schedules WHERE guild_id = ?", (G1,))
+            await db.close()
+
+    run(_main())
+
+
 if __name__ == "__main__":
     test_to_pg_ddl_autoincrement_and_guild_id()
     print("test_to_pg_ddl_autoincrement_and_guild_id: OK")
@@ -623,6 +672,8 @@ if __name__ == "__main__":
         print("test_pg_live_dashboard_row_id_accepts_string: OK")
         test_pg_live_layer_start_accepts_text_layer_num()
         print("test_pg_live_layer_start_accepts_text_layer_num: OK")
+        test_pg_live_schedule_soft_delete_columns()
+        print("test_pg_live_schedule_soft_delete_columns: OK")
     else:
         print("ライブ PG テストは CLUB_TEST_PG_DSN 未設定のためスキップ")
     print("全テスト成功")
