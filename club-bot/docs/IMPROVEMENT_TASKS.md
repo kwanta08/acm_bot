@@ -355,14 +355,16 @@
 
 ## Phase G3: 導入と定着（破壊的変更を含む。プランモードを挟む）
 
-- [ ] **G3-1** `/setup` で班長ロールを設定できるようにし、`/set_role` に削除を追加する。
+- [x] **G3-1** `/setup` で班長ロールを設定できるようにし、`/set_role` に削除を追加する。
       `cogs/setup_wizard.py:44-47` に `LEADER_ROLE_IDS` が無く、L2 判定の唯一の根拠なのに
       ウィザードから設定できない。`cogs/settings.py:288-295` は**追記専用**で重複チェックも無く、
       1つ外すには全消しするしかない（その間 全班長が L1 に降格）。
       `services/season_service.py:71` の rollover も `members.is_leader` しかリセットせず、
       **毎年ロールIDが積み上がる**。
-      - **受入**: `ROLE_SETTINGS` に `LEADER_ROLE_IDS` を追加（`RoleSelect(max_values=5)` で複数選択、
+      - **受入**: `ROLE_SETTINGS` に `LEADER_ROLE_IDS` を追加（`RoleSelect(max_values=25)` で複数選択、
         追記ではなく上書き）。`/set_role` に `action: add|remove` を追加し重複を除去する。
+        （**当初 `max_values=5` と書いていたが 25 へ改めた。** 上書き保存なので 5 だと
+        班長ロールを6件以上運用しているギルドで L2 判定の根拠を黙って切り捨てる。完了ログの設計判断2）
         `/season rollover` の結果 Embed に「班長ロールの見直し」を促す一文を追加
       - **検証**: `tests/test_setup_wizard.py` に複数ロール保存と重複除去のケースを追加
       - **注意**: 既存の `LEADER_ROLE_IDS`（カンマ区切り）を壊さない。
@@ -1546,3 +1548,141 @@ ADR 0017 の最小権限招待では `manage_channels` を要求しないため�
 - IMPROVEMENT_REPORT P1-19 の後半「`/setup` に『不足しているものを今すぐ作る』
   ボタン」は未実装（受入基準に無いためスコープ外）
 - スキーマ変更・マイグレーションは無し。PostgreSQL 固有の新規 SQL も無い
+
+### 2026-08-28 — G3-1: `/setup` に班長ロール、`/set_role` に削除（ブランチ `fix/g3-1`）
+
+L2 判定の唯一の根拠である `LEADER_ROLE_IDS` が `/setup` から設定できず、`/set_role` は
+追記専用で重複チェックも無かった。1つ外すには全消しするしかなく、
+**その間は全班長が L1 に降格**していた。
+
+- ruff: `All checks passed!`
+- pytest: **895 passed, 10 skipped**（着手前は 870 passed, 10 skipped。
+  skip は `CLUB_TEST_PG_DSN` 未設定の PostgreSQL ライブテストのみで件数は据え置き）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `config.py` | `MULTI_ROLE_KEYS`（複数値ロール設定キー）を追加。`/setup` と `/set_role` が同じ定義を見るよう1箇所に置いた |
+| `cogs/setup_wizard.py` | `ROLE_SETTINGS` に班長ロールを追加。`build_setup_embed(gconf, selected_key, notice)` が `list[int]` を複数メンションで描画し、**空リストを「未設定」として数える**。`select_item` を `edit_message` 化。上限超過ギルドでは選ばせる前に断る。`select_role` は複数値をカンマ結合で上書き保存し、単数キーへの複数選択を拒否 |
+| `cogs/settings.py` | `split_role_tokens()` / `merge_role_ids()` / `stale_role_warning()`（純関数）を追加。`/set_role` に `action: add|remove`。変更が無いときは保存しない。保存後に実効設定を解決し直して警告する |
+| `cogs/season.py` | `rollover_result_embed` に班長ロールの見直しを促す一文（ロールIDは自動で消さない） |
+| `cogs/help.py` | `/setup-status` の班長ロールの hint を `/setup` 優先へ |
+| `docs/` | `GUIDE.md` / `OPERATION.md` / `SETUP.md` を実装に合わせた |
+
+新規テスト `tests/test_settings_role.py`（16件）＋ `tests/test_setup_wizard.py` に7件、
+`tests/test_seasons.py` に1件を追加した。
+
+#### 設計判断
+
+**1. `select_item` を `edit_message` にしたのが本質。**
+最初の方針は「`self.select_role.max_values` を切り替える」だけだった。だが従来の `select_item` は
+`interaction.response.send_message` で**別の ephemeral を送るだけ**で親メッセージの View を
+送り直していない。Python 側の属性を変えてもクライアントが持つコンポーネント定義は
+`max_values=1` のままなので、**複数選択が一生発生しない**。
+しかも「`view.select_role.max_values == 25` を見るテスト」は緑になる。
+gotcha `test-asserts-permission-but-decorator-missing` と同型なので、テストは
+`edit_message` に渡された View まで見る形にした。
+
+**2. `max_values` は受入基準の 5 ではなく 25（RoleSelect の上限）。**
+`/setup` は**上書き**保存なので、5 にすると班長ロールを6件以上運用しているギルドで
+L2 判定の根拠を黙って切り捨てる。25 でも超えるギルドはありうるので、
+`select_item` の時点で `disabled` にして `/set_role action:remove` へ誘導し、
+保存側にも同じガードを置いた（**選ばせてから捨てない**）。受入基準の本文も 25 に直した。
+
+**3. 保存が実効設定に反映されないことがあるので、成功と言い切らない。**
+`config.for_guild()` は DB 値が空のときグローバル（env 由来 / 起動時に読んだ値）へ
+フォールバックする（`config.py:315-317` の `if leader_ids:`）。最後の1件を外すと
+**DB は空なのに L2 は残る**。G2-7 と同型の嘘になるため、保存後に `force_reload=True` で
+解決し直し、**保存値に無いロールが有効なら**警告を出す。
+
+判定を「外した ID が残っているか」にすると穴が残る（差分監査で実測）。
+DB=`111` / env=`222` の状態で `111` を外すと、**保存していない `222` が L2 を得る**のに無言だった。
+「解決結果のうち保存値に無いもの」へ広げ、回帰テストを付けた。
+
+文面は原因で分けた。**env が設定されている場合しか「`.env` を直せ」と言わない。**
+`GUILD_ID` 指定のレガシーギルドでは起動時に読んだ値がプロセス内に残るだけなので
+（`config.load_from_db` は `if not self.leader_role_ids:` で一度入った値を減らさない）、
+その場合は「再起動で反映される」と案内する。存在しない `.env` の行を直せと言うのは、
+このタスクが潰そうとしている失敗と同型。
+
+**4. 保存は成功させ、DB は巻き戻さない。** 3 の警告時に保存自体を中止すると、
+`.env` を直して再起動しても何も戻ってこない。G2-7 の「ローカル完了は維持したまま
+同期結果を明記する」と同じ形にした。
+
+**5. 変更が無いときは `settings.set()` を呼ばない。**
+既存値の非数値トークンは保存時に除かれる（`get_int_list` が元から無視するので実効挙動は不変）が、
+**何も変えていない操作で消える**のは ADR 0024 の「明示的な操作でだけ変える」に反する。
+
+**6. `/season rollover` は `LEADER_ROLE_IDS` に触らない。**
+勝手に消すと新体制が設定するまで全班長が L1 に降格する（ADR 0024）。
+`services/season_service.py` は不変のまま、結果 Embed で見直しを促すだけにした。
+
+**7. 受入基準からの逸脱（すべて意図的）。**
+- `max_values` 25（設計判断2）
+- テストファイルは指定の `tests/test_setup_wizard.py` に加えて **`tests/test_settings_role.py` を新設**。
+  `/set_role` の実体は別 Cog（`cogs/settings.py`）で、ウィザード側のテストだけでは
+  コマンドがヘルパを通っていることを測れないため
+
+#### ゲートの判定
+
+| ゲート | 判定 | 経過 |
+|---|---|---|
+| ゲート1（acm-plan-reviewer） | REVISE ×2 → 「織り込めば APPROVE 相当」 | 1回目に7件（env フォールバックで remove が効かない／既存テストの直し方／コマンド経路のテスト／`edit_message` 化の3条件／`max_values` の付帯条件／黙って正規化しない／ドキュメント追随）、2回目に3件（警告文の原因別分岐・no-op で保存しない・権限テストの形） |
+| ゲート2（acm-diff-auditor） | FINDINGS → **CLEAN** | 6件（残留警告の判定漏れ／SETUP.md の記述／OPERATION.md の未エスケープ `\|`／テストの後始末が `finally` の外／`MULTI_ROLE_KEYS` の二重定義／`ruff format` の回帰）を修正 |
+| ゲート2（acm-test-adversary） | **EFFECTIVE** | 16項目すべてで、戻すと赤くなることを実測 |
+
+**ゲート2は同時ではなく逐次で回した。** test-adversary は実装を一時的に戻す手法なので、
+同時に走らせると diff-auditor が中途半端な `git diff` を読むため。ループ手順からの意図的な逸脱。
+
+#### test-adversary の実測（抜粋）
+
+| 戻した実装 | 落ちたテスト |
+|---|---|
+| `ROLE_SETTINGS` から班長ロールを削除 | 5 |
+| `build_setup_embed` の複数値分岐 | 3 |
+| `select_item` を `send_message` へ戻す | 2 |
+| `max_values` の切り替えだけ削除 | 1 |
+| 上限超過ガード | 1 |
+| `select_role` の複数値分岐 | 1 |
+| 単数キーへの複数選択拒否 | 1 |
+| `/set_role` を HEAD の実装へ全戻し | 9 |
+| `merge_role_ids` の重複判定 | 1 |
+| `changed` を常に True | 3 |
+| `stale_role_warning` の呼び出し | 3 |
+| **`leftover` を `merge.removed` ベースへ戻す** | **1**（差分監査で見つけた穴の回帰テスト） |
+| 警告文の原因別出し分け | 1 |
+| `split_role_tokens` の非数値検出 | 3 |
+| `rollover_result_embed` の一文 | 1 |
+| `@app_commands.check(is_admin)` を外す | 1 |
+
+**adversary が見つけた「戻しても緑のまま」の穴3件は、その場で塞いだ**（塞いだ後に
+戻して落ちることも実測済み）:
+
+| 穴 | 意味 | 対応 |
+|---|---|---|
+| `is_admin`(L4) → `@require(Level.L2)` への**差し替え**が無検出 | ロール無しメンバーはどのレベルでも拒否されるので素通りする。`/set_role` は L4/L2 判定の根拠そのものを書き換えるコマンドなので、**班長が自分を管理者へ昇格できる** | `command_required_level(Settings.set_role) == Level.L4` を追加 |
+| `MAX_MULTI_ROLE_VALUES` を 5 に戻しても無検出 | テストがシンボル参照だけで、意図（25 を選んだ理由）が固定されていなかった | 値そのものを assert |
+| `_set_multi_role` の `_after_change` 削除が無検出 | 保存後のキャッシュ破棄とグローバル再読込が消えても気づけない | 実効設定が更新されることを検査するケースを追加 |
+
+#### 次タスクへの申し送り
+
+- **`config.py` の解決規則そのものは変えていない。** 「settings に行があるなら空でも正」への変更は
+  L2 の解決規則の変更で、G3-1 の範囲（ADR 0014）を超える。現状は警告で運用を支えている。
+  **別タスクとして起票が要る**
+- レガシーギルド（`GUILD_ID` 指定）のグローバル値は `config.for_guild()` の種付け（`config.py:284`）
+  経由で**同一プロセスの他ギルドにも配られる**。G4-11（`log_to_channel` の同一ギルド限定）と
+  同じ根から来ている
+- `cogs/settings.py` には監査ログ（`AuditLogRepository`）の記録が**一切ない**。
+  L2 判定の根拠を書き換えるコマンドなのに、復元材料が ephemeral メッセージしかない。別タスク候補
+- `RoleSelect(default_values=...)`（discord.py 2.4+）を使うと「上書き」が
+  「今の集合を編集する」操作になり、上限超過の扱いも素直になる。
+  `requirements.txt` の下限は `>=2.3.0` なので今回は見送った。
+  **G3-6 で `DynamicItem`（2.4+）のために下限を上げる予定なので、その後なら採用できる**
+- **PostgreSQL 実機では検証していない**（`CLUB_TEST_PG_DSN` 未設定・Docker なし）。
+  SQL の追加・変更はゼロで、保存先は既存の `settings.setting_value TEXT NOT NULL`。
+  ただし**全消し時に空文字 `""` を書く経路は新規**で、ここだけは PG 未確認
+- 採番の食い違い: G1-2 の申し送りは「通知キーの一本化（`DEFAULT_PROGRESS_CHANNEL_ID` へ寄せる）は
+  G3-1 で扱う」と書いているが、G3-1 は班長ロールで埋まっている。**未起票**（破壊的変更なので別途起票が要る）
+- ブランチは `fix/g3-5` から分岐した（ADR 0014 の1タスク1コミットは保っているが、
+  **マージは順番どおりに行う必要がある**）。以降の G3 も連鎖する
