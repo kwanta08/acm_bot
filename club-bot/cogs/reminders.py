@@ -16,7 +16,7 @@ Reminders モジュール（仕様 11.5）。
 
 from __future__ import annotations
 
-from datetime import time, timedelta
+from datetime import datetime, time, timedelta
 from itertools import groupby
 
 import discord
@@ -35,13 +35,24 @@ from services.progress_sync_service import resolve_default_channel_id
 from services.progress_tree import load_tree
 from utils.embeds import task_embed
 from utils.logger import get_logger
-from utils.parser import TZ, from_iso, now, to_iso
+from utils.parser import TZ, fmt_jp, from_iso, now, to_iso
 
 log = get_logger("reminders")
 
 # 遅延マイルストーンの週次通知（0 = 月曜）。reminders_log の種別名も兼ねる
 MILESTONE_ALERT_WEEKDAY = 0
 MILESTONE_ALERT_TYPE = "milestone_alert"
+
+# 確定日程のリマインド（G3-4）。
+#
+# **この reminder_type の行は「送れた」ことだけを意味する。**
+# 失敗やスキップを書くと RemindersLogRepository.exists() が status を見ない
+# ため再送が殺され、その日の通知が二度と飛ばなくなる（G2-3 が潰した
+# 「送っていないのに送信済み」と同じ形）。失敗は log.warning と
+# bot.log_to_channel にだけ出すこと。
+CONFIRMED_REMINDER_TYPE = "schedule_confirmed"
+#: phase → (通知する日のオフセット, 本文の頭)
+CONFIRMED_PHASES = {"eve": (1, "明日"), "day": (0, "本日")}
 
 PRIORITY_LABELS = {1: "低", 2: "中", 3: "高", 4: "最優先"}
 PRIORITY_EMOJI = {4: "🔴", 3: "🟠", 2: "🔵", 1: "⚪"}
@@ -116,6 +127,7 @@ class Reminders(commands.Cog):
         self.daily_night.start()
         self.daily_purge.start()
         self.weekly_milestone_alert.start()
+        self.confirmed_schedule_reminders.start()
 
     async def cog_unload(self):
         self.schedule_tick.cancel()
@@ -123,6 +135,7 @@ class Reminders(commands.Cog):
         self.daily_night.cancel()
         self.daily_purge.cancel()
         self.weekly_milestone_alert.cancel()
+        self.confirmed_schedule_reminders.cancel()
 
     # ---------- 5分ごと: 締切前催促 + 自動締切 ----------
     @tasks.loop(minutes=5)
@@ -362,6 +375,132 @@ class Reminders(commands.Cog):
             guild_id, MILESTONE_ALERT_TYPE, target_id, None, str(channel_id), "sent"
         )
         return len(behind)
+
+    # ---------- 前日 20:00 / 当日 08:30: 確定した日程のリマインド ----------
+    @tasks.loop(time=[time(hour=8, minute=30, tzinfo=TZ), time(hour=20, minute=0, tzinfo=TZ)])
+    async def confirmed_schedule_reminders(self):
+        current = now()
+        # 08:30 の回は当日分、20:00 の回は翌日分
+        phase = "day" if current.hour < 12 else "eve"
+        await self.run_confirmed_reminders(phase, current)
+
+    @confirmed_schedule_reminders.before_loop
+    async def _before_confirmed(self):
+        await self.bot.wait_until_ready()
+
+    async def run_confirmed_reminders(self, phase: str, now_dt=None) -> dict[int, int]:
+        """確定した日程を前日 20:00 と当日朝に知らせる。
+
+        **確定した予定が1件も無い日は何も送らない**（ADR 0023）。
+        「本日の予定はありません」は送らない。
+        1ギルドの失敗が他ギルドを止めないよう個別に握る。
+        """
+        offset, _ = CONFIRMED_PHASES[phase]
+        current = now_dt or now()
+        target_date = current.date() + timedelta(days=offset)
+        start = datetime.combine(target_date, time(0, 0), tzinfo=TZ)
+        end = start + timedelta(days=1)
+        sent: dict[int, int] = {}
+        for guild in list(self.bot.guilds):
+            try:
+                count = await self._remind_confirmed(guild.id, phase, start, end)
+            except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
+                log.warning("確定日程のリマインドに失敗 (guild=%s): %s", guild.id, type(e).__name__)
+                continue
+            if count:
+                sent[guild.id] = count
+        return sent
+
+    async def _remind_confirmed(self, guild_id: int, phase: str, start, end) -> int:
+        _, prefix = CONFIRMED_PHASES[phase]
+        rows = await self.schedule_repo.list_confirmed_between(guild_id, to_iso(start), to_iso(end))
+        if not rows:
+            return 0
+
+        guild = self.bot.get_guild(guild_id)
+        date_key = start.date().isoformat()
+        sent = 0
+        for row in rows:
+            schedule_id = str(row["schedule_id"])
+            target_id = f"confirmed:{schedule_id}:{date_key}:{phase}"
+            if await self.log_repo.exists(guild_id, CONFIRMED_REMINDER_TYPE, target_id):
+                continue
+            try:
+                when = fmt_jp(from_iso(str(row["confirmed_start_at"])))
+            except (TypeError, ValueError):
+                # 壊れた1件でその日の他の通知を落とさない
+                log.warning(
+                    "確定日時を解釈できません (guild=%s, schedule=%s): %r",
+                    guild_id,
+                    schedule_id,
+                    row.get("confirmed_start_at"),
+                )
+                continue
+
+            body = f"{prefix} {when} **{row['title']}**"
+            if row.get("place"):
+                body += f"（{row['place']}）"
+            channel = self._guild_channel(guild, row.get("channel_id"))
+            if channel is None:
+                # 部員には沈黙するが、運用者には見える形で残す（ADR 0023）
+                log.info(
+                    "確定リマインドの送信先が無い (guild=%s, schedule=%s)", guild_id, schedule_id
+                )
+                await self.bot.log_to_channel(
+                    f"[Schedule] 確定日程「{row['title']}」のリマインドを送れませんでした"
+                    "（投稿チャンネルが見つかりません）。",
+                    guild_id=guild_id,
+                )
+                continue
+
+            content = None
+            if guild is not None and row.get("target_role_id"):
+                try:
+                    role = guild.get_role(int(row["target_role_id"]))
+                except (TypeError, ValueError):
+                    # 壊れた1件でそのギルドの残りを落とさない
+                    role = None
+                if role:
+                    content = role.mention
+            try:
+                await channel.send(content=content, embed=task_embed("📅 予定のお知らせ", body))
+            except (discord.Forbidden, discord.HTTPException) as e:
+                # **reminders_log には書かない。** 書くと exists() が再送を殺す
+                log.warning(
+                    "確定リマインドの送信に失敗 (guild=%s, schedule=%s): %s",
+                    guild_id,
+                    schedule_id,
+                    e,
+                )
+                await self.bot.log_to_channel(
+                    f"[Schedule] 確定日程「{row['title']}」のリマインド送信に失敗しました: {e}",
+                    guild_id=guild_id,
+                )
+                continue
+
+            await self._log_reminder(
+                guild_id,
+                CONFIRMED_REMINDER_TYPE,
+                target_id,
+                None,
+                str(channel.id),
+                "sent",
+            )
+            sent += 1
+        return sent
+
+    @staticmethod
+    def _guild_channel(guild, channel_id):
+        """同一ギルド内でチャンネルを解決する（他ギルドへ流さない）。"""
+        if guild is None or not channel_id:
+            return None
+        try:
+            # スレッドに投稿された予定もあるので get_channel_or_thread
+            # （get_channel はスレッドを解決しない）
+            channel = guild.get_channel_or_thread(int(channel_id))
+        except (TypeError, ValueError):
+            return None
+        return channel if channel is not None and hasattr(channel, "send") else None
 
     # ---------- 毎日 04:00: 期限切れギルドのデータ削除 ----------
     @tasks.loop(time=time(hour=4, minute=0, tzinfo=TZ))

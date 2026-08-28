@@ -67,10 +67,20 @@ class ScheduleRepository(BaseRepository):
         row = await self.db.fetchone(sql, (guild_id, schedule_id))
         return dict(row) if row else None
 
+    #: 確定候補の日時・ラベルを同じ行で返す JOIN（予定ごとに引くと N+1 になる）。
+    #: 表示は confirmed_start_at（正規化済み）を使う。label は利用者の生入力で、
+    #: 年なし・時刻なしもありうるため日時として扱わない
+    _CONFIRMED_JOIN = (
+        " LEFT JOIN schedule_options o"
+        " ON o.guild_id = s.guild_id AND o.option_id = s.confirmed_option_id"
+    )
+    _CONFIRMED_COLS = "s.*, o.start_at AS confirmed_start_at, o.label AS confirmed_label"
+
     async def list_open_schedules(self, guild_id: int) -> list[dict[str, Any]]:
         rows = await self.db.fetchall(
-            "SELECT * FROM schedules WHERE guild_id = ? AND closed_flag = 0 AND deleted_flag = 0"
-            " ORDER BY deadline",
+            f"SELECT {self._CONFIRMED_COLS} FROM schedules s{self._CONFIRMED_JOIN}"
+            " WHERE s.guild_id = ? AND s.closed_flag = 0 AND s.deleted_flag = 0"
+            " ORDER BY s.deadline",
             (guild_id,),
         )
         return [dict(r) for r in rows]
@@ -145,6 +155,58 @@ class ScheduleRepository(BaseRepository):
             "SELECT * FROM schedules WHERE guild_id = ? AND deleted_flag = 1"
             " ORDER BY deadline DESC",
             (guild_id,),
+        )
+        return [dict(r) for r in rows]
+
+    # ---------- 確定日程（G3-4） ----------
+    async def set_confirmed_option(self, guild_id: int, schedule_id: str, option_id: str) -> bool:
+        """確定した候補を保存する。対象外の候補は**書けない**。
+
+        「その予定・そのギルドの候補か」は Cog の if ではなく **SQL の
+        EXISTS で守る**（規律ではなく構造で守る。ADR 0008 / 0010）。
+        呼び出し元が増えても、他予定・他ギルドの option_id は入らない。
+        戻り値は書けたかどうか。
+        """
+        cur = await self.db.execute(
+            """
+            UPDATE schedules SET confirmed_option_id = ?
+             WHERE guild_id = ? AND schedule_id = ? AND deleted_flag = 0
+               AND EXISTS (
+                   SELECT 1 FROM schedule_options
+                    WHERE option_id = ? AND schedule_id = ?
+               )
+            """,
+            (option_id, guild_id, schedule_id, option_id, schedule_id),
+        )
+        return cur.rowcount > 0
+
+    async def clear_confirmed_option(self, guild_id: int, schedule_id: str) -> bool:
+        """確定を取り消す。確定していなければ False。"""
+        cur = await self.db.execute(
+            "UPDATE schedules SET confirmed_option_id = NULL"
+            " WHERE guild_id = ? AND schedule_id = ? AND deleted_flag = 0"
+            " AND confirmed_option_id IS NOT NULL",
+            (guild_id, schedule_id),
+        )
+        return cur.rowcount > 0
+
+    async def list_confirmed_between(
+        self, guild_id: int, from_iso: str, to_iso_: str
+    ) -> list[dict[str, Any]]:
+        """確定日時が [from, to) に入る予定を返す（当日・前日リマインド用）。
+
+        **closed_flag では絞らない**（締切前に決まることもある）。
+        削除済みだけを外す。
+        """
+        rows = await self.db.fetchall(
+            f"""
+            SELECT {self._CONFIRMED_COLS} FROM schedules s{self._CONFIRMED_JOIN}
+             WHERE s.guild_id = ? AND s.deleted_flag = 0
+               AND s.confirmed_option_id IS NOT NULL
+               AND o.start_at >= ? AND o.start_at < ?
+             ORDER BY o.start_at
+            """,
+            (guild_id, from_iso, to_iso_),
         )
         return [dict(r) for r in rows]
 
@@ -258,8 +320,9 @@ class ScheduleRepository(BaseRepository):
 
     async def list_closed_schedules(self, guild_id: int) -> list[dict[str, Any]]:
         rows = await self.db.fetchall(
-            "SELECT * FROM schedules WHERE guild_id = ? AND closed_flag = 1 AND deleted_flag = 0"
-            " ORDER BY deadline DESC",
+            f"SELECT {self._CONFIRMED_COLS} FROM schedules s{self._CONFIRMED_JOIN}"
+            " WHERE s.guild_id = ? AND s.closed_flag = 1 AND s.deleted_flag = 0"
+            " ORDER BY s.deadline DESC",
             (guild_id,),
         )
         return [dict(r) for r in rows]

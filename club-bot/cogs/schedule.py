@@ -112,6 +112,30 @@ def schedule_choices(
     return out
 
 
+def schedule_list_value(row: dict) -> str:
+    """一覧 Embed の1件分の本文（締切＋確定日）。
+
+    確定日は `add_field` を増やさず**既存の value へ追記**する
+    （field を増やすと MAX_EMBED_FIELDS の打ち切り閾値が実質半分になる）。
+    日時は候補の label（利用者の生入力。年なし・時刻なしもありうる）ではなく
+    正規化済みの start_at を使い、締切と同じ表記に揃える。
+    """
+    try:
+        lines = [f"締切: {fmt_jp(from_iso(row['deadline']))}"]
+    except (TypeError, ValueError):
+        lines = ["締切: ?"]
+    start_at = row.get("confirmed_start_at")
+    if start_at:
+        try:
+            lines.append(f"**確定: {fmt_jp(from_iso(str(start_at)))}**")
+        except (TypeError, ValueError):
+            # 1件の壊れた値で一覧全体を落とさない
+            log.warning(
+                "確定日時を解釈できません (schedule=%s): %r", row.get("schedule_id"), start_at
+            )
+    return "\n".join(lines)
+
+
 def resolve_emoji_input(guild: discord.Guild, raw: str) -> discord.Emoji | None:
     """emoji オプションの入力値をサーバーのカスタム絵文字へ解決する。
 
@@ -311,6 +335,33 @@ class Schedule(commands.Cog):
             for label, value in schedule_choices(rows, current)
         ]
 
+    async def _option_ac(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """確定する候補の一覧（先に選ばれた schedule_id に属するものだけ）。"""
+        if interaction.guild is None:
+            return []
+        schedule_id = getattr(interaction.namespace, "schedule_id", None)
+        if not schedule_id:
+            return []
+        try:
+            options = await self.repo.list_options(interaction.guild.id, str(schedule_id))
+        except Exception:  # noqa: BLE001  (補完は失敗しても致命的でない)
+            return []
+        needle = (current or "").strip().lower()
+        out: list[app_commands.Choice[str]] = []
+        for opt in options:
+            try:
+                label = fmt_jp(from_iso(str(opt["start_at"])))
+            except (TypeError, ValueError, KeyError):
+                label = str(opt.get("label") or opt["option_id"])
+            if needle and needle not in label.lower():
+                continue
+            out.append(app_commands.Choice(name=label[:100], value=str(opt["option_id"])))
+            if len(out) >= 25:
+                break
+        return out
+
     async def _schedule_ac_deleted(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
@@ -475,7 +526,7 @@ class Schedule(commands.Cog):
         for s in schedules[:MAX_EMBED_FIELDS]:
             embed.add_field(
                 name=f"{s['title']}（`{s['schedule_id']}`）",
-                value=f"締切: {fmt_jp(from_iso(s['deadline']))}",
+                value=schedule_list_value(s),
                 inline=False,
             )
         add_truncation_note(embed, len(schedules), MAX_EMBED_FIELDS, "締切が近い順に表示しています")
@@ -519,7 +570,7 @@ class Schedule(commands.Cog):
         for s in schedules[:MAX_EMBED_FIELDS]:
             embed.add_field(
                 name=f"{s['title']}（`{s['schedule_id']}`）",
-                value=f"締切: {fmt_jp(from_iso(s['deadline']))}",
+                value=schedule_list_value(s),
                 inline=False,
             )
         add_truncation_note(embed, len(schedules), MAX_EMBED_FIELDS, "新しい順に表示しています")
@@ -677,6 +728,156 @@ class Schedule(commands.Cog):
         view.message = await interaction.followup.send(
             embed=view.preview_embed, view=view, ephemeral=True
         )
+
+    # ---------- confirm ----------
+    @group.command(name="confirm", description="投票の結果として確定した日程を登録します。")
+    @app_commands.describe(schedule_id="投票 ID", option_id="確定した候補")
+    @require(Level.L2)
+    async def confirm(self, interaction: discord.Interaction, schedule_id: str, option_id: str):
+        await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        schedule = await self._find_schedule(interaction, guild_id, schedule_id)
+        if schedule is None:
+            return
+
+        # 対象外の候補は SQL 側で弾かれる（set_confirmed_option の EXISTS）
+        if not await self.repo.set_confirmed_option(guild_id, schedule_id, option_id):
+            await interaction.followup.send(
+                embed=error_embed(
+                    "その候補はこの投票のものではありません。\n"
+                    "候補は `option_id` のリストから選んでください。"
+                ),
+                ephemeral=True,
+            )
+            return
+
+        updated = await self.repo.get_schedule(guild_id, schedule_id)
+        option = next(
+            (
+                o
+                for o in await self.repo.list_options(guild_id, schedule_id)
+                if str(o["option_id"]) == option_id
+            ),
+            None,
+        )
+        when = self._fmt_option(option)
+        announced = await self._announce_confirmation(
+            guild_id,
+            updated or schedule,
+            f"【日程が決まりました】{schedule['title']}",
+            f"日時: **{when}**" + (f"\n場所: {schedule['place']}" if schedule.get("place") else ""),
+        )
+
+        detail = f"**{schedule['title']}**（ID: `{schedule_id}`）\n確定: {when}"
+        if not announced:
+            detail += (
+                "\n\n⚠️ **告知は送れませんでした。** 投稿チャンネルが見つからないか、"
+                "Bot に送信権限がありません。"
+            )
+        if not schedule.get("closed_flag"):
+            # 先に決まることはある。勝手に締め切らない（明示操作でだけ変える）
+            detail += (
+                "\n\nこの予定はまだ投票受付中です。"
+                "締め切るには `/schedule close` を実行してください。"
+            )
+        await interaction.followup.send(
+            embed=success_embed(
+                "確定日程を登録しました", detail, executor=interaction.user.display_name
+            ),
+            ephemeral=True,
+        )
+
+    @group.command(name="unconfirm", description="登録した確定日程を取り消します。")
+    @app_commands.describe(schedule_id="投票 ID")
+    @require(Level.L2)
+    async def unconfirm(self, interaction: discord.Interaction, schedule_id: str):
+        await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        schedule = await self._find_schedule(interaction, guild_id, schedule_id)
+        if schedule is None:
+            return
+        if not await self.repo.clear_confirmed_option(guild_id, schedule_id):
+            await interaction.followup.send(
+                embed=info_embed(
+                    "確定していません",
+                    f"**{schedule['title']}**（ID: `{schedule_id}`）に確定日程は登録されていません。",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        # 既に日付を告知しているので、黙って消すと部員側に誤情報が残る
+        announced = await self._announce_confirmation(
+            guild_id,
+            schedule,
+            f"【日程の確定を取り消しました】{schedule['title']}",
+            "日程は未定に戻りました。決まり次第あらためてお知らせします。",
+        )
+        detail = f"**{schedule['title']}**（ID: `{schedule_id}`）"
+        if not announced:
+            detail += (
+                "\n\n⚠️ **取り消しの告知は送れませんでした。** 部員には確定日程が"
+                "告知されたままなので、チャンネルで直接お知らせしてください。"
+            )
+        await interaction.followup.send(
+            embed=success_embed(
+                "確定日程を取り消しました", detail, executor=interaction.user.display_name
+            ),
+            ephemeral=True,
+        )
+
+    @staticmethod
+    def _fmt_option(option: dict | None) -> str:
+        """候補の表示（正規化済みの start_at を優先）。"""
+        if not option:
+            return "?"
+        try:
+            return fmt_jp(from_iso(str(option["start_at"])))
+        except (TypeError, ValueError, KeyError):
+            return str(option.get("label") or "?")
+
+    async def _announce_confirmation(
+        self, guild_id: int, schedule: dict, heading: str, body: str
+    ) -> bool:
+        """投稿チャンネルへ告知する（同一ギルド内に限定して解決する）。
+
+        **本文は description に渡す。** Embed の title は 100 文字で切られる
+        （`utils/embeds._base`）ため、title に本文を入れるとイベント名が長い
+        ギルドで日時や場所が黙って消える。
+
+        戻り値は送れたかどうか。呼び出し側は失敗を実行者に伝える
+        （成功と表示したまま部員に何も届かない状態を作らない）。
+        """
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            return False
+        try:
+            # スレッド内で /schedule create した予定は channel_id が
+            # スレッド ID になる。get_channel はスレッドを解決しない
+            channel = guild.get_channel_or_thread(int(schedule["channel_id"]))
+        except (TypeError, ValueError):
+            channel = None
+        if channel is None or not hasattr(channel, "send"):
+            log.info("確定の告知先が見つかりません (guild=%s)", guild_id)
+            return False
+        content = None
+        if schedule.get("target_role_id"):
+            try:
+                role = guild.get_role(int(schedule["target_role_id"]))
+            except (TypeError, ValueError):
+                role = None
+            if role:
+                content = role.mention
+        try:
+            await channel.send(content=content, embed=schedule_embed(heading, body))
+        except (discord.Forbidden, discord.HTTPException) as e:
+            log.warning("確定の告知に失敗 (guild=%s): %s", guild_id, e)
+            return False
+        return True
 
     # ---------- restore ----------
     @group.command(
@@ -1030,6 +1231,9 @@ Schedule.edit_deadline.autocomplete("schedule_id")(Schedule._schedule_ac_open)
 Schedule.status.autocomplete("schedule_id")(Schedule._schedule_ac_all)
 Schedule.delete.autocomplete("schedule_id")(Schedule._schedule_ac_all)
 Schedule.restore.autocomplete("schedule_id")(Schedule._schedule_ac_deleted)
+Schedule.confirm.autocomplete("schedule_id")(Schedule._schedule_ac_all)
+Schedule.confirm.autocomplete("option_id")(Schedule._option_ac)
+Schedule.unconfirm.autocomplete("schedule_id")(Schedule._schedule_ac_all)
 
 
 async def setup(bot: commands.Bot):

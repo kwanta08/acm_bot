@@ -240,6 +240,31 @@ async def build_summary_embed(
             best_ok = len(ok_users)
             best_label = opt["label"]
 
+    # 「結局いつに決まったのか」を残す（G3-4）。
+    #
+    # **field ではなく description に足す。** 候補数に上限が無いので、
+    # field を1つ増やすと上限25に当たる閾値が下がり、候補の多い予定で
+    # 集計サマリーごと投稿されなくなる（finalize_schedule は
+    # HTTPException を握り潰すため無言で消える）。
+    #
+    # このサマリーは公開チャンネルへ出るので、L1 の部員に実行できない
+    # コマンドを命令しない（主語を書く）。
+    lines: list[str] = []
     if best_label:
-        embed.description = f"最多参加候補: **{best_label}**（{best_ok}名）"
+        lines.append(f"最多参加候補: **{best_label}**（{best_ok}名）")
+
+    confirmed_id = schedule.get("confirmed_option_id")
+    if confirmed_id:
+        confirmed = next((o for o in options if str(o["option_id"]) == str(confirmed_id)), None)
+        if confirmed is not None:
+            try:
+                when = fmt_jp(from_iso(str(confirmed["start_at"])))
+            except (TypeError, ValueError, KeyError):
+                when = str(confirmed.get("label") or "?")
+            lines.append(f"確定した日程: **{when}**")
+    elif options:
+        lines.append("班長以上が `/schedule confirm` で確定した日程を登録します。")
+
+    if lines:
+        embed.description = "\n".join(lines)
     return embed

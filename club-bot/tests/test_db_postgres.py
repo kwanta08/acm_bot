@@ -579,8 +579,13 @@ def test_pg_live_layer_start_accepts_text_layer_num():
 
             # /layer end 相当（完了記録への引き渡し）も通る
             rid = await repo.add_record(
-                G1, "u1", "主桁1", "シュリンク",
-                "2026-08-26 10:00:00", "2026-08-26 11:00:00", 60,
+                G1,
+                "u1",
+                "主桁1",
+                "シュリンク",
+                "2026-08-26 10:00:00",
+                "2026-08-26 11:00:00",
+                60,
             )
             assert rid
             await repo.end(G1, "u1")
@@ -642,6 +647,56 @@ def test_pg_live_schedule_soft_delete_columns():
     run(_main())
 
 
+def test_pg_live_confirmed_schedule_join():
+    """確定日程の JOIN が PostgreSQL でも動くこと（G3-4）。
+
+    start_at は TEXT に `+09:00` 付きの ISO 文字列で入る。範囲比較の境界を
+    naive な文字列で作ると、ちょうど 00:00:00 の行を取りこぼす。
+    """
+    dsn = _guarded_dsn()
+
+    async def _main():
+        from datetime import datetime, timedelta
+
+        from repositories.schedule_repository import ScheduleRepository
+        from utils.parser import TZ, to_iso
+
+        db = Database("./unused.db", database_url=dsn)
+        await db.connect()
+        try:
+            await db.execute("DELETE FROM schedules WHERE guild_id = ?", (G1,))
+            repo = ScheduleRepository(db)
+            start = datetime(2026, 10, 1, 0, 0, tzinfo=TZ)
+            await repo.create_schedule(
+                G1, "pg_conf", "PG 確定", None, "部室", None, to_iso(start), "u1", "1"
+            )
+            # ちょうど 00:00:00 の候補（境界）
+            await repo.add_option(G1, "pg_conf_o1", "pg_conf", "10/1", to_iso(start), None, None)
+            assert await repo.set_confirmed_option(G1, "pg_conf", "pg_conf_o1") is True
+            # 存在しない候補は書けない
+            assert await repo.set_confirmed_option(G1, "pg_conf", "no_such_option") is False
+            # **他の予定に属する実在の候補**も書けない（現実的な誤操作はこちら）
+            await repo.create_schedule(
+                G1, "pg_conf2", "PG 確定2", None, None, None, to_iso(start), "u1", "1"
+            )
+            await repo.add_option(G1, "pg_conf2_o1", "pg_conf2", "10/1", to_iso(start), None, None)
+            assert await repo.set_confirmed_option(G1, "pg_conf", "pg_conf2_o1") is False
+
+            rows = await repo.list_confirmed_between(
+                G1, to_iso(start), to_iso(start + timedelta(days=1))
+            )
+            assert len(rows) == 1, "境界（00:00:00）の候補を取りこぼしている"
+            assert rows[0]["confirmed_start_at"] == to_iso(start)
+
+            (listed,) = await repo.list_open_schedules(G1)
+            assert listed["confirmed_start_at"] == to_iso(start)
+        finally:
+            await db.execute("DELETE FROM schedules WHERE guild_id = ?", (G1,))
+            await db.close()
+
+    run(_main())
+
+
 if __name__ == "__main__":
     test_to_pg_ddl_autoincrement_and_guild_id()
     print("test_to_pg_ddl_autoincrement_and_guild_id: OK")
@@ -674,6 +729,8 @@ if __name__ == "__main__":
         print("test_pg_live_layer_start_accepts_text_layer_num: OK")
         test_pg_live_schedule_soft_delete_columns()
         print("test_pg_live_schedule_soft_delete_columns: OK")
+        test_pg_live_confirmed_schedule_join()
+        print("test_pg_live_confirmed_schedule_join: OK")
     else:
         print("ライブ PG テストは CLUB_TEST_PG_DSN 未設定のためスキップ")
     print("全テスト成功")
