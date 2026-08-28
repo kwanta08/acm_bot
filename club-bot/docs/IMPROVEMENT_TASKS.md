@@ -398,7 +398,10 @@
       - **申し送り**: `.ics` 添付（標準ライブラリのみ・外部依存ゼロ）は次イテレーションで。
         Google カレンダー連携は ADR 0013 に反するのでやらない
 
-- [ ] **G3-5** 招待直後の案内を確実に届ける。
+- [x] **G3-5** 招待直後の案内を確実に届ける。
+      （実装は `fix/g3-5`。2026-08-22 に venv を作成して検証済み:
+      ruff パス / pytest 870 passed・10 skipped（skip は `CLUB_TEST_PG_DSN` 未設定の
+      PostgreSQL ライブテストのみ））
       `bot.py:331-336` の「次のステップ: `/setup`」は `log_to_channel` 経由で、
       `bot.py:363-370` は `BOT_LOG_CHANNEL_ID` 未設定なら**無言で破棄**する。
       `bot.py:69-76` の `INVITE_PERMISSIONS` は `manage_channels` を含まないので、
@@ -549,6 +552,22 @@
       - **検証**: `tests/test_incident.py`（新規）。匿名時に報告者名が Embed に出ないことを検査
       - **注意**: `docs/PRIVACY.md` に収集項目を追記する。
         Modal は `cogs/todoist_admin.py:39` の実装を流用
+
+- [ ] **G4-11** `log_to_channel` の送信先を同一ギルドに限定する。
+      `bot.py` の `log_to_channel` は `BOT_LOG_CHANNEL_ID` を `self.get_channel`
+      （bot 全体のチャンネルキャッシュ）で解決し、`guild_id` 未指定時は
+      `config.bot_log_channel_id`（env 由来。**全ギルドの GuildConfig に配られる**）へも
+      フォールバックする。あるギルドの設定が別ギルドのチャンネル ID を指していると、
+      **他テナントの運用ログがそのサーバーへ流れる**。
+      G3-5 で追加した `send_guild_notice` は `guild.get_channel` で同一ギルド内に限定済みなので、
+      同じ守り方へ揃える。
+      - **受入**: 送信先を「その `guild_id` に属するチャンネル」に限定する
+        （`guild.get_channel` で解決、または `channel.guild.id` を検査）。
+        env フォールバックは対象ギルドに実在するチャンネルのときだけ使う
+      - **検証**: `tests/test_multi_tenant.py` に、他ギルドのチャンネル ID を設定した状態で
+        送信先が0件になることを検査するケースを追加
+      - **注意**: レガシー単一ギルド運用（`GUILD_ID` 指定）の後方互換を壊さない。
+        起源は G3-5 のプラン審査（acm-plan-reviewer）で指摘された既存の穴
 
 ---
 
@@ -1416,3 +1435,114 @@ edit だけ直すと2つの入口で挙動が食い違う。
 - `/task add` 系の TodoistError は元からエラー表示があり触っていない。
   定期同期（`cogs/progress.py` の periodic_sync）の失敗は #bot-log へ
   通知される既存実装がある
+
+### 2026-08-22 — G3-5: 招待直後の案内を確実に届ける（ブランチ `fix/g3-5`）
+
+ADR 0017 の最小権限招待では `manage_channels` を要求しないため、README の
+招待URLで入れたサーバーには `#bot-log` が作られない。それなのに案内は
+`log_to_channel`（bot-log 限定）で送られており、**ほとんどの新規サーバーで
+誰にも届かないまま破棄されていた**。さらに権限不足で何も作れなくても
+`AUTO_SETUP_DONE` を立てていたため、GUIDE.md の「権限を付けて再招待」という
+復旧手順が効かなかった（settings は退出後も猶予期間だけ残るため）。
+
+#### 変更
+
+- `bot.py`
+  - `build_setup_guidance(auto_setup_ok)` を追加。`/setup` `/setup-status` `/help`
+    を明記する。自動作成できていないときだけ、確実に効く順（①自分で作って
+    `/setup` で指定 ②Manage 系権限を付ける。同名があると作られない旨つき）で
+    手順を添える。**最小権限招待では未作成が既定の経路**なので「失敗」調にはしない
+  - `send_guild_notice()` / `_notice_channels()` を追加。bot-log →
+    `guild.system_channel` → 送信可能な最初のテキストチャンネル、の順で
+    **1箇所にだけ**送る。試行は `MAX_NOTICE_CHANNEL_ATTEMPTS`（5件）まで
+  - `on_guild_join` の案内を `log_to_channel` から `send_guild_notice` へ差し替え
+  - `_ensure_guild_setup` を `-> bool` にし、マーカーを
+    **`AUTO_SETUP_COMPLETED_AT`（新キー）へ移した**。全部揃ったときだけ立て、
+    立っていたら自動作成をやり直さない。**旧 `AUTO_SETUP_DONE` は読まない**
+    （旧実装が権限不足のギルドにも立てていたため。互換のため書き込みは残した）
+  - `_auto_create_roles` / `_auto_create_log_channel` を `-> bool` 化し、
+    「設定済みか」の判定を settings 行ではなく**実効設定**
+    （`config.for_guild`。環境変数フォールバックを含む）＋
+    **そのギルドに実在するか**で行う
+- `cogs/help.py` — `collect_setup_status()` に「幹部ロール」(`EXEC_ROLE_ID`) を追加。
+  案内が `/setup-status` を入口に指すのに、L3 判定の実体である `EXEC_ROLE_ID` を
+  見ていなかった（「すべて設定済み」と出たサーバーで幹部が L3 を使えない形）
+- `README.md`（招待直後に何が起きるか・`/setup` の項目）/ `docs/GUIDE.md` Step 1 /
+  `docs/MULTI_TENANT_MIGRATION.md` §5 を実装に合わせた。GUIDE の復旧手順は
+  案内文と同じ順序・同じ但し書きに揃えている
+
+#### 設計判断
+
+- **冪等性を二段構えにした。** (1) 新マーカー `AUTO_SETUP_COMPLETED_AT`
+  （揃ったときだけ立てる）があればやり直さない。(2) マーカーが無くても、
+  実効設定に ID があるものは作らない。旧 `AUTO_SETUP_DONE` を読まないので、
+  誤って立っている既存ギルドも復旧できる。マーカーを完全に捨てなかったのは、
+  管理者が `/settings_delete`・ダッシュボードの空値 PATCH で消した設定を
+  次の起動で復活させないため（ADR 0024「明示的な操作でだけ変える」）
+- **「設定済みか」は settings 行ではなく実効設定で判定する。** `docs/SETUP.md`
+  は今も `.env` に `EXEC_ROLE_ID` 等を書く手順を案内しており、解決順は
+  ギルド別 DB 設定 > 環境変数。settings 行だけを見ると、env で運用している
+  ギルドに空の `幹部` ロールを作って保存し、**実効設定を誰も持たないロールへ
+  差し替えて幹部が L3 を失う**。さらに ID がそのギルドに実在するかまで見る
+  （解決できないときは作り直さない。`set_if_absent` では古い行を直せず、
+  毎起動ロールを作り続けるため）
+- **同名ロールには ID を紐付けない。** 名前が一致するだけのロールを
+  `EXEC_ROLE_ID` にすると、そのロールを持つ人へ黙って L3 権限を配ることになる
+  （ADR 0024 の「既定で何も起きない」に反する）。作成をスキップして未設定のまま残し、
+  `/setup` で明示指定させる（`/setup-status` が未設定として拾う）
+- **同名 `#bot-log` は採用する。** チャンネルは権限を配らないため。ただし
+  `permissions_for(guild.me).send_messages` を確認してから採用する
+- **`log_to_channel` の仕様は据え置き。** 運用ログの宛先を一般チャンネルへ
+  広げると、他の運用ログまで部員の目に流れる。案内だけを別関数に分けた
+- ログの粒度: 権限が無いだけ・同名があるだけ（定常状態）は `log.info`、
+  API 失敗と ID 保存失敗は `log.warning` / `log.error`。最小権限招待では
+  未作成が正常なので、毎起動 WARNING を全ギルド分吐かせない
+
+#### 既存ギルドで次回起動時に起きる変化（DB は書き換えていない）
+
+- 誤って `AUTO_SETUP_DONE` が立っている既存ギルドでも、**新マーカーが無いので
+  自動セットアップが1度だけ再試行される**（旧値は読まない・消さない）
+- その結果、`manage_roles` / `manage_channels` を持つ既存ギルドで
+  `EXEC_ROLE_ID` 等が settings にも env にも無く、同名ロールも無ければ、
+  **`幹部` / `Bot管理者` が新規作成される**
+- `bot-log` という名前のチャンネルがある既存ギルドは `BOT_LOG_CHANNEL_ID` が
+  自動で入り、運用ログがそこへ流れ始める
+- 揃ったギルドには `AUTO_SETUP_COMPLETED_AT` が立ち、以降はやり直さない
+
+#### 検証
+
+- **`ruff check .` / `pytest tests/ -q -rs` を実行できていない。**
+  この worktree（`acm_bot_auto`）に `club-bot/venv` が無く、セッションの権限設定で
+  `python -m venv` / `pip install` が実行できなかった（システム Python 3.14 には
+  ruff も pytest も未導入）。次で環境を作ってから実行すること:
+  `python -m venv venv` →
+  `venv\Scripts\python.exe -m pip install -r requirements.txt -r dashboard/requirements.txt ruff pytest` →
+  `venv\Scripts\python.exe -m pytest tests/ -q -rs`
+- `tests/test_guild_foundation.py` に23ケース追加（受入基準の指定ファイル。
+  bot-log 無し・権限無しの2ケースを含む）。`__main__` の手動実行リストにも追加した
+- `tests/test_help.py` は「幹部ロール」追加に伴う既存2ケースを更新
+- ゲート2の test-adversary は**実測できず静的分析**。差し戻し9件のうち8件は
+  赤くなる見込みで、検出できない穴として指摘された
+  `config.invalidate_guild` / 成功時の文面 / on_ready 経路 / 候補の重複排除 /
+  `guild.me is None` を、テスト側を直して塞いだ（キャッシュを温めてから実行、
+  `on_ready` を実際に通す、など）
+- ゲート2の diff-auditor の指摘7件を反映（消した設定の復活・env 設定の上書き・
+  案内文の実現性・README の齟齬・`send` を持たないチャンネル・
+  MULTI_TENANT_MIGRATION の古い記述・未追跡ファイルをコミットに混ぜない）
+
+#### 申し送り
+
+- **検証済み（2026-08-22）。** venv を作成し ruff / pytest を実行、
+  870 passed・10 skipped（PG ライブテストの想定 skip）で緑。
+  ruff が ISC004 ×3（`build_setup_guidance` 内の暗黙文字列連結）を検出したため、
+  意図どおりの連結であることを確認のうえ括弧で明示した
+- 素の Windows 環境では `zoneinfo` に **`tzdata` パッケージが必要**だが
+  requirements.txt に無く、fresh venv では全テストが collection で落ちる
+  （`ZoneInfoNotFoundError: Asia/Tokyo`）。今回は venv へ手動インストールで対応。
+  requirements への追加（`tzdata; sys_platform == "win32"`）は別途検討
+- `log_to_channel` は `self.get_channel` と env フォールバックで**他ギルドの
+  チャンネルへ運用ログを送りうる**（今回追加した `send_guild_notice` は
+  `guild.get_channel` で同一ギルドに限定済み）。**G4-11 として起票した**
+- IMPROVEMENT_REPORT P1-19 の後半「`/setup` に『不足しているものを今すぐ作る』
+  ボタン」は未実装（受入基準に無いためスコープ外）
+- スキーマ変更・マイグレーションは無し。PostgreSQL 固有の新規 SQL も無い
