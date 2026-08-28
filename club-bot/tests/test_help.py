@@ -334,6 +334,7 @@ def test_setup_status_all_done_after_configuration():
                 default_task_channel_id=1001,
                 bot_log_channel_id=1002,
                 admin_role_id=2001,
+                exec_role_id=2002,
                 leader_role_ids=[3001],
                 competition_date="2026-07-25",
             )
@@ -383,6 +384,8 @@ def test_setup_status_partial_configuration():
             assert done["ログチャンネル"] is True
             assert done["タスク通知チャンネル"] is False
             assert done["管理者ロール"] is False
+            # 幹部ロール（L3 判定の実体）も未設定として拾う
+            assert done["幹部ロール"] is False
             assert done["班長ロール"] is False
             assert done["桁"] is False
         finally:

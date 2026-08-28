@@ -237,6 +237,14 @@ async def collect_setup_status(db, gconf: GuildConfig) -> list[SetupItem]:
             "ログチャンネル", gconf.bot_log_channel_id is not None, "`/setup` で設定してください"
         ),
         SetupItem("管理者ロール", gconf.admin_role_id is not None, "`/setup` で設定してください"),
+        # 幹部（L3）の判定は EXEC_ROLE_ID だけを見ている（utils/permissions.py）。
+        # 招待直後の案内が /setup-status を入口に指すので、ここが抜けていると
+        # 「すべて設定済み」と出たサーバーで幹部が L3 コマンドを使えない。
+        SetupItem(
+            "幹部ロール",
+            gconf.exec_role_id is not None,
+            "`/setup` の「実行役ロール」で設定してください",
+        ),
         # 班長（L2）の判定は LEADER_ROLE_IDS だけを見ている。
         # members.is_leader は Web ダッシュボードの認可にしか使われないため、
         # ここが空だと班長は Discord 上で何もできない。

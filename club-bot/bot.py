@@ -21,7 +21,7 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
-from config import config
+from config import GuildConfig, config
 from repositories.guild_repository import GuildRepository
 from repositories.settings_repository import SettingsRepository
 from services.todoist_service import TodoistServiceManager
@@ -55,13 +55,29 @@ COGS = [
 
 # on_guild_join / 起動時の自動セットアップで投入するギルド別デフォルト設定
 # （ID 系は自動作成に成功した場合のみ保存される）
+#
+# 旧マーカー。**読まない**（旧実装が「権限不足で何も作れなかったギルド」にも
+# 立ててしまっていたため、これを分岐に使うと docs/GUIDE.md の
+# 「権限を付けて再招待」という復旧手順が永久に効かない）。
 AUTO_SETUP_DONE_KEY = "AUTO_SETUP_DONE"
+# ロールもログチャンネルも揃った日時。**成功したときだけ**立て、
+# 立っていたら自動作成をやり直さない。
+# 管理者が意図的に BOT_LOG_CHANNEL_ID を消した場合に復活させないための
+# マーカーでもある（ADR 0024「明示的な操作でだけ変える」）。
+# 旧 AUTO_SETUP_DONE と別キーにしてあるのは、旧実装が誤って立てた値を
+# 引き継がないため。
+AUTO_SETUP_COMPLETED_KEY = "AUTO_SETUP_COMPLETED_AT"
 # 旧ギルド限定コマンドの除去マーカー（グローバル登録への移行措置。
 # 一度クリアしたギルドでは再実行しない）
 GUILD_COMMANDS_CLEARED_KEY = "GUILD_COMMANDS_CLEARED_AT"
 BOT_LOG_CHANNEL_NAME = "bot-log"
 EXEC_ROLE_NAME = "幹部"
 ADMIN_ROLE_NAME = "Bot管理者"
+
+# 招待直後の案内を送るときに試すチャンネル数の上限。
+# 送信できないチャンネルが並ぶギルドで 403 を連発しないための歯止め
+# （Discord の invalid request 制限に触れないようにする）。
+MAX_NOTICE_CHANNEL_ATTEMPTS = 5
 
 # 招待リンクに含める最小権限（Administrator・Manage 系は要求しない）。
 # ロール・ログチャンネルの自動作成を使う場合のみ、招待後に手動で
@@ -83,6 +99,43 @@ def build_invite_url(client_id: int) -> str:
         permissions=INVITE_PERMISSIONS,
         scopes=("bot", "applications.commands"),
     )
+
+
+def build_setup_guidance(auto_setup_ok: bool) -> str:
+    """招待直後にギルドへ送る案内文を組み立てる。
+
+    `auto_setup_ok` が False のときは、ロールとログチャンネルが自動では
+    用意されていないことを添える。ADR 0017 の最小権限招待では Manage 系の
+    権限を要求しないため、**新規ギルドではこちらが既定の経路**になる。
+    失敗の告知ではなく手順として書き、原因（権限不足 / API 失敗 / 同名あり）の
+    切り分けはログにだけ残す。
+    """
+    lines = [
+        "**club-bot を導入いただきありがとうございます。**",
+        "使い始めるには、管理者が次の順に実行してください。",
+        "",
+        (
+            "1. `/setup` — 通知チャンネル・ロール・サークル名・班を設定します"
+            "（班は自動作成されません）"
+        ),
+        "2. `/setup-status` — 設定の不足を確認できます",
+        "3. `/help` — 使えるコマンドの一覧を表示します",
+    ]
+    if not auto_setup_ok:
+        lines += [
+            "",
+            (
+                f"`{EXEC_ROLE_NAME}` / `{ADMIN_ROLE_NAME}` ロールと "
+                f"`#{BOT_LOG_CHANNEL_NAME}` チャンネルは、まだ自動では用意されていません。"
+                "次のどちらかで設定してください。"
+            ),
+            "- **自分で作成し、`/setup` で指定する**（すぐ反映されます）",
+            (
+                "- Bot に `ロールの管理` と `チャンネルの管理` を付ける"
+                "（同じ名前のロール・チャンネルが無ければ、Bot の次回起動時に作成されます）"
+            ),
+        ]
+    return "\n".join(lines)
 
 
 def build_intents() -> discord.Intents:
@@ -165,16 +218,28 @@ class ClubBot(commands.Bot):
     # ------------------------------------------------------------------
     # ギルド自動セットアップ
     # ------------------------------------------------------------------
-    async def _ensure_guild_setup(self, guild: discord.Guild) -> None:
+    async def _ensure_guild_setup(self, guild: discord.Guild) -> bool:
         """
         ギルドの初期セットアップを冪等に行う。
 
         (a) guilds 台帳へ登録し、settings にギルド用デフォルト設定を INSERT（未存在時のみ）
-        (b) 初回のみ: ロール（幹部/Bot管理者）と bot-log チャンネルを自動作成し、
+        (b) ロール（幹部/Bot管理者）と bot-log チャンネルを用意し、
             ID を settings に保存（権限不足・API 失敗時はログに残して続行）
+
+        冪等性は二段構え。
+        (1) 完了マーカー `AUTO_SETUP_COMPLETED_AT`（**揃ったときだけ立てる**）が
+            あれば (b) をやり直さない。管理者が後から消した設定を復活させないため
+        (2) マーカーが無くても、**実効設定**（環境変数フォールバックを含む）に
+            ID があるものは作らない
+        旧 `AUTO_SETUP_DONE` は読まない（旧実装が権限不足のギルドにも立てており、
+        これで早期 return すると「権限を付けて再招待」の復旧手順が効かない）。
+        そのため権限が後から付与されたギルドでは、次の起動時に (b) が
+        再試行される。
 
         班・技能タグの初期値は投入しない（新規ギルドは空で開始。
         管理者が /team-add /skill-add で登録する）。
+
+        戻り値は「ロールもログチャンネルも settings に揃ったか」。
         """
         repo = SettingsRepository(self.db)
 
@@ -197,76 +262,228 @@ class ClubBot(commands.Bot):
         except Exception as e:  # noqa: BLE001
             log.warning("ギルド初期設定の保存に失敗 (guild=%s): %s", guild.id, e)
 
-        # (b) ロール・ログチャンネルの自動作成（初回のみ）
+        # (b) ロール・ログチャンネルの用意
+        # 完了マーカーがあればやり直さない（管理者が後から設定を消した場合に
+        # 復活させないため）。**旧 AUTO_SETUP_DONE は読まない**
         try:
-            done = await repo.get(guild.id, AUTO_SETUP_DONE_KEY)
+            completed = await repo.get(guild.id, AUTO_SETUP_COMPLETED_KEY)
         except Exception as e:  # noqa: BLE001
             log.warning("自動セットアップ状態の取得に失敗 (guild=%s): %s", guild.id, e)
-            return
-        if done:
-            return
-
-        me = guild.me
-        if me is not None:
-            perms = me.guild_permissions
-            if perms.manage_roles:
-                await self._auto_create_roles(guild, repo)
-            else:
-                log.warning("ロール自動作成をスキップ（manage_roles 権限なし, guild=%s）", guild.id)
-            if perms.manage_channels:
-                await self._auto_create_log_channel(guild, repo)
-            else:
-                log.warning(
-                    "ログチャンネル自動作成をスキップ（manage_channels 権限なし, guild=%s）",
-                    guild.id,
-                )
+            completed = None
+        if completed:
+            return True
 
         try:
-            await repo.set(guild.id, AUTO_SETUP_DONE_KEY, to_iso(now()))
-        except Exception as e:  # noqa: BLE001
-            log.warning("自動セットアップ完了マーカーの保存に失敗 (guild=%s): %s", guild.id, e)
-        config.invalidate_guild(guild.id)
-        log.info("ギルド自動セットアップが完了しました: %s (id=%s)", guild.name, guild.id)
+            gconf = await config.for_guild(guild.id)
+            roles_ok = await self._auto_create_roles(guild, repo, gconf)
+            channel_ok = await self._auto_create_log_channel(guild, repo, gconf)
+        except Exception:
+            log.exception("ロール・ログチャンネルの自動セットアップに失敗 (guild=%s)", guild.id)
+            roles_ok = channel_ok = False
+        ok = roles_ok and channel_ok
 
-    async def _auto_create_roles(self, guild: discord.Guild, repo: SettingsRepository) -> None:
-        """幹部/Bot管理者ロールを作成し ID を settings に保存する。
+        if ok:
+            try:
+                await repo.set_if_absent(guild.id, AUTO_SETUP_COMPLETED_KEY, to_iso(now()))
+                # 旧キーも残す（過去の運用ログ・ダッシュボードとの互換のため。
+                # 読まないが、成功したときだけ立てる点は同じ）
+                await repo.set_if_absent(guild.id, AUTO_SETUP_DONE_KEY, to_iso(now()))
+            except Exception as e:  # noqa: BLE001
+                log.warning("自動セットアップ完了マーカーの保存に失敗 (guild=%s): %s", guild.id, e)
+        else:
+            log.info(
+                "自動セットアップは未完了です（次回の起動時に再試行します, guild=%s）", guild.id
+            )
+        # 作成できた ID を後続の処理（案内の送信先解決など）へ反映するため、
+        # 成否によらずキャッシュを捨てる
+        config.invalidate_guild(guild.id)
+        log.info(
+            "ギルド自動セットアップを実行しました: %s (id=%s, 完了=%s)", guild.name, guild.id, ok
+        )
+        return ok
+
+    @staticmethod
+    def _resolve_role(guild: discord.Guild, raw: str):
+        """settings に入っているロール ID 文字列を、このギルドのロールへ解決する。"""
+        value = raw.strip()
+        return guild.get_role(int(value)) if value.isdigit() else None
+
+    @staticmethod
+    def _resolve_channel(guild: discord.Guild, raw: str):
+        """settings に入っているチャンネル ID 文字列を、このギルドのチャンネルへ解決する。"""
+        value = raw.strip()
+        return guild.get_channel(int(value)) if value.isdigit() else None
+
+    async def _auto_create_roles(
+        self, guild: discord.Guild, repo: SettingsRepository, gconf: GuildConfig
+    ) -> bool:
+        """幹部/Bot管理者ロールを用意し ID を settings に保存する。
 
         班ロールは自動作成しない（班は管理者が /team-add で登録し、
         既存ロールとの紐付けは /team-role で行う）。
-        """
 
-        async def create_role(name: str) -> discord.Role | None:
+        戻り値は「2つとも設定済みの状態にできたか」。判定は settings 行だけでなく
+        **実効設定**（環境変数フォールバックを含む）で行う。settings 行だけを見ると、
+        env で運用しているギルドに空のロールを作って実効設定を奪ってしまう。
+
+        **同名ロールが既にある場合は作成せず、ID の紐付けもしない。**
+        名前が一致するだけのロールを EXEC_ROLE_ID にすると、そのロールを
+        持っている人へ黙って権限を配ることになるため、管理者が `/setup` で
+        明示的に指定する（未設定のままなら `/setup-status` が拾う）。
+        """
+        ok = True
+        me = guild.me
+        for key, name, env_value in (
+            ("EXEC_ROLE_ID", EXEC_ROLE_NAME, gconf.exec_role_id),
+            ("ADMIN_ROLE_ID", ADMIN_ROLE_NAME, gconf.admin_role_id),
+        ):
+            raw = await repo.get(guild.id, key)
+            if raw is not None:
+                # このギルドの settings で設定済み。解決できなくても作り直さない
+                # （set_if_absent では古い行を直せず、毎起動ロールを作り続ける）
+                if self._resolve_role(guild, raw) is None:
+                    log.info(
+                        "設定済みのロールが見つかりません: %s (%s) [guild=%s]。"
+                        "/setup で指定し直してください",
+                        name,
+                        raw,
+                        guild.id,
+                    )
+                    ok = False
+                continue
+            if env_value is not None and guild.get_role(env_value) is not None:
+                # 環境変数で設定されており、このギルドに実在する（レガシー運用）
+                continue
+            if discord.utils.get(guild.roles, name=name) is not None:
+                log.info(
+                    "同名ロールがあるため自動作成しません: %s [guild=%s]。"
+                    "/setup で指定してください",
+                    name,
+                    guild.id,
+                )
+                ok = False
+                continue
+            if me is None or not me.guild_permissions.manage_roles:
+                log.info(
+                    "ロール自動作成をスキップ（manage_roles 権限なし）: %s [guild=%s]",
+                    name,
+                    guild.id,
+                )
+                ok = False
+                continue
             try:
                 role = await guild.create_role(
                     name=name, mentionable=True, reason="club-bot 自動セットアップ"
                 )
-                log.info("ロール作成: %s (%s) [guild=%s]", role.name, role.id, guild.id)
-                return role
             except (discord.Forbidden, discord.HTTPException) as e:
                 log.warning("ロール作成失敗: %s [guild=%s]: %s", name, guild.id, e)
-                return None
-
-        role = await create_role(EXEC_ROLE_NAME)
-        if role is not None:
-            await repo.set_if_absent(guild.id, "EXEC_ROLE_ID", str(role.id))
-
-        role = await create_role(ADMIN_ROLE_NAME)
-        if role is not None:
-            await repo.set_if_absent(guild.id, "ADMIN_ROLE_ID", str(role.id))
+                ok = False
+                continue
+            log.info("ロール作成: %s (%s) [guild=%s]", role.name, role.id, guild.id)
+            try:
+                await repo.set_if_absent(guild.id, key, str(role.id))
+            except Exception as e:  # noqa: BLE001
+                # 作成できたのに保存できない場合、復旧先が人間に見えないと詰む
+                log.error(
+                    "作成したロールの ID 保存に失敗: %s (%s) [guild=%s]: %s。"
+                    "/setup で指定してください",
+                    role.name,
+                    role.id,
+                    guild.id,
+                    e,
+                )
+                ok = False
+        return ok
 
     async def _auto_create_log_channel(
-        self, guild: discord.Guild, repo: SettingsRepository
-    ) -> None:
-        """bot-log チャンネルを作成し ID を settings に保存する。"""
+        self, guild: discord.Guild, repo: SettingsRepository, gconf: GuildConfig
+    ) -> bool:
+        """bot-log チャンネルを用意し ID を settings に保存する。
+
+        戻り値は「BOT_LOG_CHANNEL_ID が設定済みの状態にできたか」。判定は
+        ロール側と同じく**実効設定**で行い、このギルドに実在するかまで見る
+        （環境変数の値は全ギルドの GuildConfig に配られるため、
+        他ギルドのチャンネル ID を「設定済み」と誤認しない）。
+
+        同名チャンネルが既にある場合は、そこへ送信できることを確認したうえで
+        採用する（ロールと違い、権限を配ることにはならないため）。
+        """
+        key = "BOT_LOG_CHANNEL_ID"
+        raw = await repo.get(guild.id, key)
+        if raw is not None:
+            if self._resolve_channel(guild, raw) is None:
+                log.info(
+                    "設定済みのログチャンネルが見つかりません (%s) [guild=%s]。"
+                    "/setup で指定し直してください",
+                    raw,
+                    guild.id,
+                )
+                return False
+            return True
+        if gconf.bot_log_channel_id is not None and guild.get_channel(gconf.bot_log_channel_id):
+            # 環境変数で設定されており、このギルドに実在する（レガシー運用）
+            return True
+
+        me = guild.me
+        existing = discord.utils.get(
+            getattr(guild, "text_channels", []), name=BOT_LOG_CHANNEL_NAME
+        )
+        if existing is not None:
+            if me is None:
+                log.info(
+                    "同名チャンネルへの送信可否を確認できないため採用しません: #%s [guild=%s]",
+                    BOT_LOG_CHANNEL_NAME,
+                    guild.id,
+                )
+                return False
+            if not existing.permissions_for(me).send_messages:
+                log.info(
+                    "同名チャンネルへ送信できないため採用しません: #%s (%s) [guild=%s]",
+                    existing.name,
+                    existing.id,
+                    guild.id,
+                )
+                return False
+            log.info(
+                "既存の #%s (%s) をログチャンネルとして採用します [guild=%s]",
+                existing.name,
+                existing.id,
+                guild.id,
+            )
+            return await self._save_log_channel_id(guild, repo, existing)
+
+        if me is None or not me.guild_permissions.manage_channels:
+            log.info(
+                "ログチャンネル自動作成をスキップ（manage_channels 権限なし, guild=%s）", guild.id
+            )
+            return False
         try:
             channel = await guild.create_text_channel(
                 BOT_LOG_CHANNEL_NAME, reason="club-bot 自動セットアップ"
             )
         except (discord.Forbidden, discord.HTTPException) as e:
             log.warning("ログチャンネル作成失敗 [guild=%s]: %s", guild.id, e)
-            return
+            return False
         log.info("ログチャンネル作成: #%s (%s) [guild=%s]", channel.name, channel.id, guild.id)
-        await repo.set_if_absent(guild.id, "BOT_LOG_CHANNEL_ID", str(channel.id))
+        return await self._save_log_channel_id(guild, repo, channel)
+
+    async def _save_log_channel_id(
+        self, guild: discord.Guild, repo: SettingsRepository, channel
+    ) -> bool:
+        """ログチャンネルの ID を settings に保存する（失敗は log.error に残す）。"""
+        try:
+            await repo.set_if_absent(guild.id, "BOT_LOG_CHANNEL_ID", str(channel.id))
+        except Exception as e:  # noqa: BLE001
+            log.error(
+                "ログチャンネルの ID 保存に失敗: #%s (%s) [guild=%s]: %s。"
+                "/setup で指定してください",
+                channel.name,
+                channel.id,
+                guild.id,
+                e,
+            )
+            return False
+        return True
 
     async def _clear_legacy_guild_commands(self, guild: discord.Guild) -> None:
         """旧ギルド限定登録のコマンドを除去する（グローバル登録への移行措置）。
@@ -324,16 +541,14 @@ class ClubBot(commands.Bot):
         """新規ギルド参加時の自動セットアップ（招待するだけで利用開始できる）。"""
         log.info("新規ギルドに参加しました: %s (id=%s)", guild.name, guild.id)
         try:
-            await self._ensure_guild_setup(guild)
+            ok = await self._ensure_guild_setup(guild)
         except Exception:
             log.exception("on_guild_join セットアップ失敗 (guild=%s)", guild.id)
+            ok = False
         await self._clear_legacy_guild_commands(guild)
-        await self.log_to_channel(
-            f"新規ギルドに参加し、自動セットアップを実行しました: {guild.name} (id={guild.id})\n"
-            "次のステップ: 管理者が `/setup` を実行し、通知チャンネル・ロールの設定と"
-            "班の作成を行ってください（班は自動作成されません）。",
-            guild_id=guild.id,
-        )
+        # 案内は log_to_channel（bot-log 限定）では送らない。
+        # BOT_LOG_CHANNEL_ID が無いギルドでは無言で捨てられてしまうため
+        await self.send_guild_notice(guild, build_setup_guidance(ok))
 
     async def on_guild_remove(self, guild: discord.Guild) -> None:
         """サーバーから外れたとき。
@@ -352,6 +567,66 @@ class ClubBot(commands.Bot):
             log.exception("退出の記録に失敗しました (guild=%s)", guild.id)
             return
         log.info("データの削除予定を記録しました (guild=%s, purge_after=%s)", guild.id, purge_after)
+
+    async def _notice_channels(self, guild: discord.Guild) -> list:
+        """案内メッセージの送信先候補を優先順に返す。
+
+        bot-log →（無ければ）guild.system_channel →（無ければ）送信可能な
+        最初のテキストチャンネル。bot-log は **guild.get_channel で解決する**
+        （環境変数の BOT_LOG_CHANNEL_ID は全ギルドの GuildConfig に配られるため、
+        bot 全体から引くと他ギルドのチャンネルへ案内が飛びうる）。
+
+        送信を試す数は MAX_NOTICE_CHANNEL_ATTEMPTS 件までに抑える。
+        """
+        me = guild.me
+        candidates: list = []
+        seen: set[int] = set()
+
+        def add(channel) -> None:
+            if channel is None or channel.id in seen:
+                return
+            # 設定値がカテゴリ・フォーラムを指していることがある。
+            # send を持たないチャンネルは AttributeError になり、
+            # 下のフォールバックまで巻き添えで止まる
+            if not hasattr(channel, "send"):
+                return
+            if me is not None:
+                perms = channel.permissions_for(me)
+                if not (perms.view_channel and perms.send_messages):
+                    return
+            seen.add(channel.id)
+            candidates.append(channel)
+
+        try:
+            gconf = await config.for_guild(guild.id)
+        except Exception:  # noqa: BLE001
+            gconf = None
+        if gconf is not None and gconf.bot_log_channel_id:
+            add(guild.get_channel(gconf.bot_log_channel_id))
+        add(guild.system_channel)
+        for channel in getattr(guild, "text_channels", []):
+            add(channel)
+        return candidates[:MAX_NOTICE_CHANNEL_ATTEMPTS]
+
+    async def send_guild_notice(self, guild: discord.Guild, message: str) -> bool:
+        """ギルドの人が読めるチャンネルへ案内を送る（最初に成功した1箇所だけ）。
+
+        運用ログ用の log_to_channel と違い、bot-log が無いギルドでも届く。
+        逆に運用ログをここへ流すと一般チャンネルへ漏れるので、
+        用途は「招待直後の案内」のように必ず人に届ける必要があるものに限る。
+        """
+        for channel in await self._notice_channels(guild):
+            try:
+                await channel.send(message)
+            except (discord.Forbidden, discord.HTTPException) as e:
+                log.warning(
+                    "案内の送信に失敗 (guild=%s, channel=%s): %s", guild.id, channel.id, e
+                )
+                continue
+            log.info("案内を送信しました (guild=%s, channel=%s)", guild.id, channel.id)
+            return True
+        log.warning("案内を送信できるチャンネルがありません (guild=%s)", guild.id)
+        return False
 
     async def log_to_channel(self, message: str, guild_id: int | None = None) -> None:
         """
