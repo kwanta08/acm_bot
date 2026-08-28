@@ -35,12 +35,12 @@ Bot管理者」というラベルで出ます（`utils/permissions.LEVEL_LABELS`
 | `/ping` | L1 | 応答確認 |
 | `/health` | L1 | Bot・各連携サービスの状態表示 |
 | `/help [command]` | L1 | コマンド一覧をカテゴリから探す。`command:` で個別の説明・引数・必要権限 |
-| `/setup-status` | L1 | 初期設定（タスク通知/ログチャンネル・管理者ロール・班長ロール・班・桁・大会日）の未完了項目を表示 |
+| `/setup-status` | L1 | 初期設定（タスク通知/ログチャンネル・管理者ロール・班長ロール・班・桁・大会日）の未完了項目を表示。新入生オンボーディングが ON のときは案内チャンネルも検査する |
 
 ### Settings（サーバー設定）
 | コマンド | 権限 | 説明 |
 |---|---|---|
-| `/setup` | L4 | 初期設定ウィザード（対話形式） |
+| `/setup` | L4 | 初期設定ウィザード（対話形式）。班の一括作成、サークル名、**新入生オンボーディングの ON/OFF**（既定 OFF）も行う |
 | `/settings_list` | L4 | 設定値の一覧 |
 | `/settings_get key:` | L4 | 設定値の取得 |
 | `/settings_set key: value:` | L4 | 設定値の保存（`COMPETITION_DATE` `DATA_RETENTION_DAYS` など） |

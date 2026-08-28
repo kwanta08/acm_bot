@@ -41,6 +41,7 @@ CHANNEL_SETTINGS: list[tuple[str, str]] = [
     ("DEFAULT_TASK_CHANNEL_ID", "タスク通知チャンネル"),
     ("TODAY_LABEL_CHANNEL_ID", "今日やること通知チャンネル"),
     ("BOT_LOG_CHANNEL_ID", "Botログチャンネル"),
+    ("WELCOME_CHANNEL_ID", "新入生の案内チャンネル"),
 ]
 ROLE_SETTINGS: list[tuple[str, str]] = [
     ("ADMIN_ROLE_ID", "Bot管理者ロール"),
@@ -51,9 +52,15 @@ ROLE_SETTINGS: list[tuple[str, str]] = [
 ]
 ALL_SETUP_KEYS: set[str] = {k for k, _ in CHANNEL_SETTINGS + ROLE_SETTINGS}
 # セレクト以外（Modal 入力）で設定できるキー
-EXTRA_SETUP_KEYS: set[str] = {"CLUB_NAME"}
+EXTRA_SETUP_KEYS: set[str] = {"CLUB_NAME", "WELCOME_ENABLED"}
 _CHANNEL_KEYS: set[str] = {k for k, _ in CHANNEL_SETTINGS}
 _ROLE_KEYS: set[str] = {k for k, _ in ROLE_SETTINGS}
+
+# その機能を ON にしているギルドでだけ「未設定」に数えるキー。
+# OFF のギルドではどこからも参照されないので、常に数えると
+# 使わない機能の未設定を毎回突きつけることになる（/setup-status と揃える）。
+# 値は GuildConfig 側の属性名
+CONDITIONAL_KEYS: dict[str, str] = {"WELCOME_CHANNEL_ID": "welcome_enabled"}
 
 # RoleSelect が一度に選べる上限。受入基準は 5 だが、/setup は**上書き**保存
 # なので、5 にすると班長ロールを6件以上運用しているギルドで L2 判定の根拠を
@@ -117,7 +124,10 @@ def build_setup_embed(
             continue
         if value is None:
             lines.append(f"**{label}**: ⚠️ 未設定")
-            missing += 1
+            # その機能が OFF なら未設定として数えない（項目としては出す）
+            flag = CONDITIONAL_KEYS.get(key)
+            if flag is None or getattr(gconf, flag, False):
+                missing += 1
         elif key in _CHANNEL_KEYS:
             lines.append(f"**{label}**: <#{value}>")
         else:
@@ -128,6 +138,8 @@ def build_setup_embed(
     else:
         summary = "すべての項目が設定済みです。"
     summary += "\n「班を一括作成」ボタンで、班と対応ロールをまとめて登録できます。"
+    state = "ON" if gconf.welcome_enabled else "OFF"
+    summary += f"\n**新入生オンボーディング**: {state}（参加した人に班選択を送る）"
 
     if selected_key:
         label = dict(CHANNEL_SETTINGS + ROLE_SETTINGS).get(selected_key, selected_key)
@@ -332,6 +344,36 @@ class SetupWizardView(TimeoutAwareView):
             ClubNameModal(self.cog, self.guild_id, self.owner_id, gconf.club_name)
         )
 
+    @discord.ui.button(
+        label="新入生オンボーディング ON/OFF", style=discord.ButtonStyle.secondary, row=4
+    )
+    async def toggle_welcome(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """参加者へ班選択を送るかどうかを切り替える（既定 OFF）。"""
+        gconf = await config.for_guild(self.guild_id, db=self.cog.db)
+        turning_on = not gconf.welcome_enabled
+        await self.cog.save_setting(self.guild_id, "WELCOME_ENABLED", "1" if turning_on else "0")
+        notice = None
+        if turning_on and not gconf.welcome_channel_id:
+            # ON にしたその場で言うのが一番効く（後で /setup-status を
+            # 見に行かせる設計にしない）
+            notice = (
+                "⚠️ **新入生の案内チャンネル**が未設定です。"
+                "このままだと DM を拒否している人には案内が届きません。"
+            )
+        log.info(
+            "/setup で新入生オンボーディングを %s (guild=%s)",
+            "ON" if turning_on else "OFF",
+            self.guild_id,
+        )
+        gconf = await config.for_guild(self.guild_id, db=self.cog.db, force_reload=True)
+        try:
+            await interaction.response.edit_message(
+                embed=build_setup_embed(gconf, selected_key=self.selected_key, notice=notice),
+                view=self,
+            )
+        except discord.HTTPException as e:
+            log.warning("/setup のトグル反映に失敗 (guild=%s): %s", self.guild_id, e)
+
     @discord.ui.button(label="班を一括作成", style=discord.ButtonStyle.primary, row=3)
     async def open_team_modal(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(
@@ -454,7 +496,6 @@ class SetupWizardView(TimeoutAwareView):
         await self.cog.save_setting(self.guild_id, self.selected_key, value)
         log.info("/setup で保存 (guild=%s): %s=%s", self.guild_id, self.selected_key, value)
         await self._refresh(interaction)
-
 
 
 class SetupWizard(commands.Cog):

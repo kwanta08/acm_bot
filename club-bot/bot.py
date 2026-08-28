@@ -51,6 +51,7 @@ COGS = [
     "cogs.teams",  # 班・技能タグ管理コグ
     "cogs.todoist_admin",  # Todoist トークン管理コグ
     "cogs.progress",  # 機体進捗管理コグ（DB 正本）
+    "cogs.welcome",  # 新入生オンボーディング（既定 OFF）
 ]
 
 # on_guild_join / 起動時の自動セットアップで投入するギルド別デフォルト設定
@@ -203,6 +204,17 @@ class ClubBot(commands.Bot):
                 log.info("Cog 読み込み: %s", cog)
             except Exception:
                 log.exception("Cog 読み込み失敗: %s", cog)
+
+        # 再起動後も押せるボタン（新入生オンボーディングの「班を選ぶ」）。
+        # 登録を忘れると、再起動を挟んだ瞬間にボタンが無反応になる。
+        # **Cog 読み込みと同じく失敗を握る。** ここで例外を上げると
+        # setup_hook ごと落ちて、全ギルドの bot が起動しなくなる
+        try:
+            from cogs.welcome import TeamPickButton
+
+            self.add_dynamic_items(TeamPickButton)
+        except Exception:
+            log.exception("DynamicItem の登録に失敗: cogs.welcome")
 
         # スラッシュコマンドはグローバル登録に統一する。
         # 新規サーバーへ参加してもコマンド登録の追加作業は不要

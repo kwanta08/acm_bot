@@ -119,7 +119,8 @@ def test_build_setup_embed_marks_missing():
     desc = embed.description or ""
     assert "<#111>" in desc  # 設定済みはメンション表示
     assert "⚠️ 未設定" in desc  # 未設定項目を明示
-    assert "未設定が 8 件" in desc  # 全9項目中1件のみ設定済み
+    # 案内チャンネルはオンボーディングが OFF なので数えない（全10項目・8件）
+    assert "未設定が 8 件" in desc
 
     full = GuildConfig(
         guild_id=G1,
@@ -132,6 +133,7 @@ def test_build_setup_embed_marks_missing():
         exec_role_id=7,
         admin_role_id=8,
         leader_role_ids=[9],
+        welcome_channel_id=10,
     )
     embed_full = build_setup_embed(full)
     assert "未設定" not in (embed_full.description or "")
@@ -364,6 +366,7 @@ def test_build_setup_embed_shows_the_selected_item():
         exec_role_id=7,
         admin_role_id=8,
         leader_role_ids=[9],
+        welcome_channel_id=10,
     )
     desc = build_setup_embed(full, selected_key="LEADER_ROLE_IDS").description or ""
     assert "班長ロール" in desc
