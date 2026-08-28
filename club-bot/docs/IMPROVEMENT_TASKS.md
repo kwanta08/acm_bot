@@ -395,7 +395,7 @@
       - **検証**: `tests/test_schedule_delete.py`（新規）
       - **注意**: 既存の CASCADE 削除に依存しているテストがあれば併せて直す
 
-- [ ] **G3-4** `/schedule confirm` — 確定日程の登録と当日リマインド。
+- [x] **G3-4** `/schedule confirm` — 確定日程の登録と当日リマインド。
       `finalize_schedule`（`cogs/schedule.py:704`）は集計サマリーを投稿して終わりで、
       **「結局いつに決まったのか」がどこにも残らない**。前日・当日のリマインドも無い。
       - **⚠️ `confirmed_option_id` は G3-3 で追加済み（v17）。新しい migration を作らないこと。**
@@ -405,8 +405,11 @@
         （gotcha `bot-wont-start-undefined-column`）
       - **受入**: スキーマ v17（`016_schedule_confirmed.sql`。G3-3 で適用済み）の
         `schedules.confirmed_option_id TEXT NULL` を使う。`/schedule confirm schedule_id option_id`（L2）で
-        確定を保存し対象ロールへ告知。`/schedule list` に確定日を表示。
+        確定を保存し対象ロールへ告知。`/schedule list` **と `/schedule list-closed`** に確定日を表示。
         前日20時と当日朝に「本日 18:00 ◯◯（場所）」を通知
+        （**当初「`/schedule list` に表示」とだけ書いていたが、締切済み一覧を足した。**
+        通常フローは締切 → 集計 → 確定で `closed_flag = 1` になるため、
+        開催中一覧だけでは確定日が実質どこにも出ない。完了ログの設計判断1）
       - **検証**: `tests/test_schedule_confirm.py`（新規）。リマインドは `reminders_log` の
         日付キーで二重送信を防ぐ
       - **申し送り**: `.ics` 添付（標準ライブラリのみ・外部依存ゼロ）は次イテレーションで。
@@ -2033,3 +2036,132 @@ guild_id しか絞らないので削除済みの行も並び、`closed_flag` は
 - 「見つかりません」の重複は **5件**（6ではない）。集約後は `_find_schedule` と
   `restore`（`include_deleted=True` が要るため意図的に非集約）の2箇所
 - 適用前に `pg_dump -Fc` を取ること（down が無い）。手順の docs への追記は G3-7 で行う
+
+### 2026-08-29 — G3-4: `/schedule confirm` 確定日程と当日リマインド（ブランチ `fix/g3-4`）
+
+`finalize_schedule` は集計サマリーを投稿して終わりで、**「結局いつに決まったのか」が
+どこにも残らなかった**。前日・当日のリマインドも無い。
+
+- ruff: `All checks passed!`
+- pytest: **972 passed, 12 skipped**（着手前は 943 passed, 11 skipped）。
+  **skip が1件増えたのは PG ライブテストを1本追加したため。**
+  内訳は `tests/test_dashboard_edit.py` 4件・`tests/test_db_postgres.py` 8件で、
+  いずれも `CLUB_TEST_PG_DSN` 未設定。**PG ライブテストは今回実行していない（skip のまま）**
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `repositories/schedule_repository.py` | `set_confirmed_option`（**SQL の `EXISTS` で対象候補を担保**）/ `clear_confirmed_option` / `list_confirmed_between`。一覧2つを LEFT JOIN 化し確定候補の `start_at` を同じ行で返す |
+| `cogs/schedule.py` | `/schedule confirm`（L2）/ `/schedule unconfirm`（L2）。`option_id` の候補は選ばれた予定のものだけ。一覧に確定日を表示 |
+| `cogs/reminders.py` | 前日 20:00 / 当日 08:30 の新ループ。`confirmed_schedule_reminders` |
+| `services/schedule_service.py` | 集計サマリーに確定日（`description` へ追記） |
+| `docs/` | `OPERATION.md`（コマンド表・自動ジョブ表）/ `GUIDE.md`（通知表・使い方） |
+
+**マイグレーションは無し。** `confirmed_option_id` は G3-3 の v17 で追加済み。
+
+新規テスト `tests/test_schedule_confirm.py`（29件）＋ `tests/test_db_postgres.py` に PG ライブ1件。
+
+#### 設計判断
+
+**1. 受入基準の「`/schedule list` に確定日を表示」だけでは機能が死ぬ。**
+`/schedule list` は `closed_flag = 0` しか出さないが、確定作業の通常フロー
+（締切 → 集計サマリー → 確定）を通ると `finalize_schedule` が `close_schedule` を呼ぶので、
+その予定は二度と `/schedule list` に現れない。**`/schedule list-closed` にも出す**ように直し、
+受入基準の本文も更新した。
+
+**2. 確定日の表示に候補の `label` を使わない。**
+`label` は利用者が `/schedule create` に打った生文字列で、`utils/parser.SHORT_FORMATS` により
+`7/20 18:00`（年なし）や `2026-07-20`（時刻なし）も通る。これを確定日として出すと、
+一覧は「7/20」なのに当日通知は「本日 00:00」になる。**正規化済みの `start_at` に統一**した。
+
+**3. 対象外の候補を弾くのは Cog の if ではなく SQL。**
+`set_confirmed_option` を1文の UPDATE にし、`EXISTS (SELECT 1 FROM schedule_options
+WHERE guild_id = ? AND option_id = ? AND schedule_id = ?)` を条件に入れた（ADR 0008 / 0010）。
+Cog の分岐は UX のためで、担保はリポジトリ側。テストも Cog を通さず直接叩いて固定した。
+
+**4. 失敗を `reminders_log` に書かない。**
+`RemindersLogRepository.exists()` は `status` を見ないので、失敗を同じキーで書くと
+**その日の通知が二度と飛ばない**（G2-3 が潰した「送っていないのに送信済み」と同じ形）。
+失敗は `log.warning` と `bot.log_to_channel` にだけ出す。この不変条件を
+`CONFIRMED_REMINDER_TYPE` の定義箇所に明記した。
+`exists()` に `status` フィルタを足す案は、共有述語の変更で `milestone_alert` の挙動も
+変わるため採らなかった（ADR 0014。必要になったら別タスク）。
+
+**5. 締切前の確定を許可する。ただし自動で締め切らない。**
+「先に決まる」は実運用で起きる。断ると `/schedule close`（＝公開サマリー投稿）を
+強制することになる。逆に confirm が `finalize_schedule` を呼ぶのは、別コマンドの副作用で
+公開投稿が飛ぶ設計で ADR 0024 に反する。保存したうえで ephemeral に
+「まだ投票受付中です。締め切るには `/schedule close`」を添える形にした。
+
+**6. 告知の本文は Embed の `description` に渡す。**
+`utils/embeds._base` は `title[:100]` で無条件に切るため、本文を title に入れると
+**イベント名が長いギルドで日時や場所が黙って消える**（このコマンドの目的そのものが落ちる）。
+差分監査の指摘で発見。イベント名90文字の回帰テストを置いた。
+
+**7. チャンネルは `guild.get_channel_or_thread`。**
+`guild.get_channel` はスレッドを解決しない。`/schedule create` は `channel` 未指定時に
+`interaction.channel` の ID を保存するので、**スレッド内で作られた予定は `channel_id` が
+スレッド ID になる**。`get_channel` だと告知が出ず、リマインドは毎日2回
+「チャンネルが見つかりません」を運用者ログへ流し続ける。既存経路は `bot.get_channel`
+（スレッドも解決する）なので、同一ギルド限定にした今回の2箇所だけが踏む形だった。
+
+**8. 集計サマリーの確定日は `add_field` ではなく `description`。**
+候補数に上限が無い（`svc.parse_options` は分割するだけ）ので、field を1つ増やすと
+上限25に当たる閾値が下がる。`finalize_schedule` は `HTTPException` を握り潰すため、
+**超えた瞬間に集計サマリーが無言で投稿されなくなる**。
+
+**9. 未確定のサマリーに1行の案内を残した（意図的な逸脱）。**
+差分監査は「確定済みのときだけ出す」を勧めたが、(a) `description` の1行なので上限の問題は
+解消している、(b) このタスクの起票理由は「結局いつに決まったのかが残らない」ことで、
+締切サマリーは**その必要が生じるまさにその瞬間**に出る唯一の接点、
+(c) ADR 0024 が禁じているのはマイグレーションや既定値による**状態**の変化で、
+公開投稿の文面1行はそれに当たらない、として残した。再監査で許容判定。
+公開投稿なので主語を書く形（「班長以上が `/schedule confirm` で…」）にし、
+L1 の部員に実行できないコマンドを命令していない。
+
+**10. `/schedule unconfirm` を足した（受入基準に無い）。**
+取り消し手段が無いと、誤確定を止める唯一の方法が `/schedule delete`（L3・投票メッセージも
+消える）になり代償が釣り合わない。`option_id` 省略で解除する案は、Discord の UI で
+任意引数の省略が最も起きやすいため却下した。`clear_confirmed_option` が
+**呼び出し元の無いデッドコードになる**という指摘も決め手。
+
+#### ゲートの判定
+
+| ゲート | 判定 | 経過 |
+|---|---|---|
+| ゲート1（acm-plan-reviewer） | REVISE ×2 → 「反映すれば実装に入ってよい」 | 1回目に10件（**確定日が表示されない**／`exists()` が status を見ない／ループ登録テストの空振り／Cog の if ではなく SQL で守る／`guild.get_channel` へ揃える／公開投稿で命令しない／本文と時刻／PG の境界値／docs／作業ツリー確認）、2回目に3件（失敗を `reminders_log` に書かない／`list_option_labels` では確定「日」を出せない／`unconfirm` の補完と権限テスト） |
+| ゲート2（acm-diff-auditor） | FINDINGS → **CLEAN** | 6件（**title 100文字切り**／**`get_channel` がスレッドを解決しない**／告知失敗が伝わらない／field が増える／`int()` が try の外／`OPERATION.md` の自動ジョブ表） |
+| ゲート2（acm-test-adversary） | **EFFECTIVE** | 23項目すべてで戻すと赤くなることを実測 |
+
+**ゲート2は同時ではなく逐次で回した**（G3-1〜G3-3 と同じ意図的な逸脱）。
+
+#### ループ登録テストの実測（ゲート1の指定）
+
+既存の `tests/test_data_purge.py` の `test_purge_loop_is_registered` は `hasattr` を見るだけで、
+**`cog_load` から `start()` の行を消しても通る**形だった。今回は挙動で見る形にし、
+実際に行を消して落ちることを確認した:
+
+| 消した行 | 結果 |
+|---|---|
+| `cog_load` の `self.confirmed_schedule_reminders.start()` | `test_every_loop_is_started_and_cancelled_by_the_cog` が **1 件失敗** |
+| `cog_unload` の `self.confirmed_schedule_reminders.cancel()` | 同じテストが **1 件失敗** |
+
+#### test-adversary が見つけた「戻しても緑」の穴（その場で塞いだ）
+
+| 穴 | 意味 | 対応 |
+|---|---|---|
+| `schedule_list_value` から確定日の3行を消しても緑 | **受入基準の中核**（一覧に確定日を表示）が cog 側で無検証だった。リポジトリの JOIN は担保されていたが、それを Embed に出す側を見るテストが無かった | `Schedule.list_cmd` / `list_closed_cmd` を実際に呼び、field の value に確定日時が入ることを検査（戻すと落ちることを実測） |
+| PG ライブテストが「他予定の**実在する** option_id」を見ていなかった | 現実的な誤操作（他予定の候補を選ぶ）が PG 側で無検証 | 2つ目の予定と候補を作って False を確認するケースを追加（**DSN 未設定のため未実行**） |
+
+#### 次タスクへの申し送り
+
+- **`.ics` 添付は次イテレーション**（受入基準の申し送りどおり）。Google カレンダー連携は ADR 0013 に反するのでやらない
+- **PG ライブテストは skip のまま**（`CLUB_TEST_PG_DSN` 未設定）。今回追加した
+  `test_pg_live_confirmed_schedule_join` は、`+09:00` 付き ISO 文字列の範囲比較で
+  **ちょうど 00:00:00 の候補**を取りこぼさないことを見る。実行するときはここを注視すること
+- `config.tz` に**夏時間のあるゾーン**を設定すると、`start_at` のオフセットが変動して
+  文字列の辞書順＝時刻順が崩れる。既存の `deadline` 比較と同じ前提なので今回は触っていない
+- 08:30 に3つのループ（`daily_morning` / `weekly_milestone_alert` /
+  `confirmed_schedule_reminders`）が並走する。いずれもギルド単位で例外を握るので
+  相互には影響しないが、ギルド数が増えたら実行時刻の分散を検討する
