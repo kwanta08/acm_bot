@@ -431,7 +431,7 @@
       - **検証**: `tests/test_guild_foundation.py` に、bot-log 無し・権限無しの2ケースを追加
       - **注意**: ADR 0017（最小権限）は維持する。権限を増やす方向で解決しない
 
-- [ ] **G3-6** 新入生オンボーディング（`on_member_join` → 班のセルフ選択）。
+- [x] **G3-6** 新入生オンボーディング（`on_member_join` → 班のセルフ選択）。
       新歓期に30〜50人が入るが、`on_member_join` は名前キャッシュを更新するだけ
       （`cogs/name_cache.py:157`）。**bot は新入生の存在を知らず、`/member register` を
       幹部が1人ずつ手打ちしている**。名簿に載らない人には班別通知も出欠催促も届かない。
@@ -441,7 +441,9 @@
         DM 拒否時は指定チャンネルでメンション。`/setup` に ON/OFF を追加
       - **検証**: `tests/test_welcome.py`（新規）。OFF のとき何も起きないことを必ず検査
       - **注意**: **既定は OFF**（ADR 0024「既定値で何も起きない状態から始める」）。
-        UI は `cogs/members.py:287` の `/member setup` の班選択ウィザードを流用する
+        （**`/member setup` は「班選択ウィザード」ではない。** autocomplete 付きの
+        L3 スラッシュコマンドで、流用できるのは `MemberRepository.list_teams` と
+        `_sync_roles` だけ。Select View は新規に書いた。完了ログの設計判断5）
 
 - [ ] **G3-7** ドキュメントを実装に合わせ、GUIDE.md を回帰テストの対象にする。
       齟齬: GUIDE.md:364-365 は「毎朝 **08:00**」だが実装は **08:30**（`cogs/reminders.py:193`）。
@@ -2165,3 +2167,119 @@ L1 の部員に実行できないコマンドを命令していない。
 - 08:30 に3つのループ（`daily_morning` / `weekly_milestone_alert` /
   `confirmed_schedule_reminders`）が並走する。いずれもギルド単位で例外を握るので
   相互には影響しないが、ギルド数が増えたら実行時刻の分散を検討する
+
+### 2026-08-29 — G3-6: 新入生オンボーディング（ブランチ `fix/g3-6`）
+
+新歓期に30〜50人が入るのに bot は新入生の存在を知らず、幹部が `/member register` を
+1人ずつ手打ちしていた。名簿に載らない人には班別通知も出欠催促も届かない。
+
+- ruff: `All checks passed!`
+- pytest: **1013 passed, 12 skipped**（着手前は 972 passed, 12 skipped。skip は据え置き）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `cogs/welcome.py`（新規） | `on_member_join` で「班を選ぶ」ボタンを DM。押すと班 Select → 名簿登録＋ロール付与 |
+| `config.py` | `welcome_enabled: bool`（既定 False）/ `welcome_channel_id` |
+| `repositories/settings_repository.py` | `get_bool()`（保存は `"1"/"0"`、解釈は大文字小文字を無視、不正値は既定） |
+| `cogs/setup_wizard.py` | ON/OFF トグル。`CONDITIONAL_KEYS` で OFF のギルドは未設定に数えない |
+| `cogs/help.py` | `/setup-status` も ON のときだけ案内チャンネルを検査 |
+| `bot.py` | `COGS` 追加、`add_dynamic_items` の登録（**失敗を握る**） |
+| `requirements.txt` | discord.py の下限を `>=2.4.0` へ |
+| `docs/` | `GUIDE.md` Step 4.5 / `PRIVACY.md`（**公開ポリシーの変更**）/ `OPERATION.md` |
+
+新規テスト `tests/test_welcome.py`（38件）。**マイグレーションは無し**（`settings` の行のみ）。
+
+#### 設計判断
+
+**1. 参加しただけでは `members` に登録しない。** 登録は班を選んだときだけ。
+`on_member_join` は**再参加でも発火**するので、ここで `upsert_member` すると
+訪問者や OB まで台帳に入る。台帳は G3-2 で**未回答催促の母集団**にしたばかりなので、
+誤爆が直接「誤送信」になる。`status` / `active_flag` にも触れない
+（再参加した卒業生が自動で現役に戻る経路を作らない）。
+
+**2. DM 拒否時の送り先は `WELCOME_CHANNEL_ID` だけ。未設定なら何もしない。**
+G3-5 の `send_guild_notice` は招待直後の案内用で、候補順が
+`#bot-log` → `system_channel` → 送信可能な最初のテキストチャンネル、
+権限チェックも Bot 側だけ。新入生が読めない `#bot-log` に落ちても「送信しました」と
+成功扱いになる。受入基準の語も「**指定**チャンネル」。
+Bot の送信権限と**本人の可視性**の両方を検査し、カテゴリ・フォーラムも弾く。
+
+**3. ボタンは `DynamicItem`。`custom_id` に guild_id と user_id の両方を埋める。**
+user_id を埋めないと、チャンネルへ落ちたボタンが**誰でも押せる班ロール自販機**になる
+（L2 の `/member register` を迂回する）。`DynamicItem` にしたのは、新歓期の再起動で
+新入生のボタンが死なないようにするため。これに伴い `requirements.txt` の下限を
+`>=2.4.0` へ上げた（2.3 環境では import が落ちるが、venv は 2.7.1 なので
+**テストでは絶対に検出できない**。ソース走査テストで下限を守る）。
+
+**4. ロール付与の前提は2つ。どちらが欠けても登録は通す。**
+Manage Roles は最小権限の招待（ADR 0017）に含まれず、`teams.member_role_id` は
+ロールの自動作成が成功したギルドにしか入っていない。**後者は新規ギルドの既定に近い状態**なので、
+`_sync_roles` の戻り値だけを見ると「付いた」と誤解させる。`member_role_id` の有無を
+先に判定して文面を分けた。権限を増やす方向では解決しない。
+
+**5. `/member setup` は「班選択ウィザード」ではなかった。**
+受入基準の「UI は `/member setup` の班選択ウィザードを流用する」は現物と食い違っており、
+実体は autocomplete 付きの L3 スラッシュコマンド。流用できたのは
+`MemberRepository.list_teams` と `_sync_roles` だけで、**Select View は新規に書いた**。
+受入基準の本文にもその旨を追記した。
+
+**6. `/setup` と `/setup-status` は ON のときだけ案内チャンネルを数える。**
+OFF のギルドではこの設定はどこからも参照されないので、常時カウントすると
+オンボーディングを使わないサークルに毎回「未設定 N 件」を突きつけることになる
+（ADR 0023 / 0024）。逆に ON なら**必ず**数える——未設定だと DM を拒否している
+新入生が丸ごと取りこぼされるため。ON にしたその場でも警告する
+（後で `/setup-status` を見に行かせる設計にしない）。
+
+**7. `add_dynamic_items` の登録失敗を握る。**
+`load_extension` は失敗を握るのに、直後の裸の `from cogs.welcome import ...` を
+try の外に置いていた。ここで例外が出ると `setup_hook` ごと落ちて
+**全ギルドの bot が起動しない**。1ギルドの機能欠落で済むはずが全テナント停止に化ける。
+
+#### 公開ポリシー（`docs/PRIVACY.md`）の変更
+
+- §2 冒頭に「ボタン・選択メニューの操作」を追加し、
+  「名簿に登録されるのは班を選んでいただいたときだけ」を明記
+- §2.1 に「表示名キャッシュ」の行を追加。**この差分以前から欠落していた項目**で、
+  `cogs/name_cache.py` は設定に関わらず**起動のたびに全メンバー分**を更新する
+  （当初「サーバー参加時」とだけ書いてしまい、差分監査に2度指摘された）
+- §2.4 の「スラッシュコマンドとリアクションのみで動作し」を実装に合わせた
+
+#### ゲートの判定
+
+| ゲート | 判定 | 経過 |
+|---|---|---|
+| ゲート1（acm-plan-reviewer） | REVISE ×2 → 実装許可 | 1回目に13件（**フォールバック先が受入基準の「指定チャンネル」でない**／**再参加で既存データが動く**／`_sync_roles` が例外を捕捉していない／Select の25件上限／下限引き上げを構造で守る／`get_bool` の往復／`/member setup` の事実誤認 ほか）、2回目に4件（`get_channel_or_thread` がカテゴリを返す／Bot 側権限を落とさない／バージョン判定を文字列一致で書かない／初回押下でボタンを消さない） |
+| ゲート2（acm-diff-auditor） | FINDINGS ×2 → 残1件 | 1回目に6件（**PRIVACY.md に事実でない記述**／`/setup` が無条件にカウント／**Cog 1本の import 失敗で起動不能**／ロール未紐付けで「登録しました」だけ返る／テストが効いていない2箇所／`open_team_picker` だけ在籍を見ていない）、2回目に3件（表示名キャッシュの記録タイミング／`ruff format` による無関係な整形の混入／picker の在籍ガードに回帰テストが無い） |
+| ゲート2（acm-test-adversary） | **INEFFECTIVE → 修正済み** | 下記 |
+
+#### test-adversary の実測（27項目）と、見つかった7つの穴
+
+23項目は戻すと赤くなった。**緑のままだったのは7件**で、いずれもその場で塞ぎ、
+戻すと落ちることを実測した:
+
+| 穴 | 意味 |
+|---|---|
+| `WELCOME_CHANNEL_ID` の判定を消して `text_channels[0]` へ落としても緑 | テストの `_Guild` に `text_channels` / `system_channel` が無く、**受入基準の「指定チャンネル」を守れていなかった**。ダブルに実物と同じ入口を持たせた |
+| `open_team_picker` の在籍検査を消しても緑 | picker を呼ぶ既存4テストが全員メンバーを渡す形だった |
+| `get_bool` を `raw == "1"` だけにしても緑 | docstring が主張する「大文字小文字を無視」が未検証 |
+| ON 時の警告を消しても緑 | assert が**トートロジー**だった（`未設定` の行は notice の有無に関係なく出る） |
+| `add_dynamic_items` の呼び出しだけ無効化しても緑 | ソースの文字列 grep だけだったので、コメントアウトでも通る |
+| `callback` が `custom_id` でなく押下者の ID を使っても緑 | `callback` を通すテストが1件も無かった |
+| DM のボタンに user_id を埋めなくても緑 | 参加イベント → `custom_id` への埋め込みの**配線**が無検査だった |
+
+#### 次タスクへの申し送り
+
+- `cogs/settings.py` の `channel_keys` / `/set_channel` の choices に `WELCOME_CHANNEL_ID` が無い。
+  `/settings_list` で「その他」に分類されるだけの**表示上の問題**なので、このタスクでは触っていない
+- **採番の食い違い（再掲）**: `IMPROVEMENT_TASKS.md` の申し送り表は
+  「`pg_dump -Fc` の docs 追記」を "G3-6" に割り当てているが、G3-6 の枠は
+  オンボーディングで埋まっている。**この追記は G3-7 で行う**（G3-3 の完了ログにも記録済み）
+- **PostgreSQL 実測はしていない。** ただし G3-6 は新しい SQL を1文も追加しておらず
+  （`get_bool` は既存の `get` を再利用、他も既存経路）、`config.for_guild` に SELECT が
+  1回増えるだけなので、G1-0 / G1-9 型のリスクはこの差分には無いと判断した
+- **作業手順の反省**: ゲート2の test-adversary が live worktree に変異を当てている最中に
+  コミットしてしまい、G3-4 の実装コミットに変異が混ざった（`77f38bd` で復旧）。
+  以降は「フルセット緑」だけを根拠にせず、**戻した項目それぞれを実装側の grep で確認**してから
+  コミットする。adversary 側もサンドボックス複製で実測する運用に変えた
