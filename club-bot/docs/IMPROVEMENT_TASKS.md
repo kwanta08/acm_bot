@@ -482,7 +482,7 @@
       - **注意**: 通知は `cogs/reminders.py:128` の5分ループに相乗りし、
         送信済み管理は `reminders_log` を使う。**1ギルドの失敗が他ギルドを止めないこと**
 
-- [ ] **G4-3** `/report changes` — 監査ログの閲覧と export への追加。
+- [x] **G4-3** `/report changes` — 監査ログの閲覧と export への追加。
       `AuditLogRepository.list_recent`（`repositories/audit_log_repository.py:38`）を呼ぶコードが
       bot 側に1箇所も無い。`/report audit`（`cogs/reports.py:38,178`）が読んでいるのは
       `reminders_log` で別物。`audit_log` には `/setup`・班マスタ変更・年度替わり・
@@ -2537,3 +2537,96 @@ G2-3 の原則をそのまま全部に当てると、DM を閉じている部員
   閾値を「予定日からの経過」に読み替えるだけ
 - `/layer stats` は `layer_records` だけを見るので、自動取り消しされた
   セッションは集計に一切現れない（これは意図どおり）
+
+---
+
+### 2026-08-29 — G4-3: `/report changes` と読み取り専用テーブルの追加（ブランチ `feat/g4-3`）
+
+`AuditLogRepository.list_recent` を呼ぶコードが bot 側に1つも無く、
+`audit_log` は**書かれ続けているのに誰も読めない**状態だった。
+`/report audit` が読んでいたのは `reminders_log`（bot が送った通知）で別物。
+`/data export` も `TABLES` の7表だけで、年度・節目・桁マスタ・技能タグ・設定を持ち出せなかった。
+
+- ruff: `All checks passed!`
+- pytest: **1101 passed, 12 skipped**（着手前は 1072 passed, 12 skipped）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `repositories/table_repository.py` | 読み取り専用の6表（`audit_log` / `seasons` / `progress_milestones` / `layer_keta` / `skill_tags` / `settings`）と `TableSpec.min_level` |
+| `repositories/audit_log_repository.py` | `list_recent` に `actor_id` 絞り込み、`list_actors()`（補完用） |
+| `cogs/reports.py` | `/report changes`（L3・actor 補完付き）。`/report audit` → `/report notifications` へ改名 |
+| `dashboard/routers/tables.py` | `_visible_spec()` で `min_level` を一覧・取得・CSV・PATCH の4経路に効かせる |
+| `tests/test_report_changes.py`（新規） | 26件 |
+| `tests/test_dashboard_tables.py` ほか | 既存テストの前提更新＋レベル制御の3件を追加 |
+| `docs/*` `README.md` `cogs/{data,season}.py` | 「主要7テーブル」→「主要13テーブル」（8箇所）、コマンド表・早見表 |
+
+#### 設計判断
+
+**1. 表ごとの閲覧レベルを `TableSpec` に持たせた（`min_level`）。**
+`GET /settings` はロール ID の実値を **L4 にだけ**返している（G1-6）。
+`settings` を素で `TABLES` に足すと、**同じ値が表グリッド経由で L1 に見える**——
+G1-6 の修正が丸ごと無効になる。ルータ側の `if table_key == "settings"` で守る案は、
+表を足すときに書き忘れれば素通りするので採らなかった（ADR 0008 / 0016 の
+「規律ではなく構造で守る」）。既定は 1 なので、既存の7表の挙動は変わらない。
+
+割り当て: `settings` = L4（`GET /settings` と同じ）、`audit_log` = L3
+（`/report changes` と同じ。画面と Discord で食い違わせない）、残りは L1。
+`/data export` は元から L4 なので、この値の影響を受けない。
+
+**2. 新しい6表は編集可能な列をゼロにした。** 正本の入口は Discord コマンド側
+（`/season new` `/milestone add` `/layer keta-add` `/skill-add` `/setup`）にあり、
+表グリッドから直せると入口が二重になる。とくに `settings` を編集可にすると
+**ダッシュボードから権限ロールを差し替えられる**（`teams.leader_role_id` を
+編集不可にしたのと同じ理由。G1-6）。
+
+**3. 「秘密情報を含む列の除外」を、列名の検査に置き換えた。**
+`settings` の3列（`setting_key` / `setting_value` / `updated_at`）に
+秘密専用の列は無く、Todoist トークンは `todoist_configs`（`TABLES` 外）にある。
+そこで「この表のこの列を外す」ではなく、**全表を横断して
+`token` / `secret` / `password` / `credential` / `api_key` / `encrypted` を
+含む列名が1つも無いこと**をテストにした。次に表を足す人にも効く。
+
+**4. 表キーは `layer_ketas` ではなく `layer_keta`。**
+実テーブル名が `layer_keta`（単数）。タスク本文の表記に合わせて
+キーだけ複数形にすると、CSV のファイル名（`layer_ketas.csv`）と
+DB のテーブル名が食い違って混乱する。
+
+**5. `/report audit` は削除して改名した（別名を残していない）。**
+`test_the_old_audit_command_is_gone` で `hasattr` を検査している。
+残すと「audit なのに audit_log を読まない」という元の混乱がそのまま残る。
+早見表・OPERATION.md も同時に直した（`test_docs_commands.py` が両方向で検査する）。
+
+**6. 実行者の解決はギルドキャッシュ → `discord_name_cache` → ID の3段。**
+解決できないものは**伏せずに ID のまま出す**（伏せると追跡できなくなる）。
+`target` も同じ解決を通す（ロール ID・ユーザー ID が入ることがある）。
+これは G2-8 として起票されている「`/report audit` が生の18桁 ID を出す」の
+`changes` 側での解消にあたる。
+
+**7. actor の補完候補は「実際にログへ出てくる人」だけ。**
+ギルドの全メンバーを並べても、そのほとんどは1度も操作していない。
+`list_actors()` が `GROUP BY actor_id ORDER BY MAX(audit_id) DESC` で出す。
+
+#### 空振り確認（実測）
+
+| 一時的な改変 | 結果 |
+|---|---|
+| ルータの `scope.require(min_level)` を消す | ダッシュボードのレベル検査が失敗 |
+| 一覧の `min_level` フィルタだけ消す | 同上（一覧に L4 限定の表が出る） |
+| `settings` の `min_level=4` を消す | 2件が失敗 |
+| `list_recent` の `actor_id` 条件を外す | 絞り込み3件が失敗 |
+| `/report changes` が `reminders_log` を読むようにする | 3件が失敗 |
+| 名前解決をやめて ID を返す | 2件が失敗 |
+| `audit_log.action` を `editable=True` に | 読み取り専用の2件が失敗 |
+
+#### 次タスクへの申し送り
+
+- **G4-7（`progress_snapshots`）を足したら `TABLES` にも読み取り専用で加える。**
+  そのとき「主要13テーブル」の数字が `test_the_export_table_count_matches_the_whitelist`
+  で自動的に赤くなる（docs 4ファイル ＋ `cogs/{data,season}.py`）
+- `/report changes` の `target` は `members#1` のような複合文字列も入る。
+  `_resolve_actor` は数字でないものをそのまま返すので壊れないが、
+  表示名へ解決したいなら別の解決器が要る
+- G2-8（`/progress edit` が DB カラム名をそのまま出す）は**未着手のまま**。
+  `changes` 側は解消したが `progress.py` 側は手を付けていない
