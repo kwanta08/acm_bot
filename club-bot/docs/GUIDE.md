@@ -561,7 +561,7 @@ ONにしない限り参加者には何も送りません。
 | | `/task delete` `/task assign` `/task sections` `/task push` | L2〜 |
 | | `/task link-section` `/task unlink-section` `/task unlink-team-sections` | L3〜 |
 | | `/task sync` | L4 |
-| 桁巻き | `/layer start` `/layer end` `/layer status` `/layer keta-list` | 全員 |
+| 桁巻き | `/layer start` `/layer end` `/layer status` `/layer stats` `/layer keta-list` | 全員 |
 | | `/layer keta-add` `/layer keta-remove` | L2〜 |
 | 機体進捗 | `/progress view` | 全員 |
 | | `/progress add` `/progress edit` `/progress remove` `/progress spar-link` `/progress setup` | L2〜 |

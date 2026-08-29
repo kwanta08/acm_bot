@@ -316,6 +316,7 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 | `/layer start <桁名> <層番号>` | L1 | 積層開始を記録 |
 | `/layer end` | L1 | 進行中セッションを終了し DB に記録 |
 | `/layer status` | L1 | 進行中の作業一覧 |
+| `/layer stats [桁名] [期間]` | L1 | 積層記録を桁別・作業者別に集計（層数・時間・1層あたり平均・最終作業日） |
 | `/layer keta-add <桁名>` | L2 | 桁名を登録 |
 | `/layer keta-remove <桁名>` | L2 | 桁名を無効化 |
 | `/layer keta-list` | L1 | 登録済みの桁名一覧 |
