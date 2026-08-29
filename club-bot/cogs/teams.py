@@ -1,9 +1,9 @@
 """
-Teams / Skills 管理モジュール。
+Teams 管理モジュール。
 
-班（teams）と技能タグ（skill_tags）のマスタをギルド単位で管理する
-管理者向けコマンド群。config.py の固定配列（INITIAL_TEAMS / SKILL_TAGS）は
-廃止され、新規ギルドは班・技能タグが空の状態で開始する。
+班（teams）のマスタをギルド単位で管理する管理者向けコマンド群。
+config.py の固定配列（INITIAL_TEAMS）は廃止され、新規ギルドは
+班が空の状態で開始する。
 
 権限: すべて Bot 管理者（L4）限定。admin_role_id 未設定でも
 サーバーオーナーまたは Discord の管理者権限（Administrator）で実行できる
@@ -21,7 +21,6 @@ from discord.ext import commands
 from config import config
 from repositories.audit_log_repository import AuditLogRepository
 from repositories.member_repository import MemberRepository
-from repositories.skill_tag_repository import SkillTagRepository
 from services import team_service
 from utils.embeds import (
     MAX_EMBED_FIELDS,
@@ -44,7 +43,6 @@ class Teams(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.repo = MemberRepository(bot.db)
-        self.skill_repo = SkillTagRepository(bot.db)
         self.audit_repo = AuditLogRepository(bot.db)
 
     # ---------- autocomplete ----------
@@ -54,13 +52,6 @@ class Teams(commands.Cog):
         if interaction.guild is None:
             return []
         return await team_service.team_choices(self.bot.db, interaction.guild.id, current)
-
-    async def _skill_ac(
-        self, interaction: discord.Interaction, current: str
-    ) -> list[app_commands.Choice[str]]:
-        if interaction.guild is None:
-            return []
-        return await team_service.skill_choices(self.bot.db, interaction.guild.id, current)
 
     # ==================================================================
     # 班管理
@@ -274,107 +265,6 @@ class Teams(commands.Cog):
                 executor=interaction.user.display_name,
             ),
             ephemeral=True,
-        )
-
-    # ==================================================================
-    # 技能タグ管理
-    # ==================================================================
-    @app_commands.command(name="skill-add", description="技能タグを追加します（管理者）。")
-    @app_commands.describe(name="技能タグ名")
-    @app_commands.check(is_admin)
-    async def skill_add(self, interaction: discord.Interaction, name: str):
-        await interaction.response.defer(ephemeral=True)
-        guild_id = await ensure_guild(interaction)
-        if guild_id is None:
-            return
-        name = name.strip()
-        if not name or len(name) > MAX_NAME_LENGTH:
-            await interaction.followup.send(
-                embed=error_embed(f"タグ名は1〜{MAX_NAME_LENGTH}文字で指定してください。"),
-                ephemeral=True,
-            )
-            return
-
-        existing = await self.skill_repo.get(guild_id, name)
-        if existing and existing["active_flag"]:
-            await interaction.followup.send(
-                embed=info_embed("技能タグ", f"「{name}」は既に登録されています。"), ephemeral=True
-            )
-            return
-
-        await self.skill_repo.add(guild_id, name, str(interaction.user.id))
-        await self.audit_repo.record(guild_id, str(interaction.user.id), "skill.add", target=name)
-        desc = (
-            f"無効化されていた技能タグ「**{name}**」を再有効化しました"
-            if existing
-            else f"技能タグ「**{name}**」を追加しました"
-        )
-        await interaction.followup.send(
-            embed=success_embed(
-                "技能タグを登録しました", desc, executor=interaction.user.display_name
-            ),
-            ephemeral=True,
-        )
-
-    @app_commands.command(
-        name="skill-remove", description="技能タグを無効化します（論理削除。管理者）。"
-    )
-    @app_commands.describe(name="無効化する技能タグ名")
-    @app_commands.autocomplete(name=_skill_ac)
-    @app_commands.check(is_admin)
-    async def skill_remove(self, interaction: discord.Interaction, name: str):
-        await interaction.response.defer(ephemeral=True)
-        guild_id = await ensure_guild(interaction)
-        if guild_id is None:
-            return
-        ok = await self.skill_repo.deactivate(guild_id, name)
-        if not ok:
-            await interaction.followup.send(
-                embed=error_embed(f"技能タグ「{name}」は登録されていません。"), ephemeral=True
-            )
-            return
-        await self.audit_repo.record(
-            guild_id, str(interaction.user.id), "skill.remove", target=name
-        )
-        await interaction.followup.send(
-            embed=success_embed(
-                "技能タグを無効化しました",
-                f"「**{name}**」\n既に付与されたメンバーの技能表示は保持されます。",
-                executor=interaction.user.display_name,
-            ),
-            ephemeral=True,
-        )
-
-    @app_commands.command(name="skill-list", description="技能タグの一覧を表示します（管理者）。")
-    @app_commands.check(is_admin)
-    async def skill_list(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        guild_id = await ensure_guild(interaction)
-        if guild_id is None:
-            return
-        rows = await self.skill_repo.list_all(guild_id)
-        if not rows:
-            await interaction.followup.send(
-                embed=info_embed(
-                    "技能タグ一覧",
-                    "登録されている技能タグはありません。\n`/skill-add` で追加してください。",
-                ),
-                ephemeral=True,
-            )
-            return
-
-        members = await self.repo.list_members(guild_id)
-        counts: dict[str, int] = {}
-        for m in members:
-            for s in m["skills"]:
-                counts[s] = counts.get(s, 0) + 1
-
-        lines = [
-            f"{'✅' if r['active_flag'] else '⛔'} {r['skill_name']}（{counts.get(r['skill_name'], 0)}名）"
-            for r in rows
-        ]
-        await interaction.followup.send(
-            embed=info_embed("技能タグ一覧", "\n".join(lines)), ephemeral=True
         )
 
 

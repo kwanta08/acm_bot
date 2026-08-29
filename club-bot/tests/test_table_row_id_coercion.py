@@ -82,7 +82,6 @@ def test_integer_primary_keys_are_the_majority_case():
     """
     int_tables = {k for k, s in TABLES.items() if s.pk_type == "int"}
     assert int_tables == {
-        "tasks",
         "members",
         "teams",
         "schedule_votes",
@@ -93,17 +92,11 @@ def test_integer_primary_keys_are_the_majority_case():
         "seasons",
         "progress_milestones",
         "layer_keta",
-        "skill_tags",
         # 進捗の日次履歴（G4-7）
         "progress_snapshots",
         # 資材・消耗品の在庫（G4-8）
         "stock_items",
         "stock_movements",
-        # 工具・機材の貸出（G4-9）
-        "tools",
-        "tool_loans",
-        # ヒヤリハット・事故報告（G4-10）
-        "incidents",
     }
     text_tables = {k for k, s in TABLES.items() if s.pk_type == "text"}
     assert text_tables == {"schedules", "settings"}
@@ -114,7 +107,7 @@ def test_integer_primary_keys_are_the_majority_case():
 # ---------------------------------------------------------------------
 @pytest.mark.parametrize(("raw", "expected"), [("5", 5), (5, 5), (" 7 ", 7), ("0", 0)])
 def test_int_pk_is_normalised_to_int(raw, expected):
-    got = coerce_row_id(get_spec("tasks"), raw)
+    got = coerce_row_id(get_spec("members"), raw)
     assert got == expected
     assert isinstance(got, int)
 
@@ -123,13 +116,13 @@ def test_int_pk_is_normalised_to_int(raw, expected):
 def test_int_pk_rejects_unconvertible_values(raw):
     """変換できない値は 404 になる例外にする（500 にしない）。"""
     with pytest.raises(UnknownRowError):
-        coerce_row_id(get_spec("tasks"), raw)
+        coerce_row_id(get_spec("members"), raw)
 
 
 def test_int_pk_rejects_bool():
     """True が 1 行目として通ってしまわないこと。"""
     with pytest.raises(UnknownRowError):
-        coerce_row_id(get_spec("tasks"), True)
+        coerce_row_id(get_spec("members"), True)
 
 
 def test_text_pk_is_kept_as_string():
@@ -165,11 +158,11 @@ class _SpyDatabase(Database):
         return await super().fetchone(sql, params)
 
 
-async def _seed_task(db: Database) -> int:
+async def _seed_member(db: Database) -> int:
     cur = await db.execute(
-        "INSERT INTO tasks (guild_id, title, status, created_by, created_at)"
-        " VALUES (?, ?, 'open', 'tester', '2026-01-01')",
-        (G1, "主桁の積層"),
+        "INSERT INTO members (guild_id, user_id, display_name, joined_at)"
+        " VALUES (?, '501', ?, '2026-01-01')",
+        (G1, "主桁くん"),
     )
     return cur.lastrowid
 
@@ -181,16 +174,16 @@ def test_get_row_passes_an_int_to_the_driver():
         db = _SpyDatabase(_tmp_db_path())
         await db.connect()
         try:
-            task_id = await _seed_task(db)
+            member_id = await _seed_member(db)
             repo = TableRepository(db)
             db.seen_params.clear()
 
-            row = await repo.get_row(G1, "tasks", str(task_id))
+            row = await repo.get_row(G1, "members", str(member_id))
 
-            assert row is not None and row["title"] == "主桁の積層"
+            assert row is not None and row["display_name"] == "主桁くん"
             assert db.seen_params, "SELECT が走っていない"
             bound_row_id = db.seen_params[-1][-1]
-            assert bound_row_id == task_id
+            assert bound_row_id == member_id
             assert isinstance(bound_row_id, int), (
                 f"str のままドライバへ渡っている: {bound_row_id!r}"
             )
@@ -207,7 +200,7 @@ def test_get_row_rejects_unconvertible_row_id():
         try:
             repo = TableRepository(db)
             with pytest.raises(UnknownRowError):
-                await repo.get_row(G1, "tasks", "abc")
+                await repo.get_row(G1, "members", "abc")
         finally:
             await db.close()
 
@@ -221,13 +214,13 @@ def test_update_row_rejects_before_writing_anything():
         db = Database(_tmp_db_path())
         await db.connect()
         try:
-            task_id = await _seed_task(db)
+            member_id = await _seed_member(db)
             repo = TableRepository(db)
             with pytest.raises(UnknownRowError):
-                await repo.update_row(G1, "tasks", "abc", {"title": "書き換わってはいけない"})
+                await repo.update_row(G1, "members", "abc", {"display_name": "書き換わってはいけない"})
 
-            row = await repo.get_row(G1, "tasks", task_id)
-            assert row["title"] == "主桁の積層"
+            row = await repo.get_row(G1, "members", member_id)
+            assert row["display_name"] == "主桁くん"
         finally:
             await db.close()
 
@@ -241,10 +234,10 @@ def test_update_row_accepts_string_row_id():
         db = Database(_tmp_db_path())
         await db.connect()
         try:
-            task_id = await _seed_task(db)
+            member_id = await _seed_member(db)
             repo = TableRepository(db)
-            assert await repo.update_row(G1, "tasks", str(task_id), {"title": "リブの積層"}) is True
-            assert (await repo.get_row(G1, "tasks", task_id))["title"] == "リブの積層"
+            assert await repo.update_row(G1, "members", str(member_id), {"display_name": "リブくん"}) is True
+            assert (await repo.get_row(G1, "members", member_id))["display_name"] == "リブくん"
         finally:
             await db.close()
 

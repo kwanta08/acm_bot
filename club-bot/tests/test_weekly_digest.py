@@ -37,12 +37,7 @@ from config import DEFAULT_WEEKLY_DIGEST_WEEKDAY, GuildConfig, config
 from repositories.layer_session_repository import LayerSessionRepository
 from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.settings_repository import SettingsRepository
-from repositories.task_repository import TaskRepository
-from services.weekly_digest_service import (
-    count_completed_between,
-    last_week_range,
-    week_label,
-)
+from services.weekly_digest_service import last_week_range, week_label
 from utils.db import Database
 from utils.parser import TZ, to_iso
 
@@ -96,23 +91,6 @@ def test_week_label_shows_the_last_day_not_the_exclusive_end():
     assert week_label(start, end) == "8/24〜8/30"
 
 
-def test_completed_counts_only_the_half_open_range():
-    start, end = last_week_range(MONDAY)
-    rows = [
-        {"completed_at": to_iso(start)},  # 境界は含む
-        {"completed_at": to_iso(end)},  # 上端は含まない（今週の分）
-        {"completed_at": to_iso(start - timedelta(seconds=1))},  # 先々週
-        {"completed_at": to_iso(start + timedelta(days=3))},
-    ]
-    assert count_completed_between(rows, start, end) == 2
-
-
-def test_completed_ignores_rows_without_a_timestamp():
-    start, end = last_week_range(MONDAY)
-    rows = [{"completed_at": None}, {"completed_at": ""}, {"completed_at": "こわれた"}]
-    assert count_completed_between(rows, start, end) == 0
-
-
 # =====================================================================
 # 2. 設定（既定 OFF）
 # =====================================================================
@@ -162,16 +140,42 @@ def test_an_out_of_range_weekday_falls_back_to_the_default():
 # =====================================================================
 # 3. Embed（/report weekly と共通）
 # =====================================================================
-async def _seed(db: Database, guild_id: int = G1) -> None:
-    tasks = TaskRepository(db)
-    task_id = await tasks.create_task(guild_id, "先週やったこと", "501")
-    await db.execute(
-        "UPDATE tasks SET status = 'done', completed_at = ?"
-        " WHERE guild_id = ? AND local_task_id = ?",
-        (to_iso(datetime(2026, 8, 26, 15, 0, tzinfo=TZ)), guild_id, task_id),
-    )
-    await tasks.create_task(guild_id, "まだのタスク", "501", due_date="2026-12-01")
+#: 先週（8/24〜8/30）に完了した1件。Todoist が返す完了タスクの代わり
+COMPLETED_LAST_WEEK = datetime(2026, 8, 26, 15, 0, tzinfo=TZ)
 
+
+def _raw_task(task_id: str, content: str, due: str | None = None):
+    """Todoist SDK のタスクを模した最小オブジェクト。"""
+    due_obj = SimpleNamespace(date=due, string=due) if due else None
+    return SimpleNamespace(
+        id=task_id, content=content, description="", due=due_obj, priority=1, section_id=None
+    )
+
+
+class _FakeTodoist:
+    """Todoist の代わり。open は未完了、completed は完了日時のリスト。
+
+    completed=None は「完了タスクを取得できない SDK」を表す
+    （TodoistService.get_completed_tasks_between と同じ約束）。
+    """
+
+    project_id = None
+
+    def __init__(self, *, enabled=True, open_tasks=(), completed=()):
+        self.enabled = enabled
+        self._open = list(open_tasks)
+        self._completed = None if completed is None else list(completed)
+
+    async def get_tasks(self, **kwargs):
+        return list(self._open)
+
+    async def get_completed_tasks_between(self, since, until):
+        if self._completed is None:
+            return None
+        return [_raw_task("done", "先週やったこと") for at in self._completed if since <= at < until]
+
+
+async def _seed(db: Database, guild_id: int = G1) -> None:
     layers = LayerSessionRepository(db)
     for user, day in (("501", 25), ("502", 26)):
         at = datetime(2026, 8, day, 18, 0, tzinfo=TZ)
@@ -181,8 +185,29 @@ async def _seed(db: Database, guild_id: int = G1) -> None:
     await layers.add_record(guild_id, "503", "主桁1", "99", to_iso(outside), to_iso(outside), 999)
 
 
-def _reports(db: Database) -> Reports:
-    return Reports(SimpleNamespace(db=db, guilds=[], user=None))
+def _seeded_todoist() -> _FakeTodoist:
+    """_seed と対になる Todoist の状態（未完了1件・先週の完了1件）。"""
+    return _FakeTodoist(
+        open_tasks=[_raw_task("t1", "まだのタスク", due="2026-12-01")],
+        completed=[COMPLETED_LAST_WEEK],
+    )
+
+
+def _reports(db: Database, todoist: _FakeTodoist | None = None) -> Reports:
+    class _Manager:
+        async def for_guild(self, guild_id):
+            return todoist if todoist is not None else _FakeTodoist(enabled=False)
+
+    return Reports(SimpleNamespace(db=db, guilds=[], user=None, todoist_manager=_Manager()))
+
+
+def _last_week_field(embed) -> str:
+    """「先週の実績（…）」フィールドの本文。
+
+    `完了タスク` は `未完了タスク` の部分文字列なので、Embed 全文で
+    判定すると常に真になる。見るフィールドを絞る。
+    """
+    return next(f.value for f in embed.fields if f.name.startswith("先週の実績"))
 
 
 def _embed_text(embed) -> str:
@@ -196,14 +221,53 @@ def test_the_weekly_embed_reports_last_week_numbers():
         db = await _make_db()
         try:
             await _seed(db)
-            embed = await _reports(db).build_weekly_embed(G1, now_dt=MONDAY)
+            embed = await _reports(db, _seeded_todoist()).build_weekly_embed(G1, now_dt=MONDAY)
             assert embed is not None
             text = _embed_text(embed)
             assert "8/24〜8/30" in text
-            assert "完了タスク 1 件" in text
+            assert "完了タスク 1 件" in _last_week_field(embed)
             assert "積層 2 件" in text, "先週以外の記録が混ざっている"
             assert "180 分" in text
             assert "参加 2 人" in text
+        finally:
+            config.clear_guild_cache()
+            await db.close()
+
+    run(_main())
+
+
+def test_the_weekly_embed_omits_completed_tasks_when_todoist_cannot_report_them():
+    """取得できないときに「完了タスク 0 件」と書かない（0件と区別する）。"""
+
+    async def _main():
+        db = await _make_db()
+        try:
+            await _seed(db)
+            svc = _FakeTodoist(
+                open_tasks=[_raw_task("t1", "まだのタスク", due="2026-12-01")], completed=None
+            )
+            embed = await _reports(db, svc).build_weekly_embed(G1, now_dt=MONDAY)
+            last_week = _last_week_field(embed)
+            assert "完了タスク" not in last_week, last_week
+            # 先週の実績そのものは残る
+            assert "積層 2 件" in last_week
+        finally:
+            config.clear_guild_cache()
+            await db.close()
+
+    run(_main())
+
+
+def test_the_weekly_embed_reports_zero_completed_when_todoist_says_zero():
+    async def _main():
+        db = await _make_db()
+        try:
+            await _seed(db)
+            svc = _FakeTodoist(
+                open_tasks=[_raw_task("t1", "まだのタスク", due="2026-12-01")], completed=[]
+            )
+            embed = await _reports(db, svc).build_weekly_embed(G1, now_dt=MONDAY)
+            assert "完了タスク 0 件" in _last_week_field(embed)
         finally:
             config.clear_guild_cache()
             await db.close()
@@ -218,7 +282,7 @@ def test_the_weekly_embed_never_says_nothing_is_wrong():
         db = await _make_db()
         try:
             await _seed(db)
-            embed = await _reports(db).build_weekly_embed(G1, now_dt=MONDAY)
+            embed = await _reports(db, _seeded_todoist()).build_weekly_embed(G1, now_dt=MONDAY)
             text = _embed_text(embed)
             for phrase in ("問題ありません", "遅延はありません", "遅れはありません", "異常なし"):
                 assert phrase not in text, f"ダイジェストに定型文「{phrase}」が入っている"
@@ -304,7 +368,7 @@ def test_weekly_is_private_by_default():
         try:
             await _seed(db)
             interaction = _Interaction()
-            await Reports.weekly.callback(_reports(db), interaction)
+            await Reports.weekly.callback(_reports(db, _seeded_todoist()), interaction)
             assert interaction.deferred[-1]["ephemeral"] is True
             assert interaction.sent[-1]["ephemeral"] is True
         finally:
@@ -320,7 +384,9 @@ def test_weekly_can_be_posted_publicly():
         try:
             await _seed(db)
             interaction = _Interaction()
-            await Reports.weekly.callback(_reports(db), interaction, public=True)
+            await Reports.weekly.callback(
+                _reports(db, _seeded_todoist()), interaction, public=True
+            )
             assert interaction.deferred[-1]["ephemeral"] is False, "defer が ephemeral のまま"
             assert interaction.sent[-1]["ephemeral"] is False
         finally:
@@ -398,7 +464,9 @@ class _Bot:
 
 
 def _reminders(db, guilds, reports=None) -> Reminders:
-    return Reminders(_Bot(db, guilds, reports if reports is not None else _reports(db)))
+    return Reminders(
+        _Bot(db, guilds, reports if reports is not None else _reports(db, _seeded_todoist()))
+    )
 
 
 async def _enable(db: Database, guild_id: int = G1, weekday: int | None = None) -> None:
@@ -587,7 +655,8 @@ def test_the_digest_does_not_send_for_a_guild_with_no_data():
         try:
             await _enable(db)
             channel = _Channel()
-            cog = _reminders(db, [_Guild(G1, channel)])
+            # Todoist も空（未設定）のギルド。数える対象が1つも無い
+            cog = _reminders(db, [_Guild(G1, channel)], reports=_reports(db))
             assert await cog.run_weekly_digest(MONDAY) == {}
             assert channel.sent == []
         finally:

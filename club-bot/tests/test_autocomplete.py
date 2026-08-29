@@ -1,6 +1,6 @@
 """schedule_id / task_id のオートコンプリートのテスト（G2-2）。
 
-これまで5コマンドが素の `schedule_id: str`、4コマンドが素の `task_id: int` で、
+これまで5コマンドが素の `schedule_id: str`、3コマンドが素の `task_id` で、
 利用者は一覧コマンドの出力から ID を手で写す必要があった。写し間違いは
 G2-1 で確認ステップを付けた削除系に流れ込む（確認は付いたが、そもそも
 間違った対象を選ばせない方がよい）。
@@ -8,7 +8,8 @@ G2-1 で確認ステップを付けた削除系に流れ込む（確認は付い
 - `/schedule close|remind|edit-deadline` は**開催中のみ**候補に出す
   （締切済みに close は意味がなく、remind は嘘になる）
 - `/schedule status|delete` は**締切済みも含めて**出す
-- `/task done|delete|assign|priority` は未完了タスクを `Choice[int]` で出す
+- `/task done|delete|priority` は Todoist の未完了タスクを `Choice[str]` で出す
+  （タスクの正本は Todoist。ID も Todoist のもの）
 
 候補は Discord の制約どおり25件以内、必ず guild_id でスコープする。
 """
@@ -30,7 +31,7 @@ from discord import app_commands
 from cogs.schedule import Schedule, schedule_choices
 from cogs.tasks import Tasks, task_choices
 from repositories.schedule_repository import ScheduleRepository
-from repositories.task_repository import TaskRepository
+from services.todoist_task_service import TodoistTask
 from utils.db import Database
 
 G1 = 111
@@ -111,29 +112,37 @@ def test_schedule_choice_label_is_within_discord_limit():
 # ---------------------------------------------------------------------
 # 純粋関数: task_choices
 # ---------------------------------------------------------------------
-def _trow(task_id: int, title: str) -> dict:
-    return {"local_task_id": task_id, "title": title}
+def _ttask(task_id: str, content: str) -> TodoistTask:
+    return TodoistTask(
+        id=task_id,
+        content=content,
+        description="",
+        due_date=None,
+        due_string=None,
+        priority=1,
+        section_id=None,
+    )
 
 
-def test_task_choice_label_has_id_and_title():
-    (label, value), *_ = task_choices([_trow(12, "主桁の積層")], "")
-    assert "#12" in label and "主桁の積層" in label
-    assert value == 12
+def test_task_choice_label_is_the_task_name():
+    (label, value), *_ = task_choices([_ttask("12", "主桁の積層")], "")
+    assert label == "主桁の積層"
+    assert value == "12"
 
 
-def test_task_choices_filter_by_title_and_id():
-    rows = [_trow(1, "主桁の積層"), _trow(2, "リブ切り出し")]
-    assert [v for _, v in task_choices(rows, "リブ")] == [2]
-    assert [v for _, v in task_choices(rows, "1")] == [1]
+def test_task_choices_filter_by_name_and_id():
+    rows = [_ttask("1", "主桁の積層"), _ttask("2", "リブ切り出し")]
+    assert [v for _, v in task_choices(rows, "リブ")] == ["2"]
+    assert [v for _, v in task_choices(rows, "1")] == ["1"]
 
 
 def test_task_choices_cap_at_25():
-    rows = [_trow(i, f"タスク{i}") for i in range(1, 31)]
+    rows = [_ttask(str(i), f"タスク{i:02d}") for i in range(1, 31)]
     assert len(task_choices(rows, "")) == 25
 
 
 def test_task_choice_label_is_within_discord_limit():
-    (label, _), *_ = task_choices([_trow(1, "あ" * 200)], "")
+    (label, _), *_ = task_choices([_ttask("1", "あ" * 200)], "")
     assert len(label) <= 100
 
 
@@ -277,30 +286,51 @@ def test_schedule_autocomplete_is_registered_on_the_right_commands():
 # ---------------------------------------------------------------------
 # Tasks コグ経由
 # ---------------------------------------------------------------------
-async def _seed_tasks(db: Database) -> None:
-    repo = TaskRepository(db)
-    open_id = await repo.create_task(G1, "主桁の積層", created_by="tester")
-    assert open_id
-    done_id = await repo.create_task(G1, "済んだ作業", created_by="tester")
-    await repo.complete_task(G1, done_id)
-    await repo.create_task(G2, "他大学の作業", created_by="tester")
+def _raw(task_id: str, content: str):
+    return SimpleNamespace(
+        id=task_id, content=content, description="", due=None, priority=1, section_id=None
+    )
 
 
-def _tasks_cog(db: Database) -> Tasks:
-    return Tasks(SimpleNamespace(db=db, guilds=[]))
+class _FakeTodoist:
+    """ギルドごとに違うタスクを返す Todoist の代わり。"""
+
+    project_id = None
+
+    def __init__(self, tasks_by_guild: dict[int, list], guild_id: int):
+        self.enabled = True
+        self._tasks = tasks_by_guild.get(guild_id, [])
+
+    async def get_tasks(self, **kwargs):
+        return list(self._tasks)
 
 
-def test_task_autocomplete_offers_only_open_tasks():
+def _tasks_cog(db: Database, tasks_by_guild: dict[int, list] | None = None) -> Tasks:
+    by_guild = tasks_by_guild or {}
+
+    class _Manager:
+        async def for_guild(self, guild_id):
+            return _FakeTodoist(by_guild, guild_id)
+
+    return Tasks(SimpleNamespace(db=db, guilds=[], todoist_manager=_Manager()))
+
+
+#: Todoist の get_tasks は未完了タスクしか返さない（完了済みは出てこない）
+SEEDED_TASKS = {
+    G1: [_raw("td_1", "主桁の積層")],
+    G2: [_raw("td_9", "他大学の作業")],
+}
+
+
+def test_task_autocomplete_offers_only_this_guilds_tasks():
     async def _main():
         db = Database(_tmp_db_path())
         await db.connect()
         try:
-            await _seed_tasks(db)
-            cog = _tasks_cog(db)
+            cog = _tasks_cog(db, SEEDED_TASKS)
             choices = await cog._task_autocomplete(_interaction(G1), "")
             labels = [c.name for c in choices]
             assert any("主桁の積層" in x for x in labels)
-            assert not any("済んだ作業" in x for x in labels), "完了済みが候補に出ている"
             assert not any("他大学" in x for x in labels), "他ギルドのタスクが候補に出ている"
         finally:
             await db.close()
@@ -308,17 +338,16 @@ def test_task_autocomplete_offers_only_open_tasks():
     run(_main())
 
 
-def test_task_autocomplete_returns_int_choices():
-    """task_id: int の引数に合わせて Choice[int] を返すこと。"""
+def test_task_autocomplete_returns_str_choices():
+    """task_id: str（Todoist のタスク ID）に合わせて Choice[str] を返すこと。"""
 
     async def _main():
         db = Database(_tmp_db_path())
         await db.connect()
         try:
-            await _seed_tasks(db)
-            cog = _tasks_cog(db)
+            cog = _tasks_cog(db, SEEDED_TASKS)
             choices = await cog._task_autocomplete(_interaction(G1), "")
-            assert choices and all(isinstance(c.value, int) for c in choices)
+            assert choices and all(isinstance(c.value, str) for c in choices)
         finally:
             await db.close()
 
@@ -338,8 +367,27 @@ def test_task_autocomplete_outside_a_guild_is_empty():
     run(_main())
 
 
+def test_task_autocomplete_is_empty_without_todoist():
+    """未設定ギルドでは補完を出さない（例外にもしない）。"""
+
+    async def _main():
+        db = Database(_tmp_db_path())
+        await db.connect()
+        try:
+            class _Manager:
+                async def for_guild(self, guild_id):
+                    return SimpleNamespace(enabled=False, project_id=None)
+
+            cog = Tasks(SimpleNamespace(db=db, guilds=[], todoist_manager=_Manager()))
+            assert await cog._task_autocomplete(_interaction(G1), "") == []
+        finally:
+            await db.close()
+
+    run(_main())
+
+
 def test_task_autocomplete_is_registered_on_the_right_commands():
-    targets = {"done", "delete", "assign", "priority"}
+    targets = {"done", "delete", "priority"}
     for command in Tasks.group.commands:
         if not isinstance(command, app_commands.Command):
             continue

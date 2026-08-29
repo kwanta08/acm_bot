@@ -38,7 +38,6 @@ from dashboard.security import GuildScope
 from repositories.guild_repository import GuildRepository
 from repositories.member_repository import MemberRepository
 from repositories.progress_repository import ProgressRepository
-from repositories.task_repository import TaskRepository
 from utils.db import Database
 from utils.permissions import Level
 
@@ -77,16 +76,14 @@ async def _seed(db_path: str) -> None:
     try:
         guilds = GuildRepository(db)
         members = MemberRepository(db)
-        tasks = TaskRepository(db)
         progress = ProgressRepository(db)
 
         await guilds.ensure(GUILD_A, "A大学 鳥人間")
         await guilds.ensure(GUILD_B, "B大学 鳥人間")
 
-        # A大学: メンバー1・班1・タスク1・進捗ノード1
+        # A大学: メンバー1・班1・進捗ノード1
         await members.upsert_member(GUILD_A, USER_ID, "山田")
         await members.upsert_team(GUILD_A, "wing", "主翼班")
-        await tasks.create_task(GUILD_A, "A大学のタスク", USER_ID)
         await progress.upsert_node(GUILD_A, "a1", name="A大学の機体", now_text=NOW)
 
         # B大学: 件数を変えておく（漏れたら数で分かる）
@@ -94,8 +91,6 @@ async def _seed(db_path: str) -> None:
             await members.upsert_member(GUILD_B, f"90{i}", f"B大学部員{i}")
         await members.upsert_team(GUILD_B, "tail", "尾翼班")
         await members.upsert_team(GUILD_B, "elec", "電装班")
-        for i in range(5):
-            await tasks.create_task(GUILD_B, f"B大学のタスク{i}", "900")
         for i in range(7):
             await progress.upsert_node(GUILD_B, f"b{i}", name=f"B大学の部品{i}", now_text=NOW)
     finally:
@@ -167,8 +162,8 @@ def test_own_guild_returns_only_own_data():
         res = client.get(f"/api/guilds/{GUILD_A}/summary")
         assert res.status_code == 200
         counts = res.json()["counts"]
-        # A大学の実データ（B大学は 3/2/5/7 件なので混入すれば必ず露見する）
-        assert counts == {"members": 1, "teams": 1, "progress_nodes": 1, "open_tasks": 1}
+        # A大学の実データ（B大学は 3/2/7 件なので混入すれば必ず露見する）
+        assert counts == {"members": 1, "teams": 1, "progress_nodes": 1}
     finally:
         client.__exit__(None, None, None)
 

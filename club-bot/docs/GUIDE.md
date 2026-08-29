@@ -31,7 +31,6 @@
 | ミーティングの日程を決める | `/schedule create` → メンバーがリアクションで回答 |
 | やることを配って追いかける | `/task add` `/task list` `/task done` |
 | 桁巻きの作業を記録する | `/layer start` → `/layer end` |
-| 危なかったことを報告する | `/incident report`（`anonymous:true` で匿名） |
 | 自分がやることを確認する | `/me` |
 | 機体の進捗を見える化する | `/progress add` `/progress view` |
 | 手伝える人を探す | `/member support` |
@@ -97,13 +96,6 @@ Bot に `ロールの管理` と `チャンネルの管理` が付いている�
 /team-list                            ← 一覧（有効/無効・人数・ロール）
 /team-role team:wing role:@主翼班     ← 既存の Discord ロールと紐付け
 /team-remove slug:wing                ← 無効化（人がいる場合は confirm:True が必要）
-```
-
-技能タグ（「溶接できる」「CAD できる」など）も登録できます。
-
-```
-/skill-add name:CAD
-/skill-list
 ```
 
 ### Step 4. メンバーを登録する（5分）
@@ -207,7 +199,7 @@ ONにしない限り参加者には何も送りません。
 
 ```
 /setup                      設定ウィザード
-/team-add /skill-add        班・技能タグの管理
+/team-add /team-list        班の管理
 /set_channel /set_role      通知先・ロールの変更
 /todoist-setup              Todoist 連携（任意）
 ```
@@ -275,16 +267,21 @@ ONにしない限り参加者には何も送りません。
 ### 4.2 タスクを配って追いかける
 
 ```
-/task add title:リブ切り出し due:2026-07-05 18:00 assignee:@山田 team:主翼班 priority:2
-/task list                  一覧
-/task list mine:True        自分の担当だけ
+/task add title:リブ切り出し due:2026-07-05 18:00 team:主翼班 priority:2
+/task list                  未完了の一覧
 /task team 主翼班            班のタスク
 /task done <id>             完了
-/task assign <id> @佐藤      担当者変更（班長以上）
 /task overdue               期限切れ一覧
 ```
 
-優先度は 1〜4（数字が大きいほど高い）。
+優先度は 1〜4（数字が大きいほど高い）。`<id>` は入力を始めると候補が
+出るので、手で写す必要はありません。
+
+**タスクは Todoist に入ります。** bot はタスクを自分で持たず、追加も削除も
+Todoist に対して行います。そのため `/task` を使うには、先に管理者が
+`/todoist-setup` で Todoist を登録しておく必要があります。
+班ごとの割り当ては `/task link-section` で「Todoist のセクション ↔ 班」を
+紐付けて表します（個人単位の担当者設定はありません）。
 
 **「今日やること」**をマークしておくと、毎朝まとめて通知されます。
 
@@ -358,9 +355,9 @@ ONにしない限り参加者には何も送りません。
 ### 4.5 班をまたいで手伝える人を探す
 
 ```
-/member skill add skill:CAD              自分の技能タグを登録
-/member support team:主翼班 skill:CAD    条件に合う人を検索（班長以上）
-/member profile user:@山田               所属・技能の確認
+/member support team:主翼班                     主翼班の現役メンバー（班長以上）
+/member support team:主翼班 include_alumni:True 卒業生も含めて探す
+/member profile user:@山田                      所属の確認
 ```
 
 ### 4.6 振り返る
@@ -428,10 +425,8 @@ ONにしない限り参加者には何も送りません。
 | 5分ごと | `/layer end` の押し忘れ検知。4時間経過で本人へ DM、12時間経過で自動取り消し（記録は残しません）|
 | 前日 20:00 | `/schedule confirm` で確定した日程の前日通知（「明日 …」） |
 | 当日 08:30 | 同じく当日通知（「本日 2026/10/01 18:00 **合宿**（部室）」） |
-| 毎朝 08:30 | 今日〜7日以内が期限の未完了タスク |
 | 毎朝 08:30 | 「今日やること」ラベルの付いたタスク |
 | 毎朝 08:30 | 発注閾値を割っている資材（割れが無い日は送りません） |
-| 毎朝 08:30 | 返却予定日を過ぎた工具を借りている人へ DM（1貸出につき1回） |
 | 毎朝 08:30 | Todoist のセクション別タスク（期限7日以内・超過）を班チャンネル（未設定ならタスク通知チャンネル）へ（連携している場合） |
 | 毎朝 08:30 | Todoist 連携プロジェクトの期限タスク（連携している場合） |
 | 毎週月曜 08:30 | **遅れている**マイルストーンのお知らせ（遅れが無い週は送りません） |
@@ -499,7 +494,7 @@ ONにしない限り参加者には何も送りません。
 - 現在の年度を終了し、新しい年度を開始する
 - 選んだ人を **卒業（alumni）** に切り替える
 - **班長フラグを全員リセット**する（新体制で付け直すため）
-- 切り替え時点の主要19テーブルを **年度スナップショット**（ZIP）として添付する
+- 切り替え時点の主要14テーブルを **年度スナップショット**（ZIP）として添付する
 
 **卒業者のデータは削除されません。** 過去の作業記録に残る担当者名を
 引けるようにするためです。卒業した人は `/member support` などの
@@ -529,7 +524,7 @@ ONにしない限り参加者には何も送りません。
 
 ## 9. データの扱いと利用をやめるとき
 
-**保存されるもの**: Discord のユーザーID・表示名・所属班・技能タグ・
+**保存されるもの**: Discord のユーザーID・表示名・所属班・
 出欠回答・タスク・桁巻きの作業記録・機体進捗・操作履歴。
 
 **保存されないもの**: メッセージの本文、DM の内容。
@@ -538,7 +533,7 @@ ONにしない限り参加者には何も送りません。
 **他のサークルとの関係**: すべてのデータはサーバー単位で完全に分離されています。
 他大学のサークルからあなたのデータが見えることはありません。
 
-**持ち出し**: `/data export` でこのサーバーの主要19テーブルを ZIP（CSV 群）として
+**持ち出し**: `/data export` でこのサーバーの主要14テーブルを ZIP（CSV 群）として
 受け取れます（管理者のみ）。サーバーIDや Todoist トークンは含まれません。
 
 **利用をやめるとき**: 運営者への連絡は不要です。Bot をサーバーから
@@ -569,14 +564,12 @@ ONにしない限り参加者には何も送りません。
 | | `/schedule emoji set` `/schedule emoji show` `/schedule emoji reset` | L4 |
 | タスク | `/task add` `/task list` `/task done` `/task priority` `/task overdue` `/task team` | 全員 |
 | | `/today task` `/today id` | 全員 |
-| | `/task delete` `/task assign` `/task sections` `/task push` | L2〜 |
+| | `/task delete` `/task sections` `/task push` | L2〜 |
 | | `/task link-section` `/task unlink-section` `/task unlink-team-sections` | L3〜 |
 | | `/task sync` | L4 |
 | 桁巻き | `/layer start` `/layer end` `/layer cancel` `/layer status` `/layer stats` `/layer keta-list` | 全員 |
-| 安全 | `/incident report` | 全員 |
-| | `/incident list` | L3〜 |
-| 資材・在庫 | `/stock list` `/stock use` `/tool list` `/tool borrow` `/tool return` | 全員 |
-| | `/stock add` `/stock set-threshold` `/stock remove` `/tool add` `/tool remove` | L2〜 |
+| 資材・在庫 | `/stock list` `/stock use` | 全員 |
+| | `/stock add` `/stock set-threshold` `/stock remove` | L2〜 |
 | | `/layer keta-add` `/layer keta-remove` | L2〜 |
 | 機体進捗 | `/progress view` `/progress history` | 全員 |
 | | `/progress add` `/progress edit` `/progress remove` `/progress spar-link` `/progress setup` | L2〜 |
@@ -585,11 +578,10 @@ ONにしない限り参加者には何も送りません。
 | | `/weight set` | L2〜 |
 | 大会・節目 | `/countdown` `/milestone list` | 全員 |
 | | `/milestone add` `/milestone remove` | L2〜 |
-| メンバー | `/member profile` `/member skill add` `/member skill remove` | 全員 |
+| メンバー | `/member profile` | 全員 |
 | | `/member register` `/member assign-team` `/member assign-sub-team` `/member support` | L2〜 |
 | | `/member setup` `/member set-leader` `/member set-channel` | L3〜 |
-| 班・技能 | `/team-add` `/team-remove` `/team-list` `/team-role` | L4 |
-| | `/skill-add` `/skill-remove` `/skill-list` | L4 |
+| 班 | `/team-add` `/team-remove` `/team-list` `/team-role` | L4 |
 | レポート | `/report weekly` `/report attendance-rate` `/report member-attendance` `/report export-tasks` | L2〜 |
 | | `/report notifications` `/report changes` | L3〜 |
 | 年度替わり | `/season list` | 全員 |

@@ -23,7 +23,6 @@ from repositories.member_repository import MemberRepository
 from repositories.schedule_repository import ScheduleRepository
 from repositories.section_repository import SectionRepository
 from repositories.settings_repository import SettingsRepository
-from repositories.task_repository import TaskRepository
 from utils.db import Database
 
 G1 = 100000000000000001  # ギルド1
@@ -37,7 +36,6 @@ ALL_TABLES = [
     "schedules",
     "schedule_options",
     "schedule_votes",
-    "tasks",
     "reminders_log",
     "todoist_sections",
     "layer_sessions",
@@ -258,6 +256,17 @@ def test_legacy_migration_backfills_guild_id():
                         f"{table} の guild_id がレガシー値でバックフィルされていない: "
                         f"{row['guild_id']}"
                     )
+                # v22 で廃止したものが消えていること（レガシー DB からの経路）
+                names = {
+                    r["name"]
+                    for r in await db.fetchall(
+                        "SELECT name FROM sqlite_master WHERE type = 'table'"
+                    )
+                }
+                assert "tasks" not in names, "v22 で tasks が DROP されていない"
+                cols = {r["name"] for r in await db.fetchall("PRAGMA table_info(members)")}
+                assert "skills" not in cols, "v22 で members.skills が DROP されていない"
+
                 # マイグレーション後も新規ギルドのデータを追加できる
                 repo = MemberRepository(db)
                 await repo.upsert_team(G2, "design", "設計")
@@ -301,9 +310,7 @@ def test_member_and_team_isolation():
             assert (await repo.get_member(G1, "u1"))["primary_team"] == "cfrp"
             assert (await repo.get_member(G2, "u1"))["primary_team"] == "wing"
 
-            # スキル・一覧も分離
-            await repo.add_skill(G1, "u1", "CAD")
-            assert (await repo.get_member(G2, "u1"))["skills"] == []
+            # 一覧も分離
             assert len(await repo.list_members(G1)) == 1
             assert len(await repo.list_members(G2)) == 1
 
@@ -312,31 +319,6 @@ def test_member_and_team_isolation():
             await repo.upsert_team(G2, "design", "設計", channel_id="222")
             assert (await repo.get_team(G1, "design"))["channel_id"] == "111"
             assert (await repo.get_team(G2, "design"))["channel_id"] == "222"
-        finally:
-            await db.close()
-
-    run(_main())
-
-
-def test_task_isolation():
-    async def _main():
-        db = await _connected_db()
-        try:
-            repo = TaskRepository(db)
-            id1 = await repo.create_task(G1, "G1タスク", created_by="u1", due_date="2020-01-01")
-            id2 = await repo.create_task(G2, "G2タスク", created_by="u1", due_date="2020-01-01")
-            assert [t["title"] for t in await repo.list_tasks(G1)] == ["G1タスク"]
-            assert [t["title"] for t in await repo.list_tasks(G2)] == ["G2タスク"]
-            # 他ギルドの ID では取得できない
-            assert await repo.get_task(G2, id1) is None
-            assert await repo.get_task(G1, id2) is None
-            # 超過・エクスポートも分離
-            assert len(await repo.list_overdue(G1, "2021-01-01")) == 1
-            assert len(await repo.list_all_for_export(G2)) == 1
-            # 完了操作もギルドスコープ
-            await repo.complete_task(G1, id1)
-            assert (await repo.get_task(G1, id1))["status"] == "done"
-            assert (await repo.get_task(G2, id2))["status"] == "open"
         finally:
             await db.close()
 
@@ -715,8 +697,6 @@ if __name__ == "__main__":
     print("test_legacy_migration_backfills_guild_id: OK")
     test_member_and_team_isolation()
     print("test_member_and_team_isolation: OK")
-    test_task_isolation()
-    print("test_task_isolation: OK")
     test_schedule_isolation()
     print("test_schedule_isolation: OK")
     test_settings_isolation()

@@ -270,6 +270,12 @@ PRAGMA user_version;  -- 2 が返ること
 
 ## 10. 003 マイグレーション: 班・技能タグの DB 管理化（スキーマバージョン 3）
 
+> **注記（スキーマバージョン 22）**: この節で導入した技能タグ
+> （`skill_tags` テーブル・`members.skills` 列・`/skill-*`・`/member skill *`）は
+> のちに廃止しました。現在の実装には存在しません。
+> 詳細は [`migrations/021_remove_features.sql`](../migrations/021_remove_features.sql)。
+> 以下は当時の記録として残しています。
+
 ### 変更内容
 
 | レイヤ | 変更 |

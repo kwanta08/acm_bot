@@ -479,7 +479,7 @@ COLOR_ERROR = 0xE74C3C  # 赤
 COLOR_INFO = 0x95A5A6  # 情報（灰）
 COLOR_SUCCESS = 0x2ECC71  # 成功（緑）
 
-# 班（teams）と技能タグ（skill_tags）は config.py の固定配列ではなく、
-# DB（teams / skill_tags テーブル）でギルド単位に管理する。
-# 参照は services/team_service.py、登録・変更は /team-add /skill-add 等の
-# 管理コマンド（cogs/teams.py）で行う。新規ギルドは空の状態で開始する。
+# 班（teams）は config.py の固定配列ではなく、DB（teams テーブル）で
+# ギルド単位に管理する。参照は services/team_service.py、登録・変更は
+# /team-add 等の管理コマンド（cogs/teams.py）で行う。
+# 新規ギルドは空の状態で開始する。

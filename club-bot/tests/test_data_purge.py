@@ -99,13 +99,6 @@ _SEED_SQL: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
         ("opt",),
     ),
-    "tasks": (
-        (
-            "INSERT INTO tasks (guild_id, title, created_by, created_at)"
-            " VALUES (?, 'タスク', 'u1', '2026-01-01')"
-        ),
-        (),
-    ),
     "reminders_log": (
         (
             "INSERT INTO reminders_log (guild_id, reminder_type, target_id,"
@@ -146,13 +139,6 @@ _SEED_SQL: dict[str, tuple[str, tuple[str, ...]]] = {
         (
             "INSERT INTO audit_log (guild_id, actor_id, action, created_at)"
             " VALUES (?, 'u1', 'test', '2026-01-01')"
-        ),
-        (),
-    ),
-    "skill_tags": (
-        (
-            "INSERT INTO skill_tags (guild_id, skill_name, created_by, created_at)"
-            " VALUES (?, '溶接', 'u1', '2026-01-01')"
         ),
         (),
     ),
@@ -242,28 +228,6 @@ _SEED_SQL: dict[str, tuple[str, tuple[str, ...]]] = {
             "INSERT INTO stock_movements (guild_id, stock_item_id, delta,"
             " user_id, created_at)"
             " VALUES (?, 1, -1, 'u1', '2026-01-01')"
-        ),
-        (),
-    ),
-    "tools": (
-        (
-            "INSERT INTO tools (guild_id, tool_name, created_by, created_at)"
-            " VALUES (?, 'トルクレンチ', 'u1', '2026-01-01')"
-        ),
-        (),
-    ),
-    "tool_loans": (
-        (
-            "INSERT INTO tool_loans (guild_id, tool_id, user_id, borrowed_at)"
-            " VALUES (?, 1, 'u1', '2026-01-01')"
-        ),
-        (),
-    ),
-    "incidents": (
-        (
-            "INSERT INTO incidents (guild_id, occurred_at, place, description,"
-            " reporter_id, created_at)"
-            " VALUES (?, '2026-01-01 10:00', '工房', '転びかけた', 'u1', '2026-01-01')"
         ),
         (),
     ),
@@ -454,8 +418,8 @@ def test_run_purge_deletes_due_guilds():
             results = await _cog(db).run_purge()
 
             assert set(results) == {GA}
-            assert await _count(db, "tasks", GA) == 0
-            assert await _count(db, "tasks", GB) == 1
+            assert await _count(db, "members", GA) == 0
+            assert await _count(db, "members", GB) == 1
         finally:
             await db.close()
 
@@ -491,8 +455,8 @@ def test_one_guild_failure_does_not_stop_others():
                 GuildRepository.purge_guild = original
 
             assert set(results) == {GB}, "失敗したギルド以外は処理されるべき"
-            assert await _count(db, "tasks", GA) == 1, "失敗したギルドは消えない"
-            assert await _count(db, "tasks", GB) == 0
+            assert await _count(db, "members", GA) == 1, "失敗したギルドは消えない"
+            assert await _count(db, "members", GB) == 0
         finally:
             await db.close()
 
@@ -505,7 +469,7 @@ def test_run_purge_with_nothing_due_is_noop():
         try:
             await _seed_all_tables(db, GA, "a")
             assert await _cog(db).run_purge() == {}
-            assert await _count(db, "tasks", GA) == 1
+            assert await _count(db, "members", GA) == 1
         finally:
             await db.close()
 
