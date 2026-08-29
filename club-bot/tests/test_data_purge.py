@@ -221,6 +221,14 @@ _SEED_SQL: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
         (),
     ),
+    "progress_snapshots": (
+        (
+            "INSERT INTO progress_snapshots (guild_id, node_id, snapshot_date,"
+            " aggregated, actual_weight_g)"
+            " VALUES (?, 'n1', '2026-08-01', 0.4, NULL)"
+        ),
+        (),
+    ),
 }
 
 

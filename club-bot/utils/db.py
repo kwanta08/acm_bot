@@ -458,6 +458,29 @@ CREATE TABLE IF NOT EXISTS seasons (
     UNIQUE (guild_id, name)
 );
 """,
+    # 進捗の日次スナップショット（G4-7）。
+    #
+    # progress_nodes は「現在値」しか持たないため、ペースが
+    # 「作成日→最終更新日の平均」でしか出せず、停滞期間を含まない近似に
+    # なっていた（ADR 0022）。1日1行だけ積むことで実測の履歴を持つ。
+    #
+    # - snapshot_date は 'YYYY-MM-DD'。UNIQUE (guild_id, node_id, snapshot_date)
+    #   が「1日1行」を**構造で**保証する（アプリ側の if に頼らない）
+    # - aggregated / actual_weight_g は **NULL 許容**。未集計・未計測を
+    #   0.0 に丸めない（ADR 0021）
+    # - node_id に外部キーを張らない（progress_nodes と同じ既存方針。ADR 0019）。
+    #   ノードが消えても過去の履歴は残る
+    "progress_snapshots": f"""
+CREATE TABLE IF NOT EXISTS progress_snapshots (
+    snapshot_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    {_GUILD_COL},
+    node_id         TEXT NOT NULL,
+    snapshot_date   TEXT NOT NULL,
+    aggregated      REAL,
+    actual_weight_g REAL,
+    UNIQUE (guild_id, node_id, snapshot_date)
+);
+""",
     # Discord の表示名キャッシュ（ギルド別）。bot がギルドキャッシュから
     # 書き込み、ダッシュボード（Bot トークンを持たない別プロセス）が
     # ID → 表示名の解決に読む。name はユーザーなら「そのギルドでの表示名」
@@ -498,6 +521,7 @@ CREATE INDEX IF NOT EXISTS idx_progress_milestones_guild_due ON progress_milesto
 CREATE INDEX IF NOT EXISTS idx_seasons_guild_ended ON seasons(guild_id, ended_at);
 CREATE INDEX IF NOT EXISTS idx_members_guild_status ON members(guild_id, status);
 CREATE INDEX IF NOT EXISTS idx_progress_spar_links_guild ON progress_spar_links(guild_id);
+CREATE INDEX IF NOT EXISTS idx_progress_snapshots_node ON progress_snapshots(guild_id, node_id, snapshot_date);
 """
 
 # ---------------------------------------------------------------------------
@@ -588,10 +612,11 @@ POSTGRES_VIEW_DDL = "\n".join(
 #    （年度替わり。既存メンバーはすべて active。migrations/013）
 # 15: discord_name_cache を追加（ダッシュボードの ID → 表示名解決用。
 #    bot がギルドキャッシュから書き、Web 側が読む。migrations/014）
+# 18: progress_snapshots を追加（進捗の日次履歴。G4-7）
 # 16: layer_sessions.layer_num を INTEGER から TEXT へ変更（/layer start は
 #    「シュリンク」等のテキスト層番号を受け付ける仕様。PostgreSQL では
 #    asyncpg の DataError になっていた。migrations/015）
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 18
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
@@ -619,6 +644,7 @@ _PK_COLUMNS: dict[str, str] = {
     "progress_nodes": "progress_node_id",
     "progress_todoist_links": "link_id",
     "progress_spar_links": "spar_link_id",
+    "progress_snapshots": "snapshot_id",
 }
 
 _INSERT_TABLE_RE = re.compile(r"INSERT\s+INTO\s+(\w+)", re.IGNORECASE)
@@ -1028,6 +1054,9 @@ class Database:
         if version < 17:
             await self._migrate_v17_schedule_confirmed()
 
+        if version < 18:
+            await self._migrate_v18_progress_snapshots()
+
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
 
@@ -1242,6 +1271,25 @@ class Database:
         ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
         await self._executescript(ddl_map["discord_name_cache"])
         log.info("discord_name_cache テーブルを作成しました（v15）。")
+
+    async def _migrate_v18_progress_snapshots(self) -> None:
+        """
+        v18: progress_snapshots テーブルを追加する（冪等）。
+
+        進捗の日次履歴。`/progress history` とマイルストーンのペース算出が読む。
+
+        新規 DB では init_schema / _connect_pg が CREATE TABLE IF NOT EXISTS で
+        作成済みだが、既存 DB でも確実に作られるようここでも実行する
+        （v10 / v13 / v15 と同じ方式）。
+
+        **既存データには一切触れない。** 追加されるのは空のテーブルだけで、
+        履歴は次の定期同期から1日1行ずつ積まれる。溜まるまでは
+        ペース算出が従来の推定（作成日→更新日）にフォールバックするため、
+        マイグレーション直後に判定結果が変わることはない（ADR 0024）。
+        """
+        ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
+        await self._executescript(ddl_map["progress_snapshots"])
+        log.info("progress_snapshots テーブルを作成しました（v18）。")
 
     async def _migrate_v17_schedule_confirmed(self) -> None:
         """

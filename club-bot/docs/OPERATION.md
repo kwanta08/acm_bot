@@ -52,7 +52,7 @@ Bot管理者」というラベルで出ます（`utils/permissions.LEVEL_LABELS`
 ### Data（エクスポート・削除）
 | コマンド | 権限 | 説明 |
 |---|---|---|
-| `/data export` | L4 または Manage Server | このサーバーの主要13テーブルを ZIP（CSV 群）で受け取る。サーバーIDと認証情報は含まれない |
+| `/data export` | L4 または Manage Server | このサーバーの主要14テーブルを ZIP（CSV 群）で受け取る。サーバーIDと認証情報は含まれない |
 | `/data delete` | L4 または Manage Server | データ削除を申告する。確認のためサーバー名の入力が必要。最後のバックアップが添付される |
 | `/data delete-cancel` | L4 または Manage Server | 予約済みの削除を取り消す |
 
@@ -146,6 +146,7 @@ Google Sheets へのエクスポート連携（旧 `/set_sheet` `/sheet_sync`）
 | コマンド | 権限 | 説明 |
 |---|---|---|
 | `/progress view` | L1 | 進捗をドリルダウン表示（機体 → パーツ → 部品 → …。各階層でテキストの進捗バー付き） |
+| `/progress history [node] [days]` | L1 | 進捗の推移（テキストのスパークライン）と直近7日の伸び。20分ごとの同期が1日1件記録したものを読む |
 | `/progress add` | L2 | ノードを追加（`parent` 省略で機体＝最上位。担当・状態・進捗率も同時指定可） |
 | `/progress edit` | L2 | 名前・担当・状態・進捗率・親を変更（進捗率を入れるとソースは手入力に戻る） |
 | `/progress remove` | L2 | ノードを配下ごと削除 |

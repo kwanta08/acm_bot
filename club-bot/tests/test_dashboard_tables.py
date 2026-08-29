@@ -63,6 +63,8 @@ EXPECTED_TABLES = {
     "layer_keta",
     "skill_tags",
     "settings",
+    # 進捗の日次履歴（G4-7）
+    "progress_snapshots",
 }
 
 

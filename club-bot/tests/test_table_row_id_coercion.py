@@ -94,6 +94,8 @@ def test_integer_primary_keys_are_the_majority_case():
         "progress_milestones",
         "layer_keta",
         "skill_tags",
+        # 進捗の日次履歴（G4-7）
+        "progress_snapshots",
     }
     text_tables = {k for k, s in TABLES.items() if s.pk_type == "text"}
     assert text_tables == {"schedules", "settings"}

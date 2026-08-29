@@ -375,6 +375,23 @@ TABLES: dict[str, TableSpec] = {
             _c("created_at", "登録日時", "datetime"),
         ),
     ),
+    "progress_snapshots": TableSpec(
+        key="progress_snapshots",
+        label="進捗の履歴",
+        table="progress_snapshots",
+        pk="snapshot_id",
+        pk_type="int",
+        description="1日1件の進捗スナップショット（/progress history が読む）",
+        order_by="snapshot_date DESC, node_id",
+        columns=(
+            _c("snapshot_id", "ID", "number", number_type="int"),
+            _c("node_id", "ノードID"),
+            _c("snapshot_date", "日付"),
+            # 未集計・未計測は NULL のまま出す（0.0 に丸めない。ADR 0021）
+            _c("aggregated", "集計進捗率", "progress"),
+            _c("actual_weight_g", "実測重量(g)", "number", number_type="real"),
+        ),
+    ),
     "settings": TableSpec(
         key="settings",
         label="サーバー設定",

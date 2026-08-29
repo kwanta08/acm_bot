@@ -496,7 +496,7 @@ ONにしない限り参加者には何も送りません。
 - 現在の年度を終了し、新しい年度を開始する
 - 選んだ人を **卒業（alumni）** に切り替える
 - **班長フラグを全員リセット**する（新体制で付け直すため）
-- 切り替え時点の主要13テーブルを **年度スナップショット**（ZIP）として添付する
+- 切り替え時点の主要14テーブルを **年度スナップショット**（ZIP）として添付する
 
 **卒業者のデータは削除されません。** 過去の作業記録に残る担当者名を
 引けるようにするためです。卒業した人は `/member support` などの
@@ -535,7 +535,7 @@ ONにしない限り参加者には何も送りません。
 **他のサークルとの関係**: すべてのデータはサーバー単位で完全に分離されています。
 他大学のサークルからあなたのデータが見えることはありません。
 
-**持ち出し**: `/data export` でこのサーバーの主要13テーブルを ZIP（CSV 群）として
+**持ち出し**: `/data export` でこのサーバーの主要14テーブルを ZIP（CSV 群）として
 受け取れます（管理者のみ）。サーバーIDや Todoist トークンは含まれません。
 
 **利用をやめるとき**: 運営者への連絡は不要です。Bot をサーバーから
@@ -571,7 +571,7 @@ ONにしない限り参加者には何も送りません。
 | | `/task sync` | L4 |
 | 桁巻き | `/layer start` `/layer end` `/layer cancel` `/layer status` `/layer stats` `/layer keta-list` | 全員 |
 | | `/layer keta-add` `/layer keta-remove` | L2〜 |
-| 機体進捗 | `/progress view` | 全員 |
+| 機体進捗 | `/progress view` `/progress history` | 全員 |
 | | `/progress add` `/progress edit` `/progress remove` `/progress spar-link` `/progress setup` | L2〜 |
 | | `/progress sync` | L4 |
 | 重量 | `/weight view` `/weight top` | 全員 |
