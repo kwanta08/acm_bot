@@ -36,13 +36,13 @@
 
 ## スキーマバージョンの割り当て（衝突防止）
 
-現行は `SCHEMA_VERSION = 17`（`migrations/016_schedule_confirmed.sql` まで）。
+現行は `SCHEMA_VERSION = 18`（`migrations/017_progress_snapshots.sql` まで）。
 
 | 版 | migration | タスク |
 |---|---|---|
 | v16 | `015_layer_session_layer_num_text.sql` | 適用済み（`/layer start` の PG DataError 修正） |
 | v17 | `016_schedule_confirmed.sql` | **G3-3（`deleted_flag`）＋ G3-4（`confirmed_option_id`）。1版に2列をまとめてある**（適用済み） |
-| v18 | `017_progress_snapshots.sql` | G4-7（進捗履歴） |
+| v18 | `017_progress_snapshots.sql` | G4-7（進捗履歴。適用済み） |
 | v19 | `018_stock.sql` | G4-8（在庫・工具） |
 | v20 | `019_incidents.sql` | G4-10（ヒヤリハット） |
 
@@ -529,7 +529,7 @@
       - **検証**: `tests/test_member_attendance.py`（新規）
       - **注意**: 晒しにならないよう公開オプションを付けない。母集団は G3-2 と揃える
 
-- [ ] **G4-7** `progress_snapshots` — 進捗の履歴とバーンダウン。
+- [x] **G4-7** `progress_snapshots` — 進捗の履歴とバーンダウン。
       `services/milestone_service.py:9-14` が自ら書いているとおり、履歴が無いため
       ペースが「作成日→最終更新日の平均」でしか出せず判定不能が多発する。
       「先週から何%進んだか」も分からない。
@@ -2910,3 +2910,154 @@ ok率の分母も「対象回数」にすると回答率との積になり、
   `select_unanswered_targets` を使う。**3箇所目**になるので、
   そのときに「呼び出し側が毎回 role_member_ids を組み立てている」
   重複をヘルパへまとめるかを検討する
+
+---
+
+### 2026-08-29 — G4-7: `progress_snapshots` 進捗の履歴（ブランチ `feat/g4-7`・スキーマ v18）
+
+`services/milestone_service.py` が自ら書いていたとおり、履歴が無いため
+ペースが「作成日→最終更新日の平均」でしか出せず、**停滞期間を含まない**
+近似だった。「先週から何%進んだか」も分からなかった。
+
+- ruff: `All checks passed!`
+- pytest: **1212 passed, 12 skipped**（着手前は 1171 passed, 12 skipped）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `utils/db.py` | `progress_snapshots` の DDL・索引・`SCHEMA_VERSION = 18`・`_migrate_v18_progress_snapshots()` |
+| `migrations/017_progress_snapshots.sql`（新規） | PostgreSQL 手動適用用の参照定義 |
+| `repositories/progress_repository.py` | `has_snapshot` / `save_snapshots` / `list_snapshots` / `snapshot_node_ids` / `latest_snapshot_dates` |
+| `services/milestone_service.py` | `snapshot_pace()` / `recent_gain()` / `sparkline()` と、ペースの出どころ3段の説明 |
+| `cogs/progress.py` | 20分ループ末尾の `save_daily_snapshot()`、`pace_overrides()` の優先順位、`/progress history [node] [days]`（L1） |
+| `repositories/table_repository.py` | 読み取り専用の TableSpec（`/data export` に含める。G4-3 の申し送り） |
+| `tests/test_progress_snapshots.py`（新規） | 41件 |
+| `tests/test_data_purge.py` ほか | 新テーブルぶんの前提更新（3ファイル） |
+| `docs/*` `README.md` `cogs/{data,season}.py` | 「主要13テーブル」→「主要14テーブル」、コマンド表・早見表 |
+
+#### 新しい ADR の草案（0035）
+
+**ADR 0022 の「覆す条件」に沿った移行なので、0022 を失効させるのではなく
+更新する。** 0022 の核（履歴が無い期間について予測を出さない）は残る。
+
+---
+
+**0035. 進捗の履歴を日次スナップショットで持つ**
+`supersedes:` なし / `updates: 0022`
+
+**文脈** — 0022 は「履歴テーブル（案 A）は正確だが、この機能のためだけに
+スキーマと書き込み経路を増やすべきではない。近似（案 B）で足りるかを先に見る」
+と決め、覆す条件に「**進捗の履歴が必要な別機能が出てきたとき。
+その時点で A に移行し、ペースも正確化する**」を挙げていた。
+`/progress history`（G4-7）と週次ダイジェストの「先週から何%」（G4-5）が
+それにあたる。近似では原理的に出せない。
+
+**選択肢**
+
+| 案 | 内容 | 欠点 |
+|---|---|---|
+| A. 全書き込み経路に履歴を記録する | 変化の瞬間まで正確 | 経路が7つあり、1つ漏らすと静かに歪む |
+| B. 定期ジョブが1日1回スナップショットを撮る | 書き込み経路を1つも触らない | 日内の変化は残らない |
+| C. 近似のまま（0022 を維持） | 変更ゼロ | `/progress history` が作れない |
+
+**決定** — **B。20分ごとの既存同期ループの末尾で、その日まだ書いていなければ
+1回だけ全ノードのスナップショットを保存する。**
+
+**理由**
+- 進捗は日単位で語られる（「先週から何%」「大会まであと N 日」）ので、
+  日内の解像度は要らない。**必要な精度の下限で止める**
+- 案 A は `/progress edit`・Todoist 同期・桁巻き反映・ダッシュボード編集・
+  `/weight set`・再集計・移行スクリプトの**全部**に記録を足すことになり、
+  1つ漏らすと履歴が静かに歪む。歪んだ履歴は近似より悪い
+- 集計後の値（`aggregated`）を撮るので、子の変更が親に伝わった結果が残る
+
+**却下した案とその理由**
+- **A** = 上記。書き込み経路を7箇所触る変更を、日次の解像度で足りる要件のために入れない
+- **C** = `/progress history` が作れない。0022 自身が「そのときは A に移行する」と書いている
+
+**影響範囲**
+- スキーマ v18。`UNIQUE (guild_id, node_id, snapshot_date)` が「1日1行」を
+  **構造で**保証する（ADR 0008 / 0016）。アプリ側の早期 return は
+  無駄な書き込みを省くための最適化にすぎない
+- `aggregated` / `actual_weight_g` は NULL 許容。未集計を 0.0 に丸めない（ADR 0021）
+- `node_id` に外部キーを張らない（ADR 0019 と同じ方針）。ノードが消えても履歴は残る
+- ペースの出どころは **snapshots > layer_records > node** の3段。
+  **履歴が足りないノードは snapshots を使わない**（`MIN_SNAPSHOTS_FOR_PACE = 3`、
+  `MIN_SNAPSHOT_SPAN_DAYS = 3`）。ここが 0022 の核をそのまま引き継ぐ部分
+- 保存されるのは「その日の最初の同期時点の値」＝実質は前日終了時点の状態
+- 既存 DB には**空のテーブルが増えるだけ**。導入直後は従来の推定のまま動く（ADR 0024）
+
+**覆す条件**
+- 日内の変化を追う必要が出たとき（例: 作業日の時間帯別の進み方）。
+  そのときは案 A（書き込み経路への記録）へ移す
+- ノード数 × 日数が実運用で問題になる規模に育ったとき（保持期間の設計が必要になる）
+
+**根拠** — `docs/IMPROVEMENT_TASKS.md` G4-7、`migrations/017_progress_snapshots.sql`、
+`services/milestone_service.py`（`snapshot_pace` の docstring に根拠を併記）
+
+---
+
+#### 設計判断（上記 ADR 草案に含まれないもの）
+
+**1. 同期がエラーを報告したギルドでもスナップショットは撮る。**
+Todoist 連携が壊れている間だけ履歴が抜けると、復旧後にペースが狂う
+（「その期間まったく進んでいない」ように見える）。同期の成否と切り離した。
+
+**2. `/progress history` は「伸び」を出せないときに 0% と書かない。**
+「比較できる記録がまだありません」と出す。記録が1点しか無い状態と
+「まったく進んでいない」は別物（ADR 0021）。
+一方で **`snapshot_pace` は伸び 0 を判定不能にしない**——
+十分な期間の実測で伸びが0なのは「分からない」ではなく
+「このままでは間に合わない」という情報だから。この2つは意図的に扱いが違う。
+
+**3. スパークラインは系列ごとに正規化しない。** 常に 0〜1 で描く。
+正規化すると 5%→6% の変化が満杯のグラフに見える。
+未集計は空白で、`▁`（0%）と区別する。
+
+**4. `/data export` の対象に入れた**（G4-3 の申し送りどおり）。
+新テーブルを足すたびに「持ち出せないデータ」が増えるのを防ぐ。
+「主要13テーブル」→「主要14テーブル」は
+`test_the_export_table_count_matches_the_whitelist` が自動で赤くしてくれた。
+
+#### 空振り確認（実測）
+
+| 一時的な改変 | 結果 |
+|---|---|
+| `ON CONFLICT DO NOTHING` を `DO UPDATE` に | 1日1行のテストが失敗 |
+| DDL から `UNIQUE` を外す | 15件が失敗 |
+| 値の列を `NOT NULL DEFAULT 0` に | 15件が失敗 |
+| `has_snapshot` の早期 return を消す | 効率のテストが失敗（**下の注記**） |
+| `MIN_SNAPSHOTS_FOR_PACE` を 2 に下げる | 件数条件のテストが失敗（**下の注記**） |
+| `MIN_SNAPSHOT_SPAN_DAYS` の判定を消す | 期間条件のテストが失敗 |
+| `aggregated` の None を 0.0 として数える | 1件が失敗 |
+| `recent_gain` が 0.0 を返すようにする | 2件が失敗 |
+| 未集計のスパークラインを `▁` にする | 1件が失敗 |
+| スパークラインを系列ごとに正規化 | 1件が失敗 |
+| スナップショット由来のペース上書きを消す | 1件が失敗 |
+| 履歴不足のノードにもペースを入れる | 1件が失敗 |
+| `list_snapshots` から `guild_id` 条件を外す | 1件が失敗 |
+
+**注記: 最初は2つの変異が素通りした。**
+
+- **`has_snapshot` の早期 return を消しても全部緑だった。**
+  `UNIQUE` 制約があるので行は増えず、**正しさは守られていた**——
+  つまりテストは正しく、消えたのは効率だけ。とはいえ
+  「制約が守るから if は不要」で消される種類のコードなので、
+  「2回目はツリーを読み直さない」ことをテストで固定した
+- **`MIN_SNAPSHOTS_FOR_PACE` を 3→2 に下げても緑だった。**
+  件数のテストが**期間の条件でも落ちる**データを使っていたため、
+  件数の下限を検査できていなかった。2点を30日離した種データを足して
+  件数条件だけを切り出した
+
+#### 次タスクへの申し送り
+
+- **G4-5 のダイジェストに「主桁 62%→68%」を足せる状態になった。**
+  `recent_gain(snapshots, 7, today)` がそのまま使える。
+  まだ足していない（G4-5 は完了済みで、混ぜると ADR 0014 に反する）
+- **保持期間の設計はしていない。** ノード100 × 365日 = 年3.6万行。
+  数年運用しても実害は無い見込みだが、`/data delete` の対象には入っている
+- **日内の変化は残らない。** 「その日の最初の同期時点の値」なので、
+  1日のうちに進んで戻した動きは記録されない（ADR 草案の「覆す条件」）
+- ダッシュボードの表に `progress_snapshots` が出る（読み取り専用・L1）。
+  行数が多いので、シート切替（`SHEET_TABLES`）に入れるかは別途検討
