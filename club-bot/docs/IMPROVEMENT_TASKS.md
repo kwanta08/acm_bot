@@ -506,7 +506,7 @@
         `user` 引数は L2 以上のみ指定可
       - **検証**: `tests/test_me.py`（新規）。**新規テーブル不要**（既存クエリの合成のみ）
 
-- [ ] **G4-5** `/report weekly` の公開版と自動投稿。
+- [x] **G4-5** `/report weekly` の公開版と自動投稿。
       現状 `/report weekly` は L2 以上・ephemeral 固定で、部員には
       「今週サークル全体で何が進んだか」が見えない。
       - **受入**: `/report weekly` に `public: bool = False` を追加。
@@ -2717,3 +2717,109 @@ DB のテーブル名が食い違って混乱する。
   差し替えるならインスタンス属性にする（ClaudeVault の gotcha 候補）
 - `/me` は `aggregate_layer_stats`（G4-1）を再利用している。
   G4-5 のダイジェストも同じ関数を使う予定
+
+---
+
+### 2026-08-29 — G4-5: `/report weekly` の公開版と週次ダイジェスト（ブランチ `feat/g4-5`）
+
+`/report weekly` は L2 以上・ephemeral 固定で、部員には
+「今週サークル全体で何が進んだか」が見えなかった。
+
+- ruff: `All checks passed!`
+- pytest: **1148 passed, 12 skipped**（着手前は 1120 passed, 12 skipped）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `services/weekly_digest_service.py`（新規） | `last_week_range()` / `count_completed_between()` / `week_label()`（純関数） |
+| `services/layer_stats_service.py` | `aggregate_layer_stats` に `until`（半開区間 `[since, until)`） |
+| `repositories/task_repository.py` | `list_completed()`（完了タスクの取得） |
+| `cogs/reports.py` | `build_weekly_embed()` を切り出し、`/report weekly` に `public: bool = False` |
+| `cogs/reminders.py` | `weekly_digest` ループ（指定曜日 08:30・既定 OFF） |
+| `config.py` | `WEEKLY_DIGEST_ENABLED`（既定 OFF）/ `WEEKLY_DIGEST_WEEKDAY`（既定 0＝月曜） |
+| `tests/test_weekly_digest.py`（新規） | 28件 |
+| `docs/OPERATION.md` `docs/GUIDE.md` | 設定表・通知表・コマンド表 |
+
+#### 設計判断
+
+**1. ADR 0023 は覆していない。0023 の「覆す条件」に沿った代替案として実装した。**
+0023 が却下したのは「遅延が無い週にも『問題ありません』を送る」こと。
+今回のダイジェストは**実績の報告**であって「異常なし」の通知ではない。
+線引きを実装で保つために、次の3つをテストで固定した:
+
+- ダイジェストの本文に「問題ありません / 遅延はありません / 遅れはありません /
+  異常なし」が**現れないこと**（現れたら 0023 が却下したものと同じになる）
+- マイルストーン警告とは**別のジョブ・別の `reminder_type`**であること
+- **既定 OFF** であること（既存ギルドの通知量は変わらない。ADR 0024）
+
+**2. `/report weekly` と自動投稿は同じ `build_weekly_embed()` を使う。**
+別々に組み立てると、同じ「今週」の数字が画面ごとに食い違う
+（G3-2 の「未回答が2つの定義で動いていた」と同じ形）。
+`Reminders` は既存の `bot.get_cog("Schedule")` と同じやり方で
+`bot.get_cog("Reports")` から呼ぶ。
+
+**3. 「先週」は半開区間 `[前の月曜 0:00, 今週の月曜 0:00)`。当日を含めない。**
+含めると「今日の朝までの実績」が混ざり、翌週の集計と二重になる。
+`aggregate_layer_stats` に `until` を足したのも同じ理由で、
+週をつなげても境界の記録が2回数えられない。
+
+**4. 「何も無い週」は送らない。** `build_weekly_embed()` が `None` を返す
+（未完了0・超過0・投票0・先週の完了0・先週の積層0）。
+0/0/0 のダイジェストは「うまくいっている」ではなく
+「まだ始まっていない」で、送っても読む人に何も伝えない。
+これは 0023 の考え方（言うことが無い週は黙る）と同じ方向。
+
+**5. 空状態は `public:true` でも公開しない。** 「まだデータがありません」を
+チャンネルへ流す意味がなく、部員には bot の不調に見える。
+
+**6. 投稿先はお知らせチャンネル →（無ければ）`resolve_default_channel_id()`。**
+解決は `guild.get_channel` 経由（`_guild_channel`）で、**他ギルドの
+チャンネルへは出せない**。送信先が無いときは部員には沈黙し、
+運用者には `log_to_channel` で残す（マイルストーン警告と同じ作法）。
+
+**7. 送信失敗を `reminders_log` に書かない。** `exists()` は status を見ないので、
+書くとその週は二度と送られない（G2-3）。G4-2 の DM とは事情が違う——
+チャンネル送信は次の週まで再試行の機会がないので、
+「直らない失敗」として殺す理由がない。
+
+**8. 曜日の不正値は既定に落とす（例外を投げない）。**
+`for_guild()` で例外が出るとそのギルドの全コマンドが死ぬ
+（gotcha `one-guild-loses-all-features`）。
+
+#### 空振り確認（実測）
+
+| 一時的な改変 | 結果 |
+|---|---|
+| 既定を ON にする | 既定 OFF のテストが失敗 |
+| `weekly_digest_enabled` の判定を消す | OFF のテストが失敗（**下の注記を参照**） |
+| 曜日の判定を消す | 曜日テストが失敗 |
+| 二重送信の防止を消す | 同週2回のテストが失敗 |
+| 送信失敗を `failed` で記録する | 再送テストが失敗 |
+| 本文に「遅延はありません」を足す | 定型文検査が失敗 |
+| `until` の判定を消す | 先週の数字テストが失敗 |
+| 「先週」に当日以降を含める | 5件が失敗 |
+| 空のダイジェストも送るようにする | 0件ギルドのテストが失敗 |
+| `public` を無視して常に ephemeral | 公開テストが失敗 |
+| `weekly_digest.start()` を消す | ループ登録テストが失敗 |
+
+**注記: 最初は「OFF」の検査が空振りしていた。**
+`weekly_digest_enabled` の判定を丸ごと消しても緑のままだった——
+テストが投稿先チャンネルを設定しておらず、
+**「チャンネルが無いから送れなかった」で同じ結果になっていた**ため。
+チャンネルと曜日を揃え「OFF だけが送信を止めている」状態にし、
+対になる ON のケース（`test_turning_it_on_is_the_only_difference`）を
+足して裏付けた。既定 OFF は ADR 0024 の核なので、ここが空振りしたままでは
+このタスクの受入基準を満たしていない。
+
+#### 次タスクへの申し送り
+
+- **G4-7（`progress_snapshots`）が溜まったら、ダイジェストに
+  「主桁 62%→68%」を足せる。** `build_weekly_embed()` の
+  「先週の実績」フィールドが差し込み先
+- `WEEKLY_DIGEST_ENABLED` は `/setup` のボタンにしていない
+  （`/settings_set` から設定する）。`/setup` に足すなら
+  G3-6 の `WELCOME_ENABLED` トグルと同じ形にできる
+- `/report weekly` の `public:true` は**実行したチャンネル**へ出る。
+  ダイジェストの自動投稿先（お知らせチャンネル）とは別なので、
+  「公開したのに違う場所に出た」という混同は起きない
