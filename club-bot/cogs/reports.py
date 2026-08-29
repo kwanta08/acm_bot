@@ -18,14 +18,21 @@ from discord.ext import commands
 
 from config import config
 from repositories.audit_log_repository import AuditLogRepository
+from repositories.layer_session_repository import LayerSessionRepository
 from repositories.name_cache_repository import ENTITY_USER, NameCacheRepository
 from repositories.progress_repository import ProgressRepository
 from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.schedule_repository import ScheduleRepository
 from repositories.task_repository import TaskRepository
 from services import team_service
+from services.layer_stats_service import aggregate_layer_stats
 from services.milestone_service import days_until_competition, evaluate_all
 from services.progress_tree import load_tree
+from services.weekly_digest_service import (
+    count_completed_between,
+    last_week_range,
+    week_label,
+)
 from utils.embeds import (
     MAX_EMBED_FIELDS,
     add_truncation_note,
@@ -48,42 +55,57 @@ class Reports(commands.Cog):
         self.log_repo = RemindersLogRepository(bot.db)
         self.audit_repo = AuditLogRepository(bot.db)
         self.name_repo = NameCacheRepository(bot.db)
+        self.session_repo = LayerSessionRepository(bot.db)
 
     group = app_commands.Group(name="report", description="集計・エクスポート・監査")
 
     # ---------- weekly ----------
-    @group.command(name="weekly", description="週次サマリーを表示します。")
-    @require(Level.L2)
-    async def weekly(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        guild_id = await ensure_guild(interaction)
-        if guild_id is None:
-            return
-        today = now().date().isoformat()
+    async def build_weekly_embed(self, guild_id: int, now_dt=None) -> discord.Embed | None:
+        """週次サマリーの Embed を作る。データが1件も無ければ None。
+
+        **`/report weekly` と月曜朝の自動投稿（G4-5）が同じものを使う。**
+        別々に組み立てると、同じ「今週」の数字が画面ごとに食い違う。
+
+        `None` は「まだ何も始まっていない」を意味する。呼び出し側は、
+        コマンドなら空状態を出し、自動投稿なら**何も送らない**
+        （ADR 0023 と同じ考え方: 言うことが無い週は黙る）。
+        """
+        current = now_dt or now()
+        today = current.date().isoformat()
         overdue = await self.task_repo.list_overdue(guild_id, today)
         open_tasks = await self.task_repo.list_tasks(guild_id, status="open")
         schedules = await self.schedule_repo.list_open_schedules(guild_id)
+        start, end = last_week_range(current)
+        completed = count_completed_between(
+            await self.task_repo.list_completed(guild_id), start, end
+        )
+        layer = aggregate_layer_stats(
+            await self.session_repo.list_records(guild_id), {}, since=start, until=end
+        )
 
         gconf = await config.for_guild(guild_id, db=self.bot.db)
 
-        if not open_tasks and not overdue and not schedules:
+        if not open_tasks and not overdue and not schedules and not completed and not layer.records:
             # 全部0件は「健全に運用できている」ではなく「まだ始まっていない」。
-            # 0/0/0 のサマリーは両者を見分けられないので空状態として出す
-            await interaction.followup.send(
-                embed=empty_state_embed(
-                    f"{gconf.club_name_or_default} 週次サマリー",
-                    "まだデータがありません。`/task add` でタスクを、"
-                    "`/schedule create` で日程調整を作成できます。",
-                    "/task add",
-                ),
-                ephemeral=True,
-            )
-            return
+            # 0/0/0 のサマリーは両者を見分けられない
+            return None
 
         embed = info_embed(f"{gconf.club_name_or_default} 週次サマリー")
         embed.add_field(name="未完了タスク", value=str(len(open_tasks)), inline=True)
         embed.add_field(name="期限超過", value=str(len(overdue)), inline=True)
         embed.add_field(name="開催中の投票", value=str(len(schedules)), inline=True)
+
+        # 先週の実績（G4-5）。**「遅延はありません」の類は書かない**
+        # ——それを入れると ADR 0023 が却下した「毎週届く定型文」になる
+        embed.add_field(
+            name=f"先週の実績（{week_label(start, end)}）",
+            value=(
+                f"完了タスク {completed} 件\n"
+                f"積層 {layer.records} 件 / {layer.total_minutes} 分 / "
+                f"参加 {len(layer.members)} 人"
+            ),
+            inline=False,
+        )
 
         # 班別タスク集計
         team_names = await team_service.team_name_map(self.bot.db, guild_id)
@@ -98,7 +120,33 @@ class Reports(commands.Cog):
         countdown = await self.countdown_summary(guild_id, gconf)
         if countdown:
             embed.add_field(name="大会まで", value=countdown, inline=False)
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        return embed
+
+    @group.command(name="weekly", description="週次サマリーを表示します。")
+    @app_commands.describe(public="チャンネルへ公開で投稿する（既定は自分にだけ表示）")
+    @require(Level.L2)
+    async def weekly(self, interaction: discord.Interaction, public: bool = False):
+        # 公開指定のときだけ ephemeral を外す。**既定は今までどおり自分にだけ**
+        # （既存の使い方を勝手に公開へ変えない）
+        await interaction.response.defer(ephemeral=not public)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        embed = await self.build_weekly_embed(guild_id)
+        if embed is None:
+            gconf = await config.for_guild(guild_id, db=self.bot.db)
+            await interaction.followup.send(
+                embed=empty_state_embed(
+                    f"{gconf.club_name_or_default} 週次サマリー",
+                    "まだデータがありません。`/task add` でタスクを、"
+                    "`/schedule create` で日程調整を作成できます。",
+                    "/task add",
+                ),
+                # 空状態は公開しない（部員に見せる意味が無く、誤解も招く）
+                ephemeral=True,
+            )
+            return
+        await interaction.followup.send(embed=embed, ephemeral=not public)
 
     async def countdown_summary(self, guild_id: int, gconf) -> str:
         """「大会まで N 日 / 遅延 M 件」の1行。

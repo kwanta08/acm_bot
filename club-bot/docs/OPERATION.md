@@ -307,6 +307,7 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 |---|---|---|
 | `/report weekly` | L2 | 週次サマリー |
 | `/report export-tasks` | L2 | タスク一覧 CSV 出力 |
+| `/report weekly [public]` | L2 | 週次サマリー。`public:true` でチャンネルへ公開投稿（既定は自分にだけ表示） |
 | `/report notifications [limit]` | L3 | bot が送った通知の記録（`reminders_log`）を表示 |
 | `/report changes [limit] [actor]` | L3 | 設定・マスタ変更の操作ログ（`audit_log`）を表示。実行者は表示名に解決 |
 | `/report attendance-rate` | L2 | 出欠率一覧 |
@@ -469,6 +470,20 @@ API 障害→`#bot-log` に記録、送信履歴を保存し多重送信を防�
 
 - **状態確認**: `/health` で DB（PostgreSQL / SQLite）・Todoist（ギルド別）・暗号鍵の状態と遅延を確認。
 - **ログ**: さくらのVPS（systemd常駐）では `journalctl -u club-bot -f`、ファイルは `logs/bot.log`。
+**週次ダイジェストの自動投稿**（既定 OFF）:
+
+| ギルド別設定 | 既定 | 動き |
+|---|---|---|
+| `WEEKLY_DIGEST_ENABLED` | `0`（OFF） | `1` にすると、`/report weekly` と同じ内容を朝 08:30 に公開チャンネルへ投稿 |
+| `WEEKLY_DIGEST_WEEKDAY` | `0`（月曜） | 0=月 〜 6=日。範囲外の値は既定に戻ります |
+
+`/settings_set` で変更します。投稿先は「お知らせチャンネル →（無ければ）
+進捗チャンネル → タスク通知チャンネル」の順です。
+集計対象が1件も無い週は**何も送りません**（0件のダイジェストは送らない）。
+
+遅延マイルストーンの警告（遅れがある週だけ届く）とは**別の通知**です。
+ダイジェストに「遅延はありません」の類は入れていません。
+
 - **監査**: `/report notifications` で直近の通知履歴と失敗理由を、`/report changes` で設定・マスタ変更の操作ログを確認。
 - **日次バックアップ**: 本番（PostgreSQL）は `pg_dump -Fc` を日次で取得（ADR 0006。
   SQLite は開発・テスト用なので、開発環境では `data/club.db` をコピー）。週1で `/report export-tasks`。

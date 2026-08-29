@@ -11,6 +11,7 @@ Reminders モジュール（仕様 11.5）。
   - Todoist セクション別通知: 毎日08:30
   - 確定日程リマインド: 前日20:00 / 当日08:30
   - 遅延マイルストーン通知: 毎週月曜08:30（遅れが無い週は送らない）
+  - 週次ダイジェスト: 指定曜日08:30（WEEKLY_DIGEST_ENABLED が ON のギルドのみ・既定 OFF）
   - データ削除の実行: 毎日04:00
   - Task 超過通知: 毎日21:00
 通知失敗の扱い（11.5.2）: DM 失敗→チャンネル、API 障害→#bot-log、多重送信防止。
@@ -68,6 +69,14 @@ CONFIRMED_PHASES = {"eve": (1, "明日"), "day": (0, "本日")}
 # （ユーザー単位にすると、次に始めたセッションで催促が飛ばない）。
 LAYER_STALE_ALERT_TYPE = "layer_session_alert"
 LAYER_AUTO_CANCEL_TYPE = "layer_session_auto_cancel"
+
+# 週次ダイジェスト（G4-5）。
+#
+# **ADR 0023 は覆していない。** 0023 が禁じたのは「遅延が無い週にも
+# 『問題ありません』を送る」こと。こちらは実績の報告で、しかも
+# **既定 OFF**（ON にしたギルドだけが受け取る）。マイルストーン警告とは
+# 別のジョブ・別の reminder_type として共存させる。
+WEEKLY_DIGEST_TYPE = "weekly_digest"
 
 
 def layer_session_key(session_id: int) -> str:
@@ -160,6 +169,7 @@ class Reminders(commands.Cog):
         self.daily_purge.start()
         self.weekly_milestone_alert.start()
         self.confirmed_schedule_reminders.start()
+        self.weekly_digest.start()
 
     async def cog_unload(self):
         self.schedule_tick.cancel()
@@ -168,6 +178,7 @@ class Reminders(commands.Cog):
         self.daily_purge.cancel()
         self.weekly_milestone_alert.cancel()
         self.confirmed_schedule_reminders.cancel()
+        self.weekly_digest.cancel()
 
     # ---------- 5分ごと: 締切前催促 + 自動締切 ----------
     @tasks.loop(minutes=5)
@@ -446,6 +457,87 @@ class Reminders(commands.Cog):
     @weekly_milestone_alert.before_loop
     async def _before_milestone_alert(self):
         await self.bot.wait_until_ready()
+
+    # ---------- 指定曜日 08:30: 週次ダイジェスト（既定 OFF） ----------
+    @tasks.loop(time=time(hour=8, minute=30, tzinfo=TZ))
+    async def weekly_digest(self):
+        await self.run_weekly_digest()
+
+    @weekly_digest.before_loop
+    async def _before_weekly_digest(self):
+        await self.bot.wait_until_ready()
+
+    async def run_weekly_digest(self, now_dt=None) -> dict[int, int]:
+        """ON にしているギルドへ、週次サマリーを公開チャンネルへ投稿する。
+
+        **既定 OFF。** 何も設定していないギルドの通知量は変わらない（ADR 0024）。
+        曜日はギルド別（`WEEKLY_DIGEST_WEEKDAY`、既定は月曜）。
+        1ギルドの失敗が他ギルドを止めないよう個別に握る。
+        """
+        current = now_dt or now()
+        sent: dict[int, int] = {}
+        for guild in list(self.bot.guilds):
+            try:
+                ok = await self._send_weekly_digest(guild.id, current)
+            except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
+                log.warning("週次ダイジェストに失敗 (guild=%s): %s", guild.id, type(e).__name__)
+                continue
+            if ok:
+                sent[guild.id] = 1
+        return sent
+
+    async def _send_weekly_digest(self, guild_id: int, current) -> bool:
+        gconf = await config.for_guild(guild_id, db=self.bot.db)
+        if not gconf.weekly_digest_enabled:
+            return False
+        if current.weekday() != gconf.weekly_digest_weekday:
+            return False
+
+        target_id = f"digest:{self.week_key(current)}"
+        if await self.log_repo.exists(guild_id, WEEKLY_DIGEST_TYPE, target_id):
+            return False
+
+        reports = self.bot.get_cog("Reports")
+        if reports is None:
+            return False
+        # **/report weekly と同じ Embed を使う。** 別々に組むと同じ「今週」の
+        # 数字が画面ごとに食い違う
+        embed = await reports.build_weekly_embed(guild_id, now_dt=current)
+        if embed is None:
+            # まだ何も始まっていないギルド。0/0/0 のダイジェストは送らない
+            log.info("週次ダイジェスト: 集計対象が無い (guild=%s)", guild_id)
+            return False
+
+        guild = self.bot.get_guild(guild_id)
+        channel = self._guild_channel(guild, gconf.default_announce_channel_id)
+        if channel is None:
+            channel_id = await resolve_default_channel_id(self.bot.db, guild_id)
+            channel = self._guild_channel(guild, channel_id)
+        if channel is None:
+            # 部員へは送れないが、ON にしているのに届いていないことは
+            # 運用者に見える形で残す
+            log.info("週次ダイジェストの送信先が無い (guild=%s)", guild_id)
+            await self.bot.log_to_channel(
+                "[週次ダイジェスト] 投稿先チャンネルが見つかりませんでした。"
+                "`/setup` でお知らせチャンネルを設定してください。",
+                guild_id=guild_id,
+            )
+            return False
+
+        try:
+            await channel.send(embed=embed)
+        except (discord.Forbidden, discord.HTTPException) as e:
+            # **reminders_log には書かない。** 書くとその週は二度と送られない
+            log.warning("週次ダイジェストの送信に失敗 (guild=%s): %s", guild_id, e)
+            await self.bot.log_to_channel(
+                f"[週次ダイジェスト] 送信に失敗しました: {e}", guild_id=guild_id
+            )
+            return False
+
+        await self._log_reminder(
+            guild_id, WEEKLY_DIGEST_TYPE, target_id, None, str(channel.id), "sent"
+        )
+        return True
 
     @staticmethod
     def week_key(current) -> str:

@@ -102,11 +102,16 @@ def aggregate_layer_stats(
     records: Iterable[Mapping[str, Any]],
     targets: Mapping[str, int],
     since: datetime | None = None,
+    until: datetime | None = None,
 ) -> LayerStats:
     """積層記録を桁別・人別に集計する（純関数）。
 
     records の各要素は keta / layer_num / user_id / minutes / ended_at を持つ。
-    since を渡すと、それ以降に終了した記録だけを対象にする（境界は含む）。
+    since を渡すと、それ以降に終了した記録だけを対象にする（**境界は含む**）。
+    until を渡すと、その時刻より前の記録だけを対象にする（**境界は含まない**）。
+    半開区間 `[since, until)` にしてあるので、週や月をつなげても
+    境界の記録が二重に数えられない（G4-5 の「先週」で使う）。
+
     ended_at が読めない行は落とさず、期間指定があるときだけ除外する
     （集計から黙って消えるより、全期間で見えている方が気づける）。
     """
@@ -119,11 +124,14 @@ def aggregate_layer_stats(
 
     for row in records:
         ended_at = str(row["ended_at"])
-        if since is not None:
+        if since is not None or until is not None:
             try:
-                if from_iso(ended_at) < since:
-                    continue
+                ended = from_iso(ended_at)
             except ValueError:
+                continue
+            if since is not None and ended < since:
+                continue
+            if until is not None and ended >= until:
                 continue
         keta = str(row["keta"])
         layer_num = str(row["layer_num"])

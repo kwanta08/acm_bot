@@ -114,6 +114,11 @@ DEFAULT_DATA_RETENTION_DAYS = 30
 DEFAULT_LAYER_SESSION_ALERT_MINUTES = 240
 DEFAULT_LAYER_SESSION_AUTO_CANCEL_MINUTES = 720
 
+# 週次ダイジェストを流す曜日（0 = 月曜）。ギルド別設定
+# WEEKLY_DIGEST_WEEKDAY で上書きできる。範囲外の値は既定に落とす。
+# 送るかどうかは WEEKLY_DIGEST_ENABLED（既定 OFF）が決める（ADR 0024）。
+DEFAULT_WEEKLY_DIGEST_WEEKDAY = 0
+
 # 複数のロールをカンマ区切りで保存する設定キー（GuildConfig 側は list[int]）。
 # 追加するときは GuildConfig の属性も list[int] にすること。
 # /setup（cogs/setup_wizard.py）と /set_role（cogs/settings.py）が
@@ -164,6 +169,12 @@ class GuildConfig:
     # 新入生オンボーディング（on_member_join で班選択を送る）。
     # **既定は OFF。** ON にしたギルドでだけ動く（ADR 0024）
     welcome_enabled: bool = False
+
+    # 週次ダイジェストの自動投稿（G4-5）。**既定は OFF**。
+    # ON にしたギルドでだけ、指定曜日の朝に /report weekly と同じ内容を
+    # 公開チャンネルへ投稿する。既存ギルドの通知量は変わらない
+    weekly_digest_enabled: bool = False
+    weekly_digest_weekday: int = DEFAULT_WEEKLY_DIGEST_WEEKDAY
 
     # 積層セッションの押し忘れ検知（G4-2）。分。0 以下でその機能を無効にする
     layer_session_alert_minutes: int = DEFAULT_LAYER_SESSION_ALERT_MINUTES
@@ -344,6 +355,13 @@ class Config:
 
             # 真偽値の設定。不正値は既定（OFF）扱いで例外を投げない
             gc.welcome_enabled = await repo.get_bool(guild_id, "WELCOME_ENABLED")
+            gc.weekly_digest_enabled = await repo.get_bool(guild_id, "WEEKLY_DIGEST_ENABLED")
+
+            # 曜日は 0〜6 以外を保存されても既定へ落とす（例外を投げると
+            # そのギルドの全コマンドが死ぬ。gotcha one-guild-loses-all-features）
+            weekday = await repo.get_int(guild_id, "WEEKLY_DIGEST_WEEKDAY")
+            if weekday is not None and 0 <= weekday <= 6:
+                gc.weekly_digest_weekday = weekday
 
             club_name = await repo.get(guild_id, "CLUB_NAME")
             if club_name:
