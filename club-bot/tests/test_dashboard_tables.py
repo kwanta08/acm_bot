@@ -65,6 +65,9 @@ EXPECTED_TABLES = {
     "settings",
     # 進捗の日次履歴（G4-7）
     "progress_snapshots",
+    # 資材・消耗品の在庫（G4-8）
+    "stock_items",
+    "stock_movements",
 }
 
 

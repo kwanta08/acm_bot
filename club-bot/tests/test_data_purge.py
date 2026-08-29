@@ -229,6 +229,22 @@ _SEED_SQL: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
         (),
     ),
+    "stock_items": (
+        (
+            "INSERT INTO stock_items (guild_id, item_name, unit, quantity,"
+            " created_by, created_at, updated_at)"
+            " VALUES (?, 'プリプレグ', 'm', 10, 'u1', '2026-01-01', '2026-01-01')"
+        ),
+        (),
+    ),
+    "stock_movements": (
+        (
+            "INSERT INTO stock_movements (guild_id, stock_item_id, delta,"
+            " user_id, created_at)"
+            " VALUES (?, 1, -1, 'u1', '2026-01-01')"
+        ),
+        (),
+    ),
 }
 
 

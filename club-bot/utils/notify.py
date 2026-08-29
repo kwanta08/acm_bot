@@ -16,6 +16,45 @@ from utils.logger import get_logger
 log = get_logger(__name__)
 
 
+# 「サークル全体への告知」の送信先を解決する順序（G4-8）。
+#
+# 綴りの違う2つの進捗キーが並んでいるのは歴史的な事情による
+# （services/progress_sync_service.DEFAULT_CHANNEL_KEYS と同じ理由）。
+NOTICE_CHANNEL_KEYS = (
+    "DEFAULT_ANNOUNCE_CHANNEL_ID",
+    "PROGRESS_DEFAULT_CHANNEL_ID",
+    "DEFAULT_PROGRESS_CHANNEL_ID",
+    "DEFAULT_TASK_CHANNEL_ID",
+)
+
+
+async def resolve_notice_channel_id(db, guild_id: int) -> int | None:
+    """告知の送信先チャンネル ID を settings から解決する。未設定なら None。
+
+    **チャンネルの解決（get_channel）はしない。** 呼び出し側が
+    `guild.get_channel` で**同じギルド内に限定して**引くこと
+    （bot 全体のキャッシュから引くと他テナントへ流れる）。
+    """
+    from repositories.settings_repository import SettingsRepository
+
+    repo = SettingsRepository(db)
+    for key in NOTICE_CHANNEL_KEYS:
+        raw = (await repo.get(guild_id, key) or "").strip()
+        if raw.isdigit():
+            return int(raw)
+    return None
+
+
+def guild_channel(guild, channel_id):
+    """同一ギルド内でチャンネルを解決する（他ギルドへ流さない）。"""
+    if guild is None or not channel_id:
+        return None
+    try:
+        return guild.get_channel(int(channel_id))
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass
 class NotifyOutcome:
     """通知の結果。呼び出し側は failed だけ見れば「届かなかった人」が分かる。"""

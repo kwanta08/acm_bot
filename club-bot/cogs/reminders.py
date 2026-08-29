@@ -9,6 +9,7 @@ Reminders モジュール（仕様 11.5）。
   - Task 7日以内期限通知: 毎日08:30
   - Task 今日やること通知: 毎日08:30
   - Todoist セクション別通知: 毎日08:30
+  - 在庫の閾値割れ通知: 毎日08:30（割れている品目が無い日は送らない）
   - 確定日程リマインド: 前日20:00 / 当日08:30
   - 遅延マイルストーン通知: 毎週月曜08:30（遅れが無い週は送らない）
   - 週次ダイジェスト: 指定曜日08:30（WEEKLY_DIGEST_ENABLED が ON のギルドのみ・既定 OFF）
@@ -28,6 +29,7 @@ from itertools import groupby
 import discord
 from discord.ext import commands, tasks
 
+from cogs.inventory import build_low_stock_lines
 from config import config
 from repositories.guild_repository import GuildRepository
 from repositories.layer_session_repository import LayerSessionRepository
@@ -36,13 +38,16 @@ from repositories.progress_repository import ProgressRepository
 from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.schedule_repository import ScheduleRepository
 from repositories.section_repository import SectionRepository
+from repositories.stock_repository import StockRepository
 from repositories.task_repository import TaskRepository
 from services.layer_tracking_service import classify_stale_sessions
 from services.milestone_service import days_until_competition, evaluate_all
 from services.progress_sync_service import resolve_default_channel_id
 from services.progress_tree import load_tree
+from services.stock_service import low_items
 from utils.embeds import task_embed
 from utils.logger import get_logger
+from utils.notify import guild_channel, resolve_notice_channel_id
 from utils.parser import TZ, fmt_jp, from_iso, now, to_iso
 
 log = get_logger("reminders")
@@ -160,6 +165,7 @@ class Reminders(commands.Cog):
         self.section_repo = SectionRepository(bot.db)
         self.log_repo = RemindersLogRepository(bot.db)
         self.session_repo = LayerSessionRepository(bot.db)
+        self.stock_repo = StockRepository(bot.db)
 
     async def cog_load(self):
         # 起動時にループを開始
@@ -264,6 +270,36 @@ class Reminders(commands.Cog):
                 await self.bot.log_to_channel(
                     f"[Reminder] 催促失敗 {s['schedule_id']}: {e}", guild_id=guild_id
                 )
+
+    # ---------- 毎朝 08:30: 在庫の閾値割れ（G4-8） ----------
+    async def _notify_low_stock(self, guild_id: int) -> int:
+        """閾値を割っている資材をまとめて1通で知らせる。
+
+        **割れている品目が無い日は何も送らない**（ADR 0023）。
+        「在庫は足りています」を毎朝送ると、本当に足りない日も読まれなくなる。
+        品目を1件も登録していないギルドでは当然何も起きない。
+
+        即時通知（`/stock use` で割った瞬間）とは別で、こちらは
+        「割れたまま放置されている」ことを毎朝思い出させる役目。
+        """
+        items = low_items(await self.stock_repo.list_items(guild_id))
+        if not items:
+            return 0
+        guild = self.bot.get_guild(guild_id)
+        channel_id = await resolve_notice_channel_id(self.bot.db, guild_id)
+        channel = guild_channel(guild, channel_id)
+        if channel is None:
+            log.info("在庫の閾値割れ通知の送信先が無い (guild=%s)", guild_id)
+            return 0
+        lines = build_low_stock_lines(items[:20])
+        if len(items) > 20:
+            lines.append(f"…ほか {len(items) - 20} 品目")
+        embed = task_embed(
+            "🧾 発注が必要かもしれません",
+            f"閾値を割っている資材が **{len(items)} 件** あります。\n\n" + "\n".join(lines),
+        )
+        await self._safe_send(guild_id, channel, embed=embed)
+        return len(items)
 
     # ---------- 5分ごと: 積層セッションの押し忘れ検知（G4-2） ----------
     async def _process_layer_sessions(self, guild_id: int) -> int:
@@ -408,6 +444,8 @@ class Reminders(commands.Cog):
                 ("今日やること通知", self._notify_today_label),
                 # Todoist セクション別の期限7日以内/超過タスクを各班チャンネルへ
                 ("セクション別通知", self.push_section_tasks),
+                # 閾値を割っている資材（G4-8）。割れが無い日は何も送らない
+                ("在庫の閾値割れ通知", self._notify_low_stock),
             ):
                 try:
                     await job(guild.id)

@@ -481,6 +481,49 @@ CREATE TABLE IF NOT EXISTS progress_snapshots (
     UNIQUE (guild_id, node_id, snapshot_date)
 );
 """,
+    # 資材・消耗品の在庫（G4-8）。
+    #
+    # 人力飛行機で最も痛いのは「プリプレグが無くて桁が巻けない」。
+    # カーボンプリプレグは納期が数週間で、切れてから気づくと工程が1ヶ月ずれる。
+    #
+    # - **品目名の初期値はコードに持たない**（サークルごとに違う）。
+    #   マスタ管理は layer_keta と同型（有効フラグ・(guild_id, name) で一意）
+    # - threshold は **NULL 許容**。閾値を決めていない品目を 0 扱いにしない
+    #   （0 にすると「在庫0でも閾値割れではない」という嘘になる。ADR 0021）
+    # - quantity / threshold は REAL。「2.5 m」「0.5 L」のような単位を扱う
+    # - low_notified_flag は「閾値割れの即時通知を送ったか」。
+    #   閾値以上へ戻ったときに 0 へ戻すので、割り込むたびに1回だけ飛ぶ
+    "stock_items": f"""
+CREATE TABLE IF NOT EXISTS stock_items (
+    stock_item_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    {_GUILD_COL},
+    item_name         TEXT NOT NULL,
+    unit              TEXT NOT NULL DEFAULT '個',
+    quantity          REAL NOT NULL DEFAULT 0,
+    threshold         REAL,
+    note              TEXT,
+    active_flag       INTEGER NOT NULL DEFAULT 1,
+    low_notified_flag INTEGER NOT NULL DEFAULT 0,
+    created_by        TEXT NOT NULL,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    UNIQUE (guild_id, item_name)
+);
+""",
+    # 在庫の増減履歴（G4-8）。「誰がいつ何をどれだけ使ったか」を残す。
+    # stock_item_id に外部キーを張らない（progress_nodes と同じ既存方針。
+    # ADR 0019）。品目を消しても履歴は残る
+    "stock_movements": f"""
+CREATE TABLE IF NOT EXISTS stock_movements (
+    movement_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    {_GUILD_COL},
+    stock_item_id INTEGER NOT NULL,
+    delta         REAL NOT NULL,
+    reason        TEXT,
+    user_id       TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+);
+""",
     # Discord の表示名キャッシュ（ギルド別）。bot がギルドキャッシュから
     # 書き込み、ダッシュボード（Bot トークンを持たない別プロセス）が
     # ID → 表示名の解決に読む。name はユーザーなら「そのギルドでの表示名」
@@ -522,6 +565,8 @@ CREATE INDEX IF NOT EXISTS idx_seasons_guild_ended ON seasons(guild_id, ended_at
 CREATE INDEX IF NOT EXISTS idx_members_guild_status ON members(guild_id, status);
 CREATE INDEX IF NOT EXISTS idx_progress_spar_links_guild ON progress_spar_links(guild_id);
 CREATE INDEX IF NOT EXISTS idx_progress_snapshots_node ON progress_snapshots(guild_id, node_id, snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_stock_items_guild ON stock_items(guild_id, active_flag);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(guild_id, stock_item_id, created_at);
 """
 
 # ---------------------------------------------------------------------------
@@ -612,11 +657,12 @@ POSTGRES_VIEW_DDL = "\n".join(
 #    （年度替わり。既存メンバーはすべて active。migrations/013）
 # 15: discord_name_cache を追加（ダッシュボードの ID → 表示名解決用。
 #    bot がギルドキャッシュから書き、Web 側が読む。migrations/014）
+# 19: stock_items / stock_movements を追加（資材・消耗品の在庫。G4-8）
 # 18: progress_snapshots を追加（進捗の日次履歴。G4-7）
 # 16: layer_sessions.layer_num を INTEGER から TEXT へ変更（/layer start は
 #    「シュリンク」等のテキスト層番号を受け付ける仕様。PostgreSQL では
 #    asyncpg の DataError になっていた。migrations/015）
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
@@ -645,6 +691,8 @@ _PK_COLUMNS: dict[str, str] = {
     "progress_todoist_links": "link_id",
     "progress_spar_links": "spar_link_id",
     "progress_snapshots": "snapshot_id",
+    "stock_items": "stock_item_id",
+    "stock_movements": "movement_id",
 }
 
 _INSERT_TABLE_RE = re.compile(r"INSERT\s+INTO\s+(\w+)", re.IGNORECASE)
@@ -1057,6 +1105,9 @@ class Database:
         if version < 18:
             await self._migrate_v18_progress_snapshots()
 
+        if version < 19:
+            await self._migrate_v19_stock()
+
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
 
@@ -1271,6 +1322,25 @@ class Database:
         ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
         await self._executescript(ddl_map["discord_name_cache"])
         log.info("discord_name_cache テーブルを作成しました（v15）。")
+
+    async def _migrate_v19_stock(self) -> None:
+        """
+        v19: stock_items / stock_movements テーブルを追加する（冪等）。
+
+        資材・消耗品の在庫と発注アラート（G4-8）。
+
+        新規 DB では init_schema / _connect_pg が CREATE TABLE IF NOT EXISTS で
+        作成済みだが、既存 DB でも確実に作られるようここでも実行する
+        （v10 / v13 / v15 / v18 と同じ方式）。
+
+        **既存データには一切触れない。** 追加されるのは空のテーブル2つだけで、
+        **品目の初期値も入れない**（何を在庫管理するかはサークルごとに違う）。
+        品目が0件のギルドでは `/stock list` が空状態を出し、朝の通知も飛ばない。
+        """
+        ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
+        for name in ("stock_items", "stock_movements"):
+            await self._executescript(ddl_map[name])
+        log.info("stock_items / stock_movements テーブルを作成しました（v19）。")
 
     async def _migrate_v18_progress_snapshots(self) -> None:
         """
