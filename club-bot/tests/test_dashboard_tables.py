@@ -68,6 +68,9 @@ EXPECTED_TABLES = {
     # 資材・消耗品の在庫（G4-8）
     "stock_items",
     "stock_movements",
+    # 工具・機材の貸出（G4-9）
+    "tools",
+    "tool_loans",
 }
 
 

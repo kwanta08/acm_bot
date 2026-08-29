@@ -524,6 +524,43 @@ CREATE TABLE IF NOT EXISTS stock_movements (
     created_at    TEXT NOT NULL
 );
 """,
+    # 工具・機材の貸出（G4-9）。
+    #
+    # `/layer start` → `/layer end` とまったく同じ「開始 → 進行中 → 終了」モデル。
+    # マスタ（tools）と貸出（tool_loans）を分け、貸出中かどうかは
+    # **tool_loans に returned_at が NULL の行があるか**で表す
+    # （tools 側にフラグを置くと、行を消したときに貸出の事実まで消える）。
+    #
+    # - due_date は **NULL 許容**。返却予定日を決めていない貸出を
+    #   「本日返却」にしない（ADR 0021）。督促は due_date がある貸出だけ
+    # - tools は layer_keta と同型（有効フラグ・(guild_id, tool_name) で一意）
+    "tools": f"""
+CREATE TABLE IF NOT EXISTS tools (
+    tool_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    {_GUILD_COL},
+    tool_name   TEXT NOT NULL,
+    note        TEXT,
+    active_flag INTEGER NOT NULL DEFAULT 1,
+    created_by  TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    UNIQUE (guild_id, tool_name)
+);
+""",
+    # 貸出1回ぶん。returned_at が NULL なら貸出中。
+    # tool_id に外部キーを張らない（progress_nodes と同じ既存方針。ADR 0019）
+    "tool_loans": f"""
+CREATE TABLE IF NOT EXISTS tool_loans (
+    loan_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    {_GUILD_COL},
+    tool_id       INTEGER NOT NULL,
+    user_id       TEXT NOT NULL,
+    borrowed_at   TEXT NOT NULL,
+    due_date      TEXT,
+    returned_at   TEXT,
+    note          TEXT,
+    overdue_notified_flag INTEGER NOT NULL DEFAULT 0
+);
+""",
     # Discord の表示名キャッシュ（ギルド別）。bot がギルドキャッシュから
     # 書き込み、ダッシュボード（Bot トークンを持たない別プロセス）が
     # ID → 表示名の解決に読む。name はユーザーなら「そのギルドでの表示名」
@@ -567,6 +604,8 @@ CREATE INDEX IF NOT EXISTS idx_progress_spar_links_guild ON progress_spar_links(
 CREATE INDEX IF NOT EXISTS idx_progress_snapshots_node ON progress_snapshots(guild_id, node_id, snapshot_date);
 CREATE INDEX IF NOT EXISTS idx_stock_items_guild ON stock_items(guild_id, active_flag);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(guild_id, stock_item_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_tools_guild ON tools(guild_id, active_flag);
+CREATE INDEX IF NOT EXISTS idx_tool_loans_open ON tool_loans(guild_id, returned_at, tool_id);
 """
 
 # ---------------------------------------------------------------------------
@@ -657,12 +696,13 @@ POSTGRES_VIEW_DDL = "\n".join(
 #    （年度替わり。既存メンバーはすべて active。migrations/013）
 # 15: discord_name_cache を追加（ダッシュボードの ID → 表示名解決用。
 #    bot がギルドキャッシュから書き、Web 側が読む。migrations/014）
+# 20: tools / tool_loans を追加（工具・機材の貸出。G4-9）
 # 19: stock_items / stock_movements を追加（資材・消耗品の在庫。G4-8）
 # 18: progress_snapshots を追加（進捗の日次履歴。G4-7）
 # 16: layer_sessions.layer_num を INTEGER から TEXT へ変更（/layer start は
 #    「シュリンク」等のテキスト層番号を受け付ける仕様。PostgreSQL では
 #    asyncpg の DataError になっていた。migrations/015）
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
@@ -693,6 +733,8 @@ _PK_COLUMNS: dict[str, str] = {
     "progress_snapshots": "snapshot_id",
     "stock_items": "stock_item_id",
     "stock_movements": "movement_id",
+    "tools": "tool_id",
+    "tool_loans": "loan_id",
 }
 
 _INSERT_TABLE_RE = re.compile(r"INSERT\s+INTO\s+(\w+)", re.IGNORECASE)
@@ -1108,6 +1150,9 @@ class Database:
         if version < 19:
             await self._migrate_v19_stock()
 
+        if version < 20:
+            await self._migrate_v20_tools()
+
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
 
@@ -1322,6 +1367,27 @@ class Database:
         ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
         await self._executescript(ddl_map["discord_name_cache"])
         log.info("discord_name_cache テーブルを作成しました（v15）。")
+
+    async def _migrate_v20_tools(self) -> None:
+        """
+        v20: tools / tool_loans テーブルを追加する（冪等）。
+
+        工具・機材の貸出管理（G4-9）。
+
+        **v19（在庫）に足さない。** `_migrate_versioned()` は
+        `version >= SCHEMA_VERSION` で早期 return するため、v19 済みの DB は
+        二度と v19 の処理を通らない。後から v19 へ CREATE を足すと
+        **新規 DB にだけテーブルがある**状態になり、本番だけ
+        「relation does not exist」で落ちる（gotcha
+        `bot-wont-start-undefined-column` と同型）。
+
+        **既存データには一切触れない。** 追加されるのは空のテーブル2つだけで、
+        工具の初期値も入れない（何を貸出管理するかはサークルごとに違う）。
+        """
+        ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
+        for name in ("tools", "tool_loans"):
+            await self._executescript(ddl_map[name])
+        log.info("tools / tool_loans テーブルを作成しました（v20）。")
 
     async def _migrate_v19_stock(self) -> None:
         """

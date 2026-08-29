@@ -245,6 +245,20 @@ _SEED_SQL: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
         (),
     ),
+    "tools": (
+        (
+            "INSERT INTO tools (guild_id, tool_name, created_by, created_at)"
+            " VALUES (?, 'トルクレンチ', 'u1', '2026-01-01')"
+        ),
+        (),
+    ),
+    "tool_loans": (
+        (
+            "INSERT INTO tool_loans (guild_id, tool_id, user_id, borrowed_at)"
+            " VALUES (?, 1, 'u1', '2026-01-01')"
+        ),
+        (),
+    ),
 }
 
 

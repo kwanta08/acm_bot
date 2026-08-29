@@ -10,6 +10,7 @@ Reminders モジュール（仕様 11.5）。
   - Task 今日やること通知: 毎日08:30
   - Todoist セクション別通知: 毎日08:30
   - 在庫の閾値割れ通知: 毎日08:30（割れている品目が無い日は送らない）
+  - 工具の返却督促: 毎日08:30（返却予定日を過ぎた貸出の本人へ DM。1貸出1回）
   - 確定日程リマインド: 前日20:00 / 当日08:30
   - 遅延マイルストーン通知: 毎週月曜08:30（遅れが無い週は送らない）
   - 週次ダイジェスト: 指定曜日08:30（WEEKLY_DIGEST_ENABLED が ON のギルドのみ・既定 OFF）
@@ -40,11 +41,13 @@ from repositories.schedule_repository import ScheduleRepository
 from repositories.section_repository import SectionRepository
 from repositories.stock_repository import StockRepository
 from repositories.task_repository import TaskRepository
+from repositories.tool_repository import ToolRepository
 from services.layer_tracking_service import classify_stale_sessions
 from services.milestone_service import days_until_competition, evaluate_all
 from services.progress_sync_service import resolve_default_channel_id
 from services.progress_tree import load_tree
 from services.stock_service import low_items
+from services.tool_service import overdue_loans
 from utils.embeds import task_embed
 from utils.logger import get_logger
 from utils.notify import guild_channel, resolve_notice_channel_id
@@ -166,6 +169,7 @@ class Reminders(commands.Cog):
         self.log_repo = RemindersLogRepository(bot.db)
         self.session_repo = LayerSessionRepository(bot.db)
         self.stock_repo = StockRepository(bot.db)
+        self.tool_repo = ToolRepository(bot.db)
 
     async def cog_load(self):
         # 起動時にループを開始
@@ -300,6 +304,59 @@ class Reminders(commands.Cog):
         )
         await self._safe_send(guild_id, channel, embed=embed)
         return len(items)
+
+    # ---------- 毎朝 08:30: 工具の返却督促（G4-9） ----------
+    async def _notify_overdue_tools(self, guild_id: int) -> int:
+        """返却予定日を過ぎた貸出の**本人へ** DM する。
+
+        **1貸出につき1回だけ**（`overdue_notified_flag`）。毎朝送ると
+        読まれなくなるうえ、返せない事情がある人を毎日責めることになる。
+        一覧は `/tool list` に常に出ているので、督促は最初の1回で足りる。
+
+        督促の形は G4-2（積層セッションの押し忘れ）と同じ:
+        閾値を超えたものを選び、送れたときだけフラグを立てる。
+        **DM 拒否も「このセッションではもう試さない」側に倒す**——
+        次の tick でも直らないため（G4-2 の設計判断2と同じ）。
+
+        予定日が未設定の貸出は督促しない（ADR 0021）。
+        """
+        loans = overdue_loans(await self.tool_repo.list_open_loans(guild_id), now().date())
+        if not loans:
+            return 0
+        guild = self.bot.get_guild(guild_id)
+        sent = 0
+        for loan in loans:
+            member = None
+            if guild is not None:
+                try:
+                    member = guild.get_member(int(loan.user_id))
+                except (TypeError, ValueError):
+                    member = None
+            if member is None:
+                # 退部済み・キャッシュ欠落。**フラグは立てない**
+                # （借用者が戻ってきたら督促できるように）
+                log.info(
+                    "工具の督促先が見つかりません (guild=%s, loan=%s)", guild_id, loan.loan_id
+                )
+                continue
+            text = (
+                f"🔧 **{loan.tool_name}** の返却予定日"
+                f"（{loan.due_date.isoformat()}）を {loan.days_over} 日過ぎています。\n"
+                "返却したら `/tool return` で記録してください。"
+            )
+            try:
+                await member.send(text)
+            except discord.Forbidden:
+                # DM 拒否。次の日も直らないので再試行しない
+                log.info("工具の督促 DM を拒否されました (guild=%s)", guild_id)
+            except discord.HTTPException as e:
+                # 一時障害。フラグを立てず翌朝また試す
+                log.warning("工具の督促 DM に失敗 (guild=%s): %s", guild_id, e)
+                continue
+            else:
+                sent += 1
+            await self.tool_repo.set_overdue_notified(guild_id, loan.loan_id, True)
+        return sent
 
     # ---------- 5分ごと: 積層セッションの押し忘れ検知（G4-2） ----------
     async def _process_layer_sessions(self, guild_id: int) -> int:
@@ -446,6 +503,8 @@ class Reminders(commands.Cog):
                 ("セクション別通知", self.push_section_tasks),
                 # 閾値を割っている資材（G4-8）。割れが無い日は何も送らない
                 ("在庫の閾値割れ通知", self._notify_low_stock),
+                # 返却予定日を過ぎた工具（G4-9）。超過が無い日は何も送らない
+                ("工具の返却督促", self._notify_overdue_tools),
             ):
                 try:
                     await job(guild.id)

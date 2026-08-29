@@ -430,6 +430,7 @@ ONにしない限り参加者には何も送りません。
 | 毎朝 08:30 | 今日〜7日以内が期限の未完了タスク |
 | 毎朝 08:30 | 「今日やること」ラベルの付いたタスク |
 | 毎朝 08:30 | 発注閾値を割っている資材（割れが無い日は送りません） |
+| 毎朝 08:30 | 返却予定日を過ぎた工具を借りている人へ DM（1貸出につき1回） |
 | 毎朝 08:30 | Todoist のセクション別タスク（期限7日以内・超過）を班チャンネル（未設定ならタスク通知チャンネル）へ（連携している場合） |
 | 毎朝 08:30 | Todoist 連携プロジェクトの期限タスク（連携している場合） |
 | 毎週月曜 08:30 | **遅れている**マイルストーンのお知らせ（遅れが無い週は送りません） |
@@ -497,7 +498,7 @@ ONにしない限り参加者には何も送りません。
 - 現在の年度を終了し、新しい年度を開始する
 - 選んだ人を **卒業（alumni）** に切り替える
 - **班長フラグを全員リセット**する（新体制で付け直すため）
-- 切り替え時点の主要16テーブルを **年度スナップショット**（ZIP）として添付する
+- 切り替え時点の主要18テーブルを **年度スナップショット**（ZIP）として添付する
 
 **卒業者のデータは削除されません。** 過去の作業記録に残る担当者名を
 引けるようにするためです。卒業した人は `/member support` などの
@@ -536,7 +537,7 @@ ONにしない限り参加者には何も送りません。
 **他のサークルとの関係**: すべてのデータはサーバー単位で完全に分離されています。
 他大学のサークルからあなたのデータが見えることはありません。
 
-**持ち出し**: `/data export` でこのサーバーの主要16テーブルを ZIP（CSV 群）として
+**持ち出し**: `/data export` でこのサーバーの主要18テーブルを ZIP（CSV 群）として
 受け取れます（管理者のみ）。サーバーIDや Todoist トークンは含まれません。
 
 **利用をやめるとき**: 運営者への連絡は不要です。Bot をサーバーから
@@ -571,8 +572,8 @@ ONにしない限り参加者には何も送りません。
 | | `/task link-section` `/task unlink-section` `/task unlink-team-sections` | L3〜 |
 | | `/task sync` | L4 |
 | 桁巻き | `/layer start` `/layer end` `/layer cancel` `/layer status` `/layer stats` `/layer keta-list` | 全員 |
-| 資材・在庫 | `/stock list` `/stock use` | 全員 |
-| | `/stock add` `/stock set-threshold` `/stock remove` | L2〜 |
+| 資材・在庫 | `/stock list` `/stock use` `/tool list` `/tool borrow` `/tool return` | 全員 |
+| | `/stock add` `/stock set-threshold` `/stock remove` `/tool add` `/tool remove` | L2〜 |
 | | `/layer keta-add` `/layer keta-remove` | L2〜 |
 | 機体進捗 | `/progress view` `/progress history` | 全員 |
 | | `/progress add` `/progress edit` `/progress remove` `/progress spar-link` `/progress setup` | L2〜 |
