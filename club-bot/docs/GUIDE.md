@@ -367,7 +367,8 @@ ONにしない限り参加者には何も送りません。
 ```
 /report weekly              今週のサマリー（班長以上）
 /report weekly public:true  同じ内容をチャンネルへ公開投稿（班長以上）
-/report attendance-rate     出欠率の一覧（班長以上）
+/report attendance-rate     投票ごとの出欠率（班長以上）
+/report member-attendance   メンバー別の回答率・連続未回答（班長以上・自分にだけ表示）
 /report export-tasks        タスク一覧を CSV で出力（班長以上）
 /report notifications       直近の通知履歴（幹部以上）
 /report changes             設定・マスタ変更の操作ログ（幹部以上）
@@ -582,7 +583,7 @@ ONにしない限り参加者には何も送りません。
 | | `/member setup` `/member set-leader` `/member set-channel` | L3〜 |
 | 班・技能 | `/team-add` `/team-remove` `/team-list` `/team-role` | L4 |
 | | `/skill-add` `/skill-remove` `/skill-list` | L4 |
-| レポート | `/report weekly` `/report attendance-rate` `/report export-tasks` | L2〜 |
+| レポート | `/report weekly` `/report attendance-rate` `/report member-attendance` `/report export-tasks` | L2〜 |
 | | `/report notifications` `/report changes` | L3〜 |
 | 年度替わり | `/season list` | 全員 |
 | | `/season new` `/season rollover` | L4 |

@@ -310,7 +310,8 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 | `/report weekly [public]` | L2 | 週次サマリー。`public:true` でチャンネルへ公開投稿（既定は自分にだけ表示） |
 | `/report notifications [limit]` | L3 | bot が送った通知の記録（`reminders_log`）を表示 |
 | `/report changes [limit] [actor]` | L3 | 設定・マスタ変更の操作ログ（`audit_log`）を表示。実行者は表示名に解決 |
-| `/report attendance-rate` | L2 | 出欠率一覧 |
+| `/report attendance-rate` | L2 | 投票ごとの出欠率一覧 |
+| `/report member-attendance [months]` | L2 | **メンバー別**の回答率・ok率・連続未回答数（回答率の低い順・ephemeral 固定） |
 
 ### Me（個人サマリー）
 | コマンド | 権限 | 説明 |

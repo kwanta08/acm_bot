@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import csv
 import io
+from datetime import timedelta
 
 import discord
 from discord import app_commands
@@ -19,15 +20,23 @@ from discord.ext import commands
 from config import config
 from repositories.audit_log_repository import AuditLogRepository
 from repositories.layer_session_repository import LayerSessionRepository
+from repositories.member_repository import MemberRepository
 from repositories.name_cache_repository import ENTITY_USER, NameCacheRepository
 from repositories.progress_repository import ProgressRepository
 from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.schedule_repository import ScheduleRepository
 from repositories.task_repository import TaskRepository
 from services import team_service
+from services.attendance_service import (
+    MemberAttendance,
+    ScheduleAnswers,
+    aggregate_member_attendance,
+    format_rate,
+)
 from services.layer_stats_service import aggregate_layer_stats
 from services.milestone_service import days_until_competition, evaluate_all
 from services.progress_tree import load_tree
+from services.schedule_service import select_unanswered_targets
 from services.weekly_digest_service import (
     count_completed_between,
     last_week_range,
@@ -56,6 +65,7 @@ class Reports(commands.Cog):
         self.audit_repo = AuditLogRepository(bot.db)
         self.name_repo = NameCacheRepository(bot.db)
         self.session_repo = LayerSessionRepository(bot.db)
+        self.member_repo = MemberRepository(bot.db)
 
     group = app_commands.Group(name="report", description="集計・エクスポート・監査")
 
@@ -363,6 +373,138 @@ class Reports(commands.Cog):
                 name=str(d["action"])[:250], value="\n".join(parts)[:1024], inline=False
             )
         add_truncation_note(embed, len(rows), MAX_EMBED_FIELDS)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # ---------- member attendance（メンバー軸の出欠） ----------
+    async def collect_member_attendance(
+        self, guild_id: int, guild, months: int, now_dt=None
+    ) -> tuple[list[MemberAttendance], int]:
+        """締切済み投票からメンバー別の出欠実績を作る。
+
+        戻り値は (集計結果, 対象にした投票の件数)。
+
+        **母集団は `/schedule remind` と同じ**（G3-2 / ADR 0025 の更新版）。
+        対象ロールがある予定はロール保持者から名簿の退部者を引いたもの、
+        無い予定は名簿の現役。ロールを解決できない予定は
+        **0名として数えず、集計から丸ごと外す**（誰が対象か分からない
+        予定を「全員未回答」と数えると、実在しない連続未回答が出る）。
+
+        ロールは**現在**の保持者しか分からない。過去の予定について
+        当時の保持者を復元する手段は無いので、そこは近似になる。
+        """
+        current = now_dt or now()
+        # ざっくり30日/月。境界を厳密にしても「最近来ていない人」の判断は変わらない
+        since = current - timedelta(days=30 * months)
+        # 現役の条件は cogs/schedule.py の _roster_ids と同じにする
+        # （active_flag=1 かつ status='active'。ADR 0025）。
+        # list_members は既定で status='active' に絞るので、
+        # 「全員」は include_alumni=True で取り、その差を退部・休止とする
+        active_ids = {str(m["user_id"]) for m in await self.member_repo.list_members(guild_id)}
+        everyone = {
+            str(m["user_id"])
+            for m in await self.member_repo.list_members(
+                guild_id, active_only=False, include_alumni=True
+            )
+        }
+        retired_ids = everyone - active_ids
+
+        entries: list[ScheduleAnswers] = []
+        for row in await self.schedule_repo.list_closed_schedules(guild_id):
+            try:
+                if from_iso(str(row["deadline"])) < since:
+                    continue
+            except (TypeError, ValueError):
+                continue
+
+            role_member_ids = None
+            if row.get("target_role_id"):
+                role = guild.get_role(int(row["target_role_id"])) if guild else None
+                if role is None:
+                    continue  # 誰が対象か分からない。数えない
+                role_member_ids = {str(m.id) for m in role.members if not m.bot}
+                if not role_member_ids:
+                    continue
+
+            targets = select_unanswered_targets(
+                role_member_ids=role_member_ids,
+                roster_active_ids=active_ids,
+                roster_retired_ids=retired_ids,
+                answered_ids=set(),  # 対象そのものが欲しいので回答は差し引かない
+            )
+            if not targets:
+                continue
+
+            votes = await self.schedule_repo.list_schedule_votes(guild_id, row["schedule_id"])
+            answered = {str(v["user_id"]) for v in votes}
+            ok = {str(v["user_id"]) for v in votes if str(v["status"]) == "ok"}
+            entries.append(
+                ScheduleAnswers(
+                    schedule_id=str(row["schedule_id"]),
+                    targets=targets,
+                    answered=answered,
+                    ok=ok,
+                )
+            )
+
+        # list_closed_schedules は deadline の降順（新しい順）。
+        # aggregate_member_attendance は連続未回答を先頭から数えるので
+        # この順序のまま渡す
+        return aggregate_member_attendance(entries), len(entries)
+
+    @group.command(
+        name="member-attendance", description="メンバー別の回答率・参加率を表示します。"
+    )
+    @app_commands.describe(months="対象期間（何ヶ月ぶんの締切済み投票を見るか）")
+    @require(Level.L2)
+    async def member_attendance(
+        self, interaction: discord.Interaction, months: app_commands.Range[int, 1, 24] = 3
+    ):
+        # **ephemeral 固定。** 公開オプションを付けない（晒しにしない）
+        await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        members, schedule_count = await self.collect_member_attendance(
+            guild_id, interaction.guild, months
+        )
+        if not members:
+            await interaction.followup.send(
+                embed=empty_state_embed(
+                    "メンバー別の出欠",
+                    f"直近 {months} ヶ月に、集計できる締切済みの投票がありません。",
+                    "/schedule create",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        names = await self.name_repo.names(guild_id, ENTITY_USER)
+        embed = info_embed(
+            "メンバー別の出欠",
+            f"直近 {months} ヶ月 / 締切済み {schedule_count} 件。回答率の低い順。\n"
+            "回答率 = 回答した回数 ÷ 対象になった回数、"
+            "ok率 = 参加と答えた回数 ÷ 回答した回数。",
+        )
+        for member in members[:MAX_EMBED_FIELDS]:
+            label = self._resolve_actor(interaction.guild, names, member.user_id)
+            streak = (
+                f" / **{member.streak_unanswered}回連続で未回答**"
+                if member.streak_unanswered
+                else ""
+            )
+            embed.add_field(
+                name=label,
+                value=(
+                    f"回答 {format_rate(member.answer_rate)}"
+                    f"（{member.answered}/{member.targeted}）"
+                    f" / ok {format_rate(member.ok_rate)}（{member.ok}/{member.answered}）"
+                    f"{streak}"
+                ),
+                inline=False,
+            )
+        add_truncation_note(
+            embed, len(members), MAX_EMBED_FIELDS, "回答率の低い順に表示しています"
+        )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ---------- attendance rate ----------
