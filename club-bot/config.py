@@ -108,6 +108,12 @@ def _get_team_role_map(name: str) -> dict[str, int]:
 # ギルド別設定 DATA_RETENTION_DAYS で上書きできる。
 DEFAULT_DATA_RETENTION_DAYS = 30
 
+# 積層セッションの押し忘れ検知（G4-2）。ギルド別設定
+# LAYER_SESSION_ALERT_MINUTES / LAYER_SESSION_AUTO_CANCEL_MINUTES で上書きできる。
+# **0 以下でその機能を無効にする**（催促だけ切る、自動取り消しだけ切る、が選べる）。
+DEFAULT_LAYER_SESSION_ALERT_MINUTES = 240
+DEFAULT_LAYER_SESSION_AUTO_CANCEL_MINUTES = 720
+
 # 複数のロールをカンマ区切りで保存する設定キー（GuildConfig 側は list[int]）。
 # 追加するときは GuildConfig の属性も list[int] にすること。
 # /setup（cogs/setup_wizard.py）と /set_role（cogs/settings.py）が
@@ -158,6 +164,10 @@ class GuildConfig:
     # 新入生オンボーディング（on_member_join で班選択を送る）。
     # **既定は OFF。** ON にしたギルドでだけ動く（ADR 0024）
     welcome_enabled: bool = False
+
+    # 積層セッションの押し忘れ検知（G4-2）。分。0 以下でその機能を無効にする
+    layer_session_alert_minutes: int = DEFAULT_LAYER_SESSION_ALERT_MINUTES
+    layer_session_auto_cancel_minutes: int = DEFAULT_LAYER_SESSION_AUTO_CANCEL_MINUTES
 
     # 日程調整のリアクション絵文字（カスタム絵文字 ID。未設定は既定 ✅❓❌）
     schedule_emoji_ok_id: int | None = None
@@ -321,6 +331,8 @@ class Config:
                 ("SCHEDULE_EMOJI_MAYBE_ID", "schedule_emoji_maybe_id"),
                 ("SCHEDULE_EMOJI_NG_ID", "schedule_emoji_ng_id"),
                 ("DATA_RETENTION_DAYS", "data_retention_days"),
+                ("LAYER_SESSION_ALERT_MINUTES", "layer_session_alert_minutes"),
+                ("LAYER_SESSION_AUTO_CANCEL_MINUTES", "layer_session_auto_cancel_minutes"),
             ):
                 val = await repo.get_int(guild_id, key)
                 if val is not None:

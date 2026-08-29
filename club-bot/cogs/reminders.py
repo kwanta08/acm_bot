@@ -5,6 +5,7 @@ Reminders モジュール（仕様 11.5）。
 ジョブ一覧（仕様 11.5.1）:
   - Schedule 締切前催促: 締切1時間前 → 未回答者へ通知
   - Schedule 自動締切: 5分ごと → 締切済み投票を終了
+  - 積層セッションの押し忘れ検知: 5分ごと → 本人へ DM / 長すぎるものは自動取り消し
   - Task 7日以内期限通知: 毎日08:30
   - Task 今日やること通知: 毎日08:30
   - Todoist セクション別通知: 毎日08:30
@@ -28,12 +29,14 @@ from discord.ext import commands, tasks
 
 from config import config
 from repositories.guild_repository import GuildRepository
+from repositories.layer_session_repository import LayerSessionRepository
 from repositories.member_repository import MemberRepository
 from repositories.progress_repository import ProgressRepository
 from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.schedule_repository import ScheduleRepository
 from repositories.section_repository import SectionRepository
 from repositories.task_repository import TaskRepository
+from services.layer_tracking_service import classify_stale_sessions
 from services.milestone_service import days_until_competition, evaluate_all
 from services.progress_sync_service import resolve_default_channel_id
 from services.progress_tree import load_tree
@@ -57,6 +60,18 @@ MILESTONE_ALERT_TYPE = "milestone_alert"
 CONFIRMED_REMINDER_TYPE = "schedule_confirmed"
 #: phase → (通知する日のオフセット, 本文の頭)
 CONFIRMED_PHASES = {"eve": (1, "明日"), "day": (0, "本日")}
+
+# 積層セッションの押し忘れ検知（G4-2）。
+#
+# target_id は `layer_session:<session_id>` にする。session_id は
+# AUTOINCREMENT なので**1セッションにつき1回**という意味になる
+# （ユーザー単位にすると、次に始めたセッションで催促が飛ばない）。
+LAYER_STALE_ALERT_TYPE = "layer_session_alert"
+LAYER_AUTO_CANCEL_TYPE = "layer_session_auto_cancel"
+
+
+def layer_session_key(session_id: int) -> str:
+    return f"layer_session:{session_id}"
 
 
 def phase_for_hour(hour: int) -> str:
@@ -135,6 +150,7 @@ class Reminders(commands.Cog):
         self.member_repo = MemberRepository(bot.db)
         self.section_repo = SectionRepository(bot.db)
         self.log_repo = RemindersLogRepository(bot.db)
+        self.session_repo = LayerSessionRepository(bot.db)
 
     async def cog_load(self):
         # 起動時にループを開始
@@ -164,6 +180,13 @@ class Reminders(commands.Cog):
                 await self._process_schedule_close(guild.id)
             except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
                 log.warning("日程調整の定期処理に失敗 (guild=%s): %s", guild.id, type(e).__name__)
+            # 積層セッションの点検は別の try で握る。日程調整側が落ちた
+            # ギルドで押し忘れの自動取り消しまで止まると、進捗率の水増しが
+            # 残り続ける（G4-2）
+            try:
+                await self._process_layer_sessions(guild.id)
+            except Exception as e:  # noqa: BLE001  (ギルド間・ジョブ間の影響を遮断)
+                log.warning("積層セッションの点検に失敗 (guild=%s): %s", guild.id, type(e).__name__)
 
     @schedule_tick.before_loop
     async def _before_tick(self):
@@ -230,6 +253,119 @@ class Reminders(commands.Cog):
                 await self.bot.log_to_channel(
                     f"[Reminder] 催促失敗 {s['schedule_id']}: {e}", guild_id=guild_id
                 )
+
+    # ---------- 5分ごと: 積層セッションの押し忘れ検知（G4-2） ----------
+    async def _process_layer_sessions(self, guild_id: int) -> int:
+        """`/layer end` の押し忘れを催促し、長すぎるものは自動で取り消す。
+
+        自動取り消しは**記録を残さない**。`end` で閉じると押し忘れの分数が
+        `layer_records` に入り、完了層数が増えて `/progress` の進捗率まで
+        水増しされる（これがこのタスクの発端）。
+
+        戻り値は「催促 + 取り消し」の件数（テストと運用ログ用）。
+        """
+        sessions = await self.session_repo.list_all(guild_id)
+        if not sessions:
+            return 0
+        gconf = await config.for_guild(guild_id, db=self.bot.db)
+        to_alert, to_cancel = classify_stale_sessions(
+            sessions,
+            now(),
+            gconf.layer_session_alert_minutes,
+            gconf.layer_session_auto_cancel_minutes,
+        )
+        if not to_alert and not to_cancel:
+            return 0
+
+        guild = self.bot.get_guild(guild_id)
+        handled = 0
+        for stale in to_cancel:
+            if await self.log_repo.exists(
+                guild_id, LAYER_AUTO_CANCEL_TYPE, layer_session_key(stale.session_id)
+            ):
+                continue
+            # **先に取り消す。** DM が届かなくても水増しは止める
+            await self.session_repo.end(guild_id, stale.user_id)
+            await self._log_reminder(
+                guild_id,
+                LAYER_AUTO_CANCEL_TYPE,
+                layer_session_key(stale.session_id),
+                stale.user_id,
+                None,
+                "sent",
+            )
+            handled += 1
+            await self._dm_layer_notice(
+                guild,
+                guild_id,
+                stale,
+                f"⚠️ `/layer end` が押されないまま {stale.elapsed_min} 分が経過したため、"
+                f"**{stale.keta} {stale.layer_num}層** の積層を自動で取り消しました。\n"
+                "作業記録は残していません。実際に作業していた場合は "
+                "`/layer start` からやり直してください。",
+            )
+
+        for stale in to_alert:
+            key = layer_session_key(stale.session_id)
+            if await self.log_repo.exists(guild_id, LAYER_STALE_ALERT_TYPE, key):
+                continue
+            delivered = await self._dm_layer_notice(
+                guild,
+                guild_id,
+                stale,
+                f"⏳ **{stale.keta} {stale.layer_num}層** の積層を開始してから "
+                f"{stale.elapsed_min} 分が経過しています。\n"
+                "終わっているなら `/layer end`、始めていないなら `/layer cancel` を"
+                "実行してください。",
+            )
+            if delivered is None:
+                # 一時障害。**送信済みにしない**（次の tick で再試行する）
+                continue
+            # 届いた場合と、DM 拒否で今後も届かない場合。どちらも
+            # 「このセッションではもう試さない」ことを1行で表す。
+            # exists() は status を見ないので、ここに書くと再試行が止まる
+            # ——それが狙い（5分ごとに永久に Forbidden を叩かない）
+            await self._log_reminder(
+                guild_id,
+                LAYER_STALE_ALERT_TYPE,
+                key,
+                stale.user_id,
+                None,
+                "sent" if delivered else "failed",
+            )
+            handled += 1
+        return handled
+
+    async def _dm_layer_notice(self, guild, guild_id: int, stale, text: str) -> bool | None:
+        """本人へ DM する。届いたら True、拒否なら False、一時障害なら None。
+
+        - True / False は「このセッションではもう試さない」
+        - None は「次の tick で再試行してよい」
+        呼び出し側はこの3値で `reminders_log` に書くかどうかを決める。
+        """
+        member = None
+        if guild is not None:
+            try:
+                member = guild.get_member(int(stale.user_id))
+            except (TypeError, ValueError):
+                member = None
+        if member is None:
+            log.info(
+                "積層セッションの通知先が見つかりません (guild=%s, user=%s)",
+                guild_id,
+                stale.user_id,
+            )
+            return False
+        try:
+            await member.send(text)
+        except discord.Forbidden:
+            # DM 拒否。次の tick でも直らないので再試行しない
+            log.info("積層セッションの DM を拒否されました (guild=%s, user=%s)", guild_id, stale.user_id)
+            return False
+        except discord.HTTPException as e:
+            log.warning("積層セッションの DM に失敗 (guild=%s): %s", guild_id, e)
+            return None
+        return True
 
     async def _process_schedule_close(self, guild_id: int):
         """締切を過ぎた投票を自動クローズ。"""

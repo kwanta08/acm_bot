@@ -315,6 +315,7 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 |---|---|---|
 | `/layer start <桁名> <層番号>` | L1 | 積層開始を記録 |
 | `/layer end` | L1 | 進行中セッションを終了し DB に記録 |
+| `/layer cancel` | L1 | 進行中セッションを**記録を残さずに**取り消す（打ち間違え・押し忘れ用） |
 | `/layer status` | L1 | 進行中の作業一覧 |
 | `/layer stats [桁名] [期間]` | L1 | 積層記録を桁別・作業者別に集計（層数・時間・1層あたり平均・最終作業日） |
 | `/layer keta-add <桁名>` | L2 | 桁名を登録 |
@@ -323,6 +324,17 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 
 桁名はセレクトメニューから選択（タイプミス防止）。桁の追加・変更は
 `/layer keta-add` / `/layer keta-remove` で行います。
+
+**押し忘れの検知**（5分ごとの定期処理）:
+
+| ギルド別設定 | 既定 | 動き |
+|---|---|---|
+| `LAYER_SESSION_ALERT_MINUTES` | 240 | 経過がこの分数を超えたら本人へ DM で1回だけ催促 |
+| `LAYER_SESSION_AUTO_CANCEL_MINUTES` | 720 | 経過がこの分数を超えたら自動で `/layer cancel` 相当（記録は残らない）し、本人へ DM |
+
+どちらも `/settings_set` で変更でき、**`0` を設定するとその機能だけ無効**になります。
+`/layer end` を押し忘れると 1200 分といった作業時間が記録され、
+完了層数が増えて `/progress` の進捗率まで水増しされるため、既定で有効にしています。
 
 ---
 

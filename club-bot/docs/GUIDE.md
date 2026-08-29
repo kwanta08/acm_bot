@@ -419,6 +419,7 @@ ONにしない限り参加者には何も送りません。
 |---|---|
 | 締切1時間前 | 日程調整の未回答者へ DM（DM が届かない人にはチャンネルでメンション）。対象は `target_role` を指定していればそのロール、していなければ**名簿の現役メンバー** |
 | 5分ごと | 締切を過ぎた日程調整を自動で締め切り、結果を投稿 |
+| 5分ごと | `/layer end` の押し忘れ検知。4時間経過で本人へ DM、12時間経過で自動取り消し（記録は残しません）|
 | 前日 20:00 | `/schedule confirm` で確定した日程の前日通知（「明日 …」） |
 | 当日 08:30 | 同じく当日通知（「本日 2026/10/01 18:00 **合宿**（部室）」） |
 | 毎朝 08:30 | 今日〜7日以内が期限の未完了タスク |
@@ -461,7 +462,8 @@ ONにしない限り参加者には何も送りません。
 | 投票のリアクションが反映されない | Bot に「リアクションを追加」「メッセージ履歴を読む」権限があるか確認してください |
 | 催促の DM が届かない | 受け取る側の DM 設定です。届かない場合はチャンネルでのメンションに自動で切り替わります |
 | `/layer end` で「進行中のセッションがありません」 | 先に `/layer start` を実行してください。誰かの記録を代わりに終わらせることはできません |
-| 桁名を間違えて開始した | 一度 `/layer end` で終了してから、正しい桁名で `/layer start` し直してください |
+| 桁名を間違えて開始した | `/layer cancel` で記録を残さず取り消し、正しい桁名で `/layer start` し直してください |
+| `/layer end` を押し忘れて帰った | 4時間で DM が届きます。12時間で自動的に取り消され、記録は残りません（分数は `/settings_set` で変更可） |
 | `/progress view` に何も出ない | まだ機体が未登録です。`/progress add name:1号機` から始めてください |
 | Todoist が「未登録」 | 管理者が `/todoist-setup` を実行してください |
 | 通知が来ない | `/setup` で通知チャンネルを設定したか、Bot がそのチャンネルに書き込めるか確認してください |
@@ -561,7 +563,7 @@ ONにしない限り参加者には何も送りません。
 | | `/task delete` `/task assign` `/task sections` `/task push` | L2〜 |
 | | `/task link-section` `/task unlink-section` `/task unlink-team-sections` | L3〜 |
 | | `/task sync` | L4 |
-| 桁巻き | `/layer start` `/layer end` `/layer status` `/layer stats` `/layer keta-list` | 全員 |
+| 桁巻き | `/layer start` `/layer end` `/layer cancel` `/layer status` `/layer stats` `/layer keta-list` | 全員 |
 | | `/layer keta-add` `/layer keta-remove` | L2〜 |
 | 機体進捗 | `/progress view` | 全員 |
 | | `/progress add` `/progress edit` `/progress remove` `/progress spar-link` `/progress setup` | L2〜 |

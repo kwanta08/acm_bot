@@ -221,6 +221,37 @@ class LayerTracking(commands.Cog):
         )
         await interaction.followup.send(embed=embed, ephemeral=True)
 
+    # ---------- cancel ----------
+    @group.command(
+        name="cancel", description="進行中の積層を、記録を残さずに取り消します。"
+    )
+    @require(Level.L1)
+    async def cancel(self, interaction: discord.Interaction):
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        svc = self._svc_for(guild_id)
+        cancelled = await svc.cancel(str(interaction.user.id))
+        if cancelled is None:
+            await interaction.response.send_message(
+                embed=empty_state_embed(
+                    "取り消せる積層がありません",
+                    "進行中のセッションがありません。",
+                    "/layer start",
+                ),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.send_message(
+            embed=success_embed(
+                "積層を取り消しました",
+                f"桁名: **{cancelled['keta']}**\n層番号: **{cancelled['layer_num']}**\n"
+                "作業記録は残していません。",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
+
     # ---------- status ----------
     @group.command(name="status", description="現在進行中の作業一覧を表示します。")
     @require(Level.L1)
