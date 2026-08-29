@@ -5,11 +5,15 @@ Reminders モジュール（仕様 11.5）。
 ジョブ一覧（仕様 11.5.1）:
   - Schedule 締切前催促: 締切1時間前 → 未回答者へ通知
   - Schedule 自動締切: 5分ごと → 締切済み投票を終了
+  - 積層セッションの押し忘れ検知: 5分ごと → 本人へ DM / 長すぎるものは自動取り消し
   - Task 7日以内期限通知: 毎日08:30
   - Task 今日やること通知: 毎日08:30
   - Todoist セクション別通知: 毎日08:30
+  - 在庫の閾値割れ通知: 毎日08:30（割れている品目が無い日は送らない）
+  - 工具の返却督促: 毎日08:30（返却予定日を過ぎた貸出の本人へ DM。1貸出1回）
   - 確定日程リマインド: 前日20:00 / 当日08:30
   - 遅延マイルストーン通知: 毎週月曜08:30（遅れが無い週は送らない）
+  - 週次ダイジェスト: 指定曜日08:30（WEEKLY_DIGEST_ENABLED が ON のギルドのみ・既定 OFF）
   - データ削除の実行: 毎日04:00
   - Task 超過通知: 毎日21:00
 通知失敗の扱い（11.5.2）: DM 失敗→チャンネル、API 障害→#bot-log、多重送信防止。
@@ -26,19 +30,27 @@ from itertools import groupby
 import discord
 from discord.ext import commands, tasks
 
+from cogs.inventory import build_low_stock_lines
 from config import config
 from repositories.guild_repository import GuildRepository
+from repositories.layer_session_repository import LayerSessionRepository
 from repositories.member_repository import MemberRepository
 from repositories.progress_repository import ProgressRepository
 from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.schedule_repository import ScheduleRepository
 from repositories.section_repository import SectionRepository
+from repositories.stock_repository import StockRepository
 from repositories.task_repository import TaskRepository
+from repositories.tool_repository import ToolRepository
+from services.layer_tracking_service import classify_stale_sessions
 from services.milestone_service import days_until_competition, evaluate_all
 from services.progress_sync_service import resolve_default_channel_id
 from services.progress_tree import load_tree
+from services.stock_service import low_items
+from services.tool_service import overdue_loans
 from utils.embeds import task_embed
 from utils.logger import get_logger
+from utils.notify import guild_channel, resolve_notice_channel_id
 from utils.parser import TZ, fmt_jp, from_iso, now, to_iso
 
 log = get_logger("reminders")
@@ -57,6 +69,26 @@ MILESTONE_ALERT_TYPE = "milestone_alert"
 CONFIRMED_REMINDER_TYPE = "schedule_confirmed"
 #: phase → (通知する日のオフセット, 本文の頭)
 CONFIRMED_PHASES = {"eve": (1, "明日"), "day": (0, "本日")}
+
+# 積層セッションの押し忘れ検知（G4-2）。
+#
+# target_id は `layer_session:<session_id>` にする。session_id は
+# AUTOINCREMENT なので**1セッションにつき1回**という意味になる
+# （ユーザー単位にすると、次に始めたセッションで催促が飛ばない）。
+LAYER_STALE_ALERT_TYPE = "layer_session_alert"
+LAYER_AUTO_CANCEL_TYPE = "layer_session_auto_cancel"
+
+# 週次ダイジェスト（G4-5）。
+#
+# **ADR 0023 は覆していない。** 0023 が禁じたのは「遅延が無い週にも
+# 『問題ありません』を送る」こと。こちらは実績の報告で、しかも
+# **既定 OFF**（ON にしたギルドだけが受け取る）。マイルストーン警告とは
+# 別のジョブ・別の reminder_type として共存させる。
+WEEKLY_DIGEST_TYPE = "weekly_digest"
+
+
+def layer_session_key(session_id: int) -> str:
+    return f"layer_session:{session_id}"
 
 
 def phase_for_hour(hour: int) -> str:
@@ -135,6 +167,9 @@ class Reminders(commands.Cog):
         self.member_repo = MemberRepository(bot.db)
         self.section_repo = SectionRepository(bot.db)
         self.log_repo = RemindersLogRepository(bot.db)
+        self.session_repo = LayerSessionRepository(bot.db)
+        self.stock_repo = StockRepository(bot.db)
+        self.tool_repo = ToolRepository(bot.db)
 
     async def cog_load(self):
         # 起動時にループを開始
@@ -144,6 +179,7 @@ class Reminders(commands.Cog):
         self.daily_purge.start()
         self.weekly_milestone_alert.start()
         self.confirmed_schedule_reminders.start()
+        self.weekly_digest.start()
 
     async def cog_unload(self):
         self.schedule_tick.cancel()
@@ -152,6 +188,7 @@ class Reminders(commands.Cog):
         self.daily_purge.cancel()
         self.weekly_milestone_alert.cancel()
         self.confirmed_schedule_reminders.cancel()
+        self.weekly_digest.cancel()
 
     # ---------- 5分ごと: 締切前催促 + 自動締切 ----------
     @tasks.loop(minutes=5)
@@ -164,6 +201,13 @@ class Reminders(commands.Cog):
                 await self._process_schedule_close(guild.id)
             except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
                 log.warning("日程調整の定期処理に失敗 (guild=%s): %s", guild.id, type(e).__name__)
+            # 積層セッションの点検は別の try で握る。日程調整側が落ちた
+            # ギルドで押し忘れの自動取り消しまで止まると、進捗率の水増しが
+            # 残り続ける（G4-2）
+            try:
+                await self._process_layer_sessions(guild.id)
+            except Exception as e:  # noqa: BLE001  (ギルド間・ジョブ間の影響を遮断)
+                log.warning("積層セッションの点検に失敗 (guild=%s): %s", guild.id, type(e).__name__)
 
     @schedule_tick.before_loop
     async def _before_tick(self):
@@ -231,6 +275,202 @@ class Reminders(commands.Cog):
                     f"[Reminder] 催促失敗 {s['schedule_id']}: {e}", guild_id=guild_id
                 )
 
+    # ---------- 毎朝 08:30: 在庫の閾値割れ（G4-8） ----------
+    async def _notify_low_stock(self, guild_id: int) -> int:
+        """閾値を割っている資材をまとめて1通で知らせる。
+
+        **割れている品目が無い日は何も送らない**（ADR 0023）。
+        「在庫は足りています」を毎朝送ると、本当に足りない日も読まれなくなる。
+        品目を1件も登録していないギルドでは当然何も起きない。
+
+        即時通知（`/stock use` で割った瞬間）とは別で、こちらは
+        「割れたまま放置されている」ことを毎朝思い出させる役目。
+        """
+        items = low_items(await self.stock_repo.list_items(guild_id))
+        if not items:
+            return 0
+        guild = self.bot.get_guild(guild_id)
+        channel_id = await resolve_notice_channel_id(self.bot.db, guild_id)
+        channel = guild_channel(guild, channel_id)
+        if channel is None:
+            log.info("在庫の閾値割れ通知の送信先が無い (guild=%s)", guild_id)
+            return 0
+        lines = build_low_stock_lines(items[:20])
+        if len(items) > 20:
+            lines.append(f"…ほか {len(items) - 20} 品目")
+        embed = task_embed(
+            "🧾 発注が必要かもしれません",
+            f"閾値を割っている資材が **{len(items)} 件** あります。\n\n" + "\n".join(lines),
+        )
+        await self._safe_send(guild_id, channel, embed=embed)
+        return len(items)
+
+    # ---------- 毎朝 08:30: 工具の返却督促（G4-9） ----------
+    async def _notify_overdue_tools(self, guild_id: int) -> int:
+        """返却予定日を過ぎた貸出の**本人へ** DM する。
+
+        **1貸出につき1回だけ**（`overdue_notified_flag`）。毎朝送ると
+        読まれなくなるうえ、返せない事情がある人を毎日責めることになる。
+        一覧は `/tool list` に常に出ているので、督促は最初の1回で足りる。
+
+        督促の形は G4-2（積層セッションの押し忘れ）と同じ:
+        閾値を超えたものを選び、送れたときだけフラグを立てる。
+        **DM 拒否も「このセッションではもう試さない」側に倒す**——
+        次の tick でも直らないため（G4-2 の設計判断2と同じ）。
+
+        予定日が未設定の貸出は督促しない（ADR 0021）。
+        """
+        loans = overdue_loans(await self.tool_repo.list_open_loans(guild_id), now().date())
+        if not loans:
+            return 0
+        guild = self.bot.get_guild(guild_id)
+        sent = 0
+        for loan in loans:
+            member = None
+            if guild is not None:
+                try:
+                    member = guild.get_member(int(loan.user_id))
+                except (TypeError, ValueError):
+                    member = None
+            if member is None:
+                # 退部済み・キャッシュ欠落。**フラグは立てない**
+                # （借用者が戻ってきたら督促できるように）
+                log.info(
+                    "工具の督促先が見つかりません (guild=%s, loan=%s)", guild_id, loan.loan_id
+                )
+                continue
+            text = (
+                f"🔧 **{loan.tool_name}** の返却予定日"
+                f"（{loan.due_date.isoformat()}）を {loan.days_over} 日過ぎています。\n"
+                "返却したら `/tool return` で記録してください。"
+            )
+            try:
+                await member.send(text)
+            except discord.Forbidden:
+                # DM 拒否。次の日も直らないので再試行しない
+                log.info("工具の督促 DM を拒否されました (guild=%s)", guild_id)
+            except discord.HTTPException as e:
+                # 一時障害。フラグを立てず翌朝また試す
+                log.warning("工具の督促 DM に失敗 (guild=%s): %s", guild_id, e)
+                continue
+            else:
+                sent += 1
+            await self.tool_repo.set_overdue_notified(guild_id, loan.loan_id, True)
+        return sent
+
+    # ---------- 5分ごと: 積層セッションの押し忘れ検知（G4-2） ----------
+    async def _process_layer_sessions(self, guild_id: int) -> int:
+        """`/layer end` の押し忘れを催促し、長すぎるものは自動で取り消す。
+
+        自動取り消しは**記録を残さない**。`end` で閉じると押し忘れの分数が
+        `layer_records` に入り、完了層数が増えて `/progress` の進捗率まで
+        水増しされる（これがこのタスクの発端）。
+
+        戻り値は「催促 + 取り消し」の件数（テストと運用ログ用）。
+        """
+        sessions = await self.session_repo.list_all(guild_id)
+        if not sessions:
+            return 0
+        gconf = await config.for_guild(guild_id, db=self.bot.db)
+        to_alert, to_cancel = classify_stale_sessions(
+            sessions,
+            now(),
+            gconf.layer_session_alert_minutes,
+            gconf.layer_session_auto_cancel_minutes,
+        )
+        if not to_alert and not to_cancel:
+            return 0
+
+        guild = self.bot.get_guild(guild_id)
+        handled = 0
+        for stale in to_cancel:
+            if await self.log_repo.exists(
+                guild_id, LAYER_AUTO_CANCEL_TYPE, layer_session_key(stale.session_id)
+            ):
+                continue
+            # **先に取り消す。** DM が届かなくても水増しは止める
+            await self.session_repo.end(guild_id, stale.user_id)
+            await self._log_reminder(
+                guild_id,
+                LAYER_AUTO_CANCEL_TYPE,
+                layer_session_key(stale.session_id),
+                stale.user_id,
+                None,
+                "sent",
+            )
+            handled += 1
+            await self._dm_layer_notice(
+                guild,
+                guild_id,
+                stale,
+                f"⚠️ `/layer end` が押されないまま {stale.elapsed_min} 分が経過したため、"
+                f"**{stale.keta} {stale.layer_num}層** の積層を自動で取り消しました。\n"
+                "作業記録は残していません。実際に作業していた場合は "
+                "`/layer start` からやり直してください。",
+            )
+
+        for stale in to_alert:
+            key = layer_session_key(stale.session_id)
+            if await self.log_repo.exists(guild_id, LAYER_STALE_ALERT_TYPE, key):
+                continue
+            delivered = await self._dm_layer_notice(
+                guild,
+                guild_id,
+                stale,
+                f"⏳ **{stale.keta} {stale.layer_num}層** の積層を開始してから "
+                f"{stale.elapsed_min} 分が経過しています。\n"
+                "終わっているなら `/layer end`、始めていないなら `/layer cancel` を"
+                "実行してください。",
+            )
+            if delivered is None:
+                # 一時障害。**送信済みにしない**（次の tick で再試行する）
+                continue
+            # 届いた場合と、DM 拒否で今後も届かない場合。どちらも
+            # 「このセッションではもう試さない」ことを1行で表す。
+            # exists() は status を見ないので、ここに書くと再試行が止まる
+            # ——それが狙い（5分ごとに永久に Forbidden を叩かない）
+            await self._log_reminder(
+                guild_id,
+                LAYER_STALE_ALERT_TYPE,
+                key,
+                stale.user_id,
+                None,
+                "sent" if delivered else "failed",
+            )
+            handled += 1
+        return handled
+
+    async def _dm_layer_notice(self, guild, guild_id: int, stale, text: str) -> bool | None:
+        """本人へ DM する。届いたら True、拒否なら False、一時障害なら None。
+
+        - True / False は「このセッションではもう試さない」
+        - None は「次の tick で再試行してよい」
+        呼び出し側はこの3値で `reminders_log` に書くかどうかを決める。
+        """
+        member = None
+        if guild is not None:
+            try:
+                member = guild.get_member(int(stale.user_id))
+            except (TypeError, ValueError):
+                member = None
+        if member is None:
+            log.info(
+                "積層セッションの通知先が見つかりません (guild=%s, user=%s)",
+                guild_id,
+                stale.user_id,
+            )
+            return False
+        try:
+            await member.send(text)
+        except discord.Forbidden:
+            # DM 拒否。次の tick でも直らないので再試行しない
+            log.info("積層セッションの DM を拒否されました (guild=%s, user=%s)", guild_id, stale.user_id)
+            return False
+        except discord.HTTPException as e:
+            log.warning("積層セッションの DM に失敗 (guild=%s): %s", guild_id, e)
+            return None
+        return True
+
     async def _process_schedule_close(self, guild_id: int):
         """締切を過ぎた投票を自動クローズ。"""
         try:
@@ -261,6 +501,10 @@ class Reminders(commands.Cog):
                 ("今日やること通知", self._notify_today_label),
                 # Todoist セクション別の期限7日以内/超過タスクを各班チャンネルへ
                 ("セクション別通知", self.push_section_tasks),
+                # 閾値を割っている資材（G4-8）。割れが無い日は何も送らない
+                ("在庫の閾値割れ通知", self._notify_low_stock),
+                # 返却予定日を過ぎた工具（G4-9）。超過が無い日は何も送らない
+                ("工具の返却督促", self._notify_overdue_tools),
             ):
                 try:
                     await job(guild.id)
@@ -310,6 +554,87 @@ class Reminders(commands.Cog):
     @weekly_milestone_alert.before_loop
     async def _before_milestone_alert(self):
         await self.bot.wait_until_ready()
+
+    # ---------- 指定曜日 08:30: 週次ダイジェスト（既定 OFF） ----------
+    @tasks.loop(time=time(hour=8, minute=30, tzinfo=TZ))
+    async def weekly_digest(self):
+        await self.run_weekly_digest()
+
+    @weekly_digest.before_loop
+    async def _before_weekly_digest(self):
+        await self.bot.wait_until_ready()
+
+    async def run_weekly_digest(self, now_dt=None) -> dict[int, int]:
+        """ON にしているギルドへ、週次サマリーを公開チャンネルへ投稿する。
+
+        **既定 OFF。** 何も設定していないギルドの通知量は変わらない（ADR 0024）。
+        曜日はギルド別（`WEEKLY_DIGEST_WEEKDAY`、既定は月曜）。
+        1ギルドの失敗が他ギルドを止めないよう個別に握る。
+        """
+        current = now_dt or now()
+        sent: dict[int, int] = {}
+        for guild in list(self.bot.guilds):
+            try:
+                ok = await self._send_weekly_digest(guild.id, current)
+            except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
+                log.warning("週次ダイジェストに失敗 (guild=%s): %s", guild.id, type(e).__name__)
+                continue
+            if ok:
+                sent[guild.id] = 1
+        return sent
+
+    async def _send_weekly_digest(self, guild_id: int, current) -> bool:
+        gconf = await config.for_guild(guild_id, db=self.bot.db)
+        if not gconf.weekly_digest_enabled:
+            return False
+        if current.weekday() != gconf.weekly_digest_weekday:
+            return False
+
+        target_id = f"digest:{self.week_key(current)}"
+        if await self.log_repo.exists(guild_id, WEEKLY_DIGEST_TYPE, target_id):
+            return False
+
+        reports = self.bot.get_cog("Reports")
+        if reports is None:
+            return False
+        # **/report weekly と同じ Embed を使う。** 別々に組むと同じ「今週」の
+        # 数字が画面ごとに食い違う
+        embed = await reports.build_weekly_embed(guild_id, now_dt=current)
+        if embed is None:
+            # まだ何も始まっていないギルド。0/0/0 のダイジェストは送らない
+            log.info("週次ダイジェスト: 集計対象が無い (guild=%s)", guild_id)
+            return False
+
+        guild = self.bot.get_guild(guild_id)
+        channel = self._guild_channel(guild, gconf.default_announce_channel_id)
+        if channel is None:
+            channel_id = await resolve_default_channel_id(self.bot.db, guild_id)
+            channel = self._guild_channel(guild, channel_id)
+        if channel is None:
+            # 部員へは送れないが、ON にしているのに届いていないことは
+            # 運用者に見える形で残す
+            log.info("週次ダイジェストの送信先が無い (guild=%s)", guild_id)
+            await self.bot.log_to_channel(
+                "[週次ダイジェスト] 投稿先チャンネルが見つかりませんでした。"
+                "`/setup` でお知らせチャンネルを設定してください。",
+                guild_id=guild_id,
+            )
+            return False
+
+        try:
+            await channel.send(embed=embed)
+        except (discord.Forbidden, discord.HTTPException) as e:
+            # **reminders_log には書かない。** 書くとその週は二度と送られない
+            log.warning("週次ダイジェストの送信に失敗 (guild=%s): %s", guild_id, e)
+            await self.bot.log_to_channel(
+                f"[週次ダイジェスト] 送信に失敗しました: {e}", guild_id=guild_id
+            )
+            return False
+
+        await self._log_reminder(
+            guild_id, WEEKLY_DIGEST_TYPE, target_id, None, str(channel.id), "sent"
+        )
+        return True
 
     @staticmethod
     def week_key(current) -> str:

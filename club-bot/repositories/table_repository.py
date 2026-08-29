@@ -90,6 +90,16 @@ class TableSpec:
     # guild_id 以外に必ず付ける絞り込み（例: 論理削除の除外）
     extra_where: str = ""
     tags: tuple[str, ...] = field(default_factory=tuple)
+    # ダッシュボードでこの表を**閲覧**するのに必要な権限レベル（G4-3）。
+    #
+    # 既定の 1 は「サーバー参加者なら誰でも」。運用の証跡（audit_log）や
+    # ロール ID を含む設定（settings）はここを上げる。
+    # `GET /settings` がロール ID の実値を L4 にだけ返している（G1-6）のに、
+    # 同じ値が表グリッド経由で L1 に見えるのでは意味がないため、
+    # **表ごとに必要レベルを定義側が持つ**（ADR 0016 と同じ考え方。
+    # ルータ側の if で守ると、表を足すときに書き忘れる）。
+    # `/data export` は元から L4 なので、この値の影響を受けない。
+    min_level: int = 1
 
     @property
     def column_names(self) -> tuple[str, ...]:
@@ -271,6 +281,232 @@ TABLES: dict[str, TableSpec] = {
             _c("actual_weight_g", "実測重量(g)", "number", editable=True, number_type="real"),
             _c("source", "ソース"),
             _c("todoist_task_id", "TodoistタスクID"),
+            _c("updated_at", "更新日時", "datetime"),
+        ),
+    ),
+    # ------------------------------------------------------------------
+    # 読み取り専用の表（G4-3）。
+    #
+    # ここまでの7表は「Discord から入れたデータを表で直す」ためのもので、
+    # 以下は**溜まっているのに持ち出せなかった**もの。編集可能な列は
+    # 1つも置かない（正本の入口は Discord コマンド側にある）。
+    # ------------------------------------------------------------------
+    "audit_log": TableSpec(
+        key="audit_log",
+        label="操作ログ",
+        table="audit_log",
+        pk="audit_id",
+        pk_type="int",
+        description="/setup・班マスタ変更・年度替わり・ダッシュボード編集の証跡",
+        order_by="audit_id DESC",
+        # 誰がいつ何を変えたかの記録。/report changes と同じ L3 に揃える
+        min_level=3,
+        columns=(
+            _c("audit_id", "ID", "number", number_type="int"),
+            _c("actor_id", "実行者", "user"),
+            _c("action", "操作"),
+            _c("target", "対象"),
+            _c("detail", "詳細"),
+            _c("created_at", "日時", "datetime"),
+        ),
+    ),
+    "seasons": TableSpec(
+        key="seasons",
+        label="年度",
+        table="seasons",
+        pk="season_id",
+        pk_type="int",
+        description="/season new・/season rollover で区切った年度",
+        order_by="started_at DESC",
+        columns=(
+            _c("season_id", "ID", "number", number_type="int"),
+            _c("name", "年度名"),
+            _c("started_at", "開始", "datetime"),
+            _c("ended_at", "終了", "datetime"),
+            _c("created_at", "作成日時", "datetime"),
+        ),
+    ),
+    "progress_milestones": TableSpec(
+        key="progress_milestones",
+        label="節目（マイルストーン）",
+        table="progress_milestones",
+        pk="milestone_id",
+        pk_type="int",
+        description="大会から逆算した節目の期限",
+        order_by="due_date, name",
+        columns=(
+            _c("milestone_id", "ID", "number", number_type="int"),
+            _c("node_id", "ノードID"),
+            _c("name", "節目名"),
+            _c("due_date", "期限"),
+            _c("created_at", "作成日時", "datetime"),
+            _c("updated_at", "更新日時", "datetime"),
+        ),
+    ),
+    "layer_keta": TableSpec(
+        key="layer_keta",
+        label="桁マスタ",
+        table="layer_keta",
+        pk="keta_id",
+        pk_type="int",
+        description="/layer keta-add で登録した桁名",
+        order_by="active_flag DESC, keta_name",
+        columns=(
+            _c("keta_id", "ID", "number", number_type="int"),
+            _c("keta_name", "桁名"),
+            _c("active_flag", "有効", "bool"),
+            _c("created_by", "登録者", "user"),
+            _c("created_at", "登録日時", "datetime"),
+        ),
+    ),
+    "skill_tags": TableSpec(
+        key="skill_tags",
+        label="技能タグ",
+        table="skill_tags",
+        pk="skill_tag_id",
+        pk_type="int",
+        description="/skill-add で登録した技能タグ",
+        order_by="active_flag DESC, skill_name",
+        columns=(
+            _c("skill_tag_id", "ID", "number", number_type="int"),
+            _c("skill_name", "技能名"),
+            _c("active_flag", "有効", "bool"),
+            _c("created_by", "登録者", "user"),
+            _c("created_at", "登録日時", "datetime"),
+        ),
+    ),
+    "progress_snapshots": TableSpec(
+        key="progress_snapshots",
+        label="進捗の履歴",
+        table="progress_snapshots",
+        pk="snapshot_id",
+        pk_type="int",
+        description="1日1件の進捗スナップショット（/progress history が読む）",
+        order_by="snapshot_date DESC, node_id",
+        columns=(
+            _c("snapshot_id", "ID", "number", number_type="int"),
+            _c("node_id", "ノードID"),
+            _c("snapshot_date", "日付"),
+            # 未集計・未計測は NULL のまま出す（0.0 に丸めない。ADR 0021）
+            _c("aggregated", "集計進捗率", "progress"),
+            _c("actual_weight_g", "実測重量(g)", "number", number_type="real"),
+        ),
+    ),
+    "stock_items": TableSpec(
+        key="stock_items",
+        label="在庫（品目）",
+        table="stock_items",
+        pk="stock_item_id",
+        pk_type="int",
+        description="/stock で管理する資材・消耗品",
+        order_by="active_flag DESC, item_name",
+        columns=(
+            _c("stock_item_id", "ID", "number", number_type="int"),
+            _c("item_name", "品目名"),
+            _c("unit", "単位"),
+            _c("quantity", "数量", "number", number_type="real"),
+            # 閾値未設定は NULL のまま出す（0 に丸めない。ADR 0021）
+            _c("threshold", "発注閾値", "number", number_type="real"),
+            _c("note", "メモ"),
+            _c("active_flag", "有効", "bool"),
+            _c("created_by", "登録者", "user"),
+            _c("created_at", "登録日時", "datetime"),
+            _c("updated_at", "更新日時", "datetime"),
+        ),
+    ),
+    "stock_movements": TableSpec(
+        key="stock_movements",
+        label="在庫の増減",
+        table="stock_movements",
+        pk="movement_id",
+        pk_type="int",
+        description="/stock add・/stock use の履歴",
+        order_by="movement_id DESC",
+        columns=(
+            _c("movement_id", "ID", "number", number_type="int"),
+            _c("stock_item_id", "品目ID", "number", number_type="int"),
+            _c("delta", "増減", "number", number_type="real"),
+            _c("reason", "用途"),
+            _c("user_id", "記録者", "user"),
+            _c("created_at", "日時", "datetime"),
+        ),
+    ),
+    "tools": TableSpec(
+        key="tools",
+        label="工具",
+        table="tools",
+        pk="tool_id",
+        pk_type="int",
+        description="/tool で貸出管理する工具・機材",
+        order_by="active_flag DESC, tool_name",
+        columns=(
+            _c("tool_id", "ID", "number", number_type="int"),
+            _c("tool_name", "工具名"),
+            _c("note", "メモ"),
+            _c("active_flag", "有効", "bool"),
+            _c("created_by", "登録者", "user"),
+            _c("created_at", "登録日時", "datetime"),
+        ),
+    ),
+    "tool_loans": TableSpec(
+        key="tool_loans",
+        label="工具の貸出",
+        table="tool_loans",
+        pk="loan_id",
+        pk_type="int",
+        description="/tool borrow・/tool return の履歴（returned_at が空なら貸出中）",
+        order_by="loan_id DESC",
+        columns=(
+            _c("loan_id", "ID", "number", number_type="int"),
+            _c("tool_id", "工具ID", "number", number_type="int"),
+            _c("user_id", "借用者", "user"),
+            _c("borrowed_at", "貸出日時", "datetime"),
+            _c("due_date", "返却予定日"),
+            _c("returned_at", "返却日時", "datetime"),
+            _c("note", "用途"),
+        ),
+    ),
+    "incidents": TableSpec(
+        key="incidents",
+        label="ヒヤリハット報告",
+        table="incidents",
+        pk="incident_id",
+        pk_type="int",
+        description="/incident report で集めた安全報告",
+        order_by="incident_id DESC",
+        # 安全報告は L3（/incident list と同じ）。全員に見せる前提の表ではない
+        min_level=3,
+        columns=(
+            _c("incident_id", "ID", "number", number_type="int"),
+            _c("occurred_at", "発生日時"),
+            _c("place", "場所"),
+            _c("description", "内容"),
+            _c("injury", "けが"),
+            _c("prevention", "再発防止案"),
+            _c("anonymous_flag", "匿名", "bool"),
+            # **reporter_id は列に含めない。** 匿名の約束を、表示側の if では
+            # なく列ホワイトリスト（ADR 0016）で守る。匿名報告では
+            # reporter_name が NULL なので、この表からは誰か分からない
+            _c("reporter_name", "報告者"),
+            _c("created_at", "登録日時", "datetime"),
+        ),
+    ),
+    "settings": TableSpec(
+        key="settings",
+        label="サーバー設定",
+        table="settings",
+        # (guild_id, setting_key) が主キー。guild_id は scope 側が付けるので
+        # 表としての行 ID は setting_key
+        pk="setting_key",
+        pk_type="text",
+        description="/setup・/settings_set で保存したこのサーバーの設定",
+        order_by="setting_key",
+        # 値にロール ID・チャンネル ID が入る。GET /settings が
+        # ロール ID の実値を L4 にだけ返している（G1-6）ので、同じ扱いにする
+        min_level=4,
+        columns=(
+            _c("setting_key", "設定キー"),
+            _c("setting_value", "値"),
             _c("updated_at", "更新日時", "datetime"),
         ),
     ),

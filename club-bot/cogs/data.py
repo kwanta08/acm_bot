@@ -48,7 +48,7 @@ EXPORT_README = """\
 
 
 async def build_export_zip(db, guild_id: int) -> tuple[bytes, dict[str, int]]:
-    """このサーバーの主要7テーブル（TABLES のホワイトリスト）を CSV にまとめた ZIP を作る。
+    """このサーバーの主要19テーブル（TABLES のホワイトリスト）を CSV にまとめた ZIP を作る。
 
     戻り値は (ZIP のバイト列, テーブルごとの行数)。
     """

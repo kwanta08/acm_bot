@@ -36,15 +36,16 @@
 
 ## スキーマバージョンの割り当て（衝突防止）
 
-現行は `SCHEMA_VERSION = 17`（`migrations/016_schedule_confirmed.sql` まで）。
+現行は `SCHEMA_VERSION = 21`（`migrations/020_incidents.sql` まで）。
 
 | 版 | migration | タスク |
 |---|---|---|
 | v16 | `015_layer_session_layer_num_text.sql` | 適用済み（`/layer start` の PG DataError 修正） |
 | v17 | `016_schedule_confirmed.sql` | **G3-3（`deleted_flag`）＋ G3-4（`confirmed_option_id`）。1版に2列をまとめてある**（適用済み） |
-| v18 | `017_progress_snapshots.sql` | G4-7（進捗履歴） |
-| v19 | `018_stock.sql` | G4-8（在庫・工具） |
-| v20 | `019_incidents.sql` | G4-10（ヒヤリハット） |
+| v18 | `017_progress_snapshots.sql` | G4-7（進捗履歴。適用済み） |
+| v19 | `018_stock.sql` | G4-8（在庫。適用済み）。**G4-9 の工具は同じ版に追加しないこと**（下記の注記） |
+| v20 | `019_tools.sql` | G4-9（工具の貸出）。**v19 には足さない**（`_migrate_versioned()` の早期 return で既存 DB に届かないため） |
+| v21 | `020_incidents.sql` | G4-10（ヒヤリハット）。v20 が埋まったので1つずらした |
 
 ---
 
@@ -462,7 +463,7 @@
 
 ## Phase G4: 溜まっているデータを見せる / ドメイン拡張
 
-- [ ] **G4-1** `/layer stats` — 積層記録の集計。
+- [x] **G4-1** `/layer stats` — 積層記録の集計。
       `layer_records`（`utils/db.py:256`）に「誰が・どの桁の・何層目を・何分」が全部あるのに、
       **人間が読める形で出すコマンドがゼロ**。`/progress` に出るのは率だけで時間情報が捨てられている。
       - **受入**: `/layer stats [keta] [period:今週|今月|全期間]`（L1）が、桁別
@@ -471,7 +472,7 @@
       - **検証**: `tests/test_layer_stats.py`（新規）。集計は `services/` の純関数に切り出して単体テストする
       - **注意**: 新規テーブル不要。桁引数は既存の `_keta_autocomplete` を再利用
 
-- [ ] **G4-2** `/layer cancel` と押し忘れ検知。
+- [x] **G4-2** `/layer cancel` と押し忘れ検知。
       `/layer start` したまま帰宅すると `/layer end` が「1200分」を記録し、
       完了層数が増えるので**進捗率まで水増しされる**。打ち間違えて start した場合の
       取り消し手段も無い（`end` するしかなくゴミ行が残る）。
@@ -482,7 +483,7 @@
       - **注意**: 通知は `cogs/reminders.py:128` の5分ループに相乗りし、
         送信済み管理は `reminders_log` を使う。**1ギルドの失敗が他ギルドを止めないこと**
 
-- [ ] **G4-3** `/report changes` — 監査ログの閲覧と export への追加。
+- [x] **G4-3** `/report changes` — 監査ログの閲覧と export への追加。
       `AuditLogRepository.list_recent`（`repositories/audit_log_repository.py:38`）を呼ぶコードが
       bot 側に1箇所も無い。`/report audit`（`cogs/reports.py:38,178`）が読んでいるのは
       `reminders_log` で別物。`audit_log` には `/setup`・班マスタ変更・年度替わり・
@@ -498,7 +499,7 @@
         `todoist_configs` にあり `TABLES` に無いが、念のため）。
         `docs/PRIVACY.md` の記載と export 内容を一致させる
 
-- [ ] **G4-4** `/me` — 個人サマリー。
+- [x] **G4-4** `/me` — 個人サマリー。
       部員視点の入口が無い。自分のタスク・未回答の投票・積層実績・担当ノードがそれぞれ別コマンドで、
       `/task list` は全体を返す。**新入生が「今日自分は何をすればいいか」を1コマンドで確認できない**。
       - **受入**: `/me`（L1・ephemeral）が 未完了タスク（期限順・上位5）／未回答の投票／
@@ -506,7 +507,7 @@
         `user` 引数は L2 以上のみ指定可
       - **検証**: `tests/test_me.py`（新規）。**新規テーブル不要**（既存クエリの合成のみ）
 
-- [ ] **G4-5** `/report weekly` の公開版と自動投稿。
+- [x] **G4-5** `/report weekly` の公開版と自動投稿。
       現状 `/report weekly` は L2 以上・ephemeral 固定で、部員には
       「今週サークル全体で何が進んだか」が見えない。
       - **受入**: `/report weekly` に `public: bool = False` を追加。
@@ -521,7 +522,7 @@
         ダイジェスト側に「遅延はありません」の定型文を入れない。
         既定 OFF なので、既存ギルドの通知量は変わらない
 
-- [ ] **G4-6** `/report member-attendance` — メンバー軸の出欠。
+- [x] **G4-6** `/report member-attendance` — メンバー軸の出欠。
       `/report attendance-rate`（`cogs/reports.py:193`）は投票ごとの ok 率で、
       **「最近来ていない人」が特定できない**。「3回連続で未回答」は退部のほぼ確実な予兆。
       - **受入**: `/report member-attendance [months:3]`（L2 以上・**ephemeral 固定**）が、
@@ -529,7 +530,7 @@
       - **検証**: `tests/test_member_attendance.py`（新規）
       - **注意**: 晒しにならないよう公開オプションを付けない。母集団は G3-2 と揃える
 
-- [ ] **G4-7** `progress_snapshots` — 進捗の履歴とバーンダウン。
+- [x] **G4-7** `progress_snapshots` — 進捗の履歴とバーンダウン。
       `services/milestone_service.py:9-14` が自ら書いているとおり、履歴が無いため
       ペースが「作成日→最終更新日の平均」でしか出せず判定不能が多発する。
       「先週から何%進んだか」も分からない。
@@ -545,7 +546,7 @@
         **履歴が無い期間について予測を出さない**という 0022 の核は維持する
       - **申し送り**: 溜まったら G4-5 のダイジェストが「主桁 62%→68%」を言えるようになる
 
-- [ ] **G4-8** `/stock` — 資材・消耗品の在庫と発注アラート。
+- [x] **G4-8** `/stock` — 資材・消耗品の在庫と発注アラート。
       人力飛行機で最も痛いのは「プリプレグが無くて桁が巻けない」。
       カーボンプリプレグは納期が数週間で、切れてから気づくと工程が1ヶ月ずれる。
       発注判断は「残量が閾値を割った」という bot が自動で見張れる条件。
@@ -556,23 +557,23 @@
       - **注意**: マスタ管理は `layer_ketas`（有効フラグ・オートコンプリート付き）と同型にする。
         **品目名の初期値をコードに持たない**（サークルごとに違う）
 
-- [ ] **G4-9** `/tool` — 工具・機材の貸出管理。
+- [x] **G4-9** `/tool` — 工具・機材の貸出管理。
       `/layer start` → `/layer end` とまったく同じ「開始→進行中→終了」モデル。
       - **受入**: `/tool list|borrow|return|add|remove`。返却予定日超過で本人へ DM
       - **注意**: G4-8 と**同じ Cog**（`cogs/inventory.py`）にまとめる。
         督促ロジックは G4-2 の押し忘れ検知を共用する
 
-- [ ] **G4-10** `/incident` — ヒヤリハット・事故報告。
+- [x] **G4-10** `/incident` — ヒヤリハット・事故報告。
       工房での切削・溶剤・高所作業・機体運搬・テストフライトと危険度が高く、
       大学から安全管理体制の提示を求められることもある。今は雑談に流れて消える。
-      - **受入**: スキーマ v20（`019_incidents.sql`）。`/incident report`（L1）が Modal
+      - **受入**: スキーマ **v21**（`020_incidents.sql`。**当初 v20 / `019_incidents.sql` と書いていたが、G4-9 の工具が v20 を使ったので1つずらした**）。`/incident report`（L1）が Modal
         （発生日時 / 場所 / 何が起きたか / けがの有無 / 再発防止案）を開き、幹部ロールへ通知する。
         `/incident list`（L3）。**匿名フラグ**を持ち、報告者IDは DB に保持するが表示しない
       - **検証**: `tests/test_incident.py`（新規）。匿名時に報告者名が Embed に出ないことを検査
       - **注意**: `docs/PRIVACY.md` に収集項目を追記する。
         Modal は `cogs/todoist_admin.py:39` の実装を流用
 
-- [ ] **G4-11** `log_to_channel` の送信先を同一ギルドに限定する。
+- [x] **G4-11** `log_to_channel` の送信先を同一ギルドに限定する。
       `bot.py` の `log_to_channel` は `BOT_LOG_CHANNEL_ID` を `self.get_channel`
       （bot 全体のチャンネルキャッシュ）で解決し、`guild_id` 未指定時は
       `config.bot_log_channel_id`（env 由来。**全ギルドの GuildConfig に配られる**）へも
@@ -588,7 +589,7 @@
       - **注意**: レガシー単一ギルド運用（`GUILD_ID` 指定）の後方互換を壊さない。
         起源は G3-5 のプラン審査（acm-plan-reviewer）で指摘された既存の穴
 
-- [ ] **G4-12** 投票メッセージの「未回答者数」を催促の母集団へ揃える。
+- [x] **G4-12** 投票メッセージの「未回答者数」を催促の母集団へ揃える。
       G3-2 で催促（`notify_unanswered`）の母集団は「ロール保持者 − 台帳の退部者」または
       「台帳の現役」になったが、`services/schedule_service.py` の `build_option_embed` が出す
       **「未回答者数」はロール基準のまま**で、しかも候補単位で数えている。
@@ -603,7 +604,7 @@
       - **出どころ**: G3-2 のゲート1・ゲート2（`build_option_embed` を同じ差分に混ぜると
         ADR 0014 に反するため分離した）
 
-- [ ] **G4-13** オートコンプリートの登録検査が空振りしている。
+- [x] **G4-13** オートコンプリートの登録検査が空振りしている。
       `tests/test_autocomplete.py:233` と `:309` の
       `assert param is not None and param.autocomplete is not None` は、
       discord.py の公開 API の `autocomplete` が **`bool` を返すプロパティ**なので
@@ -619,7 +620,7 @@
         `AttributeError` / `KeyError` で大きな音を立てて落ちるので、テスト専用の依存として許容する
       - **出どころ**: G3-3 のゲート2（差分監査）
 
-- [ ] **G4-14** `/schedule remind` に締切済みのガードが無い。
+- [x] **G4-14** `/schedule remind` に締切済みのガードが無い。
       `cogs/schedule.py` の `remind` は `closed_flag` を見ないため、L2 が ID を直打ちすれば
       **締切済み・復元済みの予定でも未回答者へ DM が飛ぶ**（オートコンプリートは開催中のみなので
       踏みにくい）。`edit-deadline` は既に `closed_flag` を見て断っている。
@@ -2380,3 +2381,1129 @@ G4-3 で `audit_log` 等が加わったときにテスト失敗として現れ�
   現時点で齟齬が無いことは目視で確認済み（差分監査も全件突き合わせ済み）
 - `cogs/data.py` の `EXPORT_README`（ZIP に同梱され利用者が読む文面）は範囲を限定していない。
   ファイル一覧は併記されているので実害は小さいが、将来 PRIVACY と揃えるなら候補
+
+---
+
+### 2026-08-29 — G4-1: `/layer stats` 積層記録の集計（ブランチ `feat/g4-1`）
+
+`layer_records` には「誰が・どの桁の・何層目を・何分」が全部入っているのに、
+読める形で出すコマンドが1つも無かった。`/progress` に出るのは率だけで、
+**時間情報（合計・1層あたり平均・最終作業日）はどこにも出ていなかった**。
+
+- ruff: `All checks passed!`
+- pytest: **1046 passed, 12 skipped**（着手前は 1017 passed, 12 skipped。skip は据え置き）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `services/layer_stats_service.py`（新規） | `period_start()` と `aggregate_layer_stats()`。DB を触らない純関数 |
+| `repositories/layer_session_repository.py` | `list_records(guild_id, keta=None)` を追加（集計用の取得） |
+| `cogs/layer_tracking.py` | `/layer stats [keta] [period]`（L1）。桁別＋作業者別の Embed |
+| `tests/test_layer_stats.py`（新規） | 29件。期間境界・数え方・ギルド境界・分母の無い桁 |
+| `docs/OPERATION.md` `docs/GUIDE.md` | コマンド表と早見表へ追記（G3-7 の回帰テストが要求する） |
+
+#### 設計判断
+
+**1. 完了層数の数え方は `count_completed_layers` と揃えた**（層番号の種類数。
+巻き直しは1層）。ここだけ「記録の件数」で数えると、同じ桁の層数が `/progress`
+（進捗率の分子）と `/layer stats` で食い違い、**画面ごとに数字が違う**という
+一番たちの悪い形になる。テストで固定した。
+
+**2. 目標層数が無い桁に分母を作らない**（ADR 0021）。`progress_spar_links` に
+紐付けが無い桁は `target=None` として「N 層（目標未設定）」と出す。
+`0` にすると「0 層中 N 層」「達成率 ∞」のどちらかになり、どちらも嘘になる。
+
+**3. 期間の絞り込みは SQL ではなく純関数側**。`ended_at` は ISO 文字列で、
+オフセット表記が混ざると `>=` の文字列比較が黙って壊れる（`+09:00` と `Z` は
+辞書順で逆転する）。`from_iso()` で datetime に直してから比較している。
+副作用として境界の単体テストが DB 無しで書ける。
+
+**4. 週は月曜始まり、月は1日始まり。** 部活の週の区切りに合わせた。
+境界ちょうど（月曜 0:00）の記録を含めることをテストで固定している
+（`>` にすると「記録が消えた」という報告になる）。
+
+**5. 表示は ephemeral、桁別・人別とも各10件まで。** `/layer` の他コマンドが
+すべて ephemeral なので揃えた。件数制限は Embed の 25 field 上限を
+**桁10 + 続き1 + 作業者1 = 12** に収めるため（超えると送信自体が
+HTTPException で落ち、利用者には「予期せぬエラー」としか出ない）。
+打ち切りは件数と絞り込み手段（`keta` 引数）を添えて明示する。
+
+**6. 名前解決はギルドキャッシュ → `discord_name_cache` → ID の3段。**
+退部者や bot 再起動直後でも ID が生で出ないようにした。
+
+#### 空振り確認（実測）
+
+実装を一時的に改変してテストが赤くなることを確かめた。
+
+| 一時的な改変 | 結果 |
+|---|---|
+| 完了層数を「記録の件数」で数える | 数え方と平均分の2件が失敗 |
+| 期間の境界を `>=` から `>` へ | 境界テストが失敗 |
+| 目標が無い桁の `target` を `0` に | ADR 0021 のテストが失敗 |
+| `list_records` から `guild_id` 条件を外す | ギルド境界の3件が失敗 |
+| Cog の `keta=` 絞り込みを外す | 絞り込みテストが失敗 |
+| `discord_name_cache` の解決をやめる | 名前解決テストが失敗 |
+
+#### 次タスクへの申し送り
+
+- **G4-5（週次ダイジェスト）は `aggregate_layer_stats` をそのまま再利用できる。**
+  「先週の積層層数・時間・参加人数」は `LayerStats.records` /
+  `total_minutes` / `len(members)` で出せる
+- `/layer stats` は**進行中セッションを含めない**（`layer_records` のみ）。
+  G4-2 の押し忘れ検知で `layer_sessions` を見るときに、
+  「集計に出ないのに進行中」という状態が生まれることに注意
+
+---
+
+### 2026-08-29 — G4-2: `/layer cancel` と押し忘れ検知（ブランチ `feat/g4-2`）
+
+`/layer start` したまま帰宅すると `/layer end` が「1200分」を記録し、
+**完了層数が増えるので `/progress` の進捗率まで水増しされる**。
+打ち間違えた場合の取り消し手段も無く、`end` するしかなかった。
+
+- ruff: `All checks passed!`
+- pytest: **1072 passed, 12 skipped**（着手前は 1046 passed, 12 skipped）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `services/layer_tracking_service.py` | `LayerTrackingService.cancel()`（記録を残さない）と `classify_stale_sessions()`（純関数） |
+| `config.py` | `LAYER_SESSION_ALERT_MINUTES`（既定240）/ `LAYER_SESSION_AUTO_CANCEL_MINUTES`（既定720）をギルド別設定に |
+| `cogs/layer_tracking.py` | `/layer cancel`（L1） |
+| `cogs/reminders.py` | 5分ループに `_process_layer_sessions()` を相乗り。`reminders_log` で二重通知を防ぐ |
+| `tests/test_layer_session_alert.py`（新規） | 26件 |
+| `docs/OPERATION.md` `docs/GUIDE.md` | コマンド表・早見表・通知表・トラブル表 |
+
+#### 設計判断
+
+**1. `cancel` は `end` の別名ではない。記録を1行も書かない。**
+`end` で閉じると押し忘れの分数が `layer_records` に入り、
+`count_completed_layers` が数える層番号の種類数が増えて進捗率が上がる。
+これがこのタスクの発端そのものなので、テストで
+「`list_records` が空のまま」を固定した。
+
+**2. DM の失敗を「拒否（Forbidden）」と「一時障害（HTTPException）」で分けた。**
+`reminders_log.exists()` は status を見ないので、書けば再試行は止まる。
+
+- Forbidden → `failed` で**記録する**。次の tick でも直らないので、
+  5分ごとに永久に叩き続けないため
+- HTTPException → **記録しない**。次の tick で再試行する（G2-3 の
+  「送っていないなら送信済みにしない」）
+
+G2-3 の原則をそのまま全部に当てると、DM を閉じている部員1人のために
+セッション中ずっと5分おきに Forbidden を叩くことになる。
+**「直らない失敗」と「直るかもしれない失敗」を分けた**のがこのタスクの判断。
+
+**3. 自動取り消しは DM より先に実行する。**
+通知が届かなくても水増しは止める。DM は付随であって本体ではない。
+メンバーがキャッシュに無い（退部済み・キャッシュ欠落）場合も取り消しは進む。
+
+**4. 催促と自動取り消しは排他。** 閾値を両方超えたセッションは
+自動取り消しだけを行い、催促には入れない（同じ tick で2通届く）。
+`classify_stale_sessions` の `elif` がその担保で、
+`if` に変えるとテストが落ちる。
+
+**5. `reminders_log` のキーは `layer_session:<session_id>`。**
+`session_id` は AUTOINCREMENT なので「1セッションにつき1回」を素直に表せる。
+ユーザー単位にすると、次に始めたセッションで催促が飛ばなくなる。
+
+**6. 0 でその機能だけ無効。** 「催促は要らないが自動取り消しは欲しい」
+（またはその逆）が選べる。既定値を変えていないので、既存ギルドの挙動は
+4時間・12時間で**新しく**動きだす——ここは ADR 0024 の「既定値で既存データを
+動かさない」に照らして迷ったが、(a) データを書き換えるのではなく
+セッション行を消すだけ、(b) 押し忘れセッションを残すこと自体が
+進捗率を壊している状態、(c) 受入基準が既定値を明示している、の3点で
+**既定 ON のまま**とした。無効化の手段（0）を用意し、ドキュメントに書いた。
+
+**7. 5分ループでは日程調整とは別の `try` にした。**
+同じ `try` に入れると、日程調整側が落ちたギルドで押し忘れの自動取り消しまで
+止まり、進捗率の水増しが残り続ける（gotcha `all-guilds-stop-getting-notifications`
+と同じ形の、ジョブ間版）。
+
+#### 空振り確認（実測）
+
+| 一時的な改変 | 結果 |
+|---|---|
+| `cancel` が `add_record` するようにする | 記録なしの2件が失敗 |
+| 自動取り消しの境界を `>=` から `>` へ | 自動取り消し系3件が失敗 |
+| 催促の分岐を `elif` から `if` へ | 二重通知の2件が失敗 |
+| Forbidden を一時障害扱い（`None` を返す）に | 再試行しないことのテストが失敗 |
+
+#### 次タスクへの申し送り
+
+- **G4-9（工具の貸出）は `classify_stale_sessions` を再利用できる。**
+  「開始 → 進行中 → 終了」が同型で、返却予定日超過の督促は
+  閾値を「予定日からの経過」に読み替えるだけ
+- `/layer stats` は `layer_records` だけを見るので、自動取り消しされた
+  セッションは集計に一切現れない（これは意図どおり）
+
+---
+
+### 2026-08-29 — G4-3: `/report changes` と読み取り専用テーブルの追加（ブランチ `feat/g4-3`）
+
+`AuditLogRepository.list_recent` を呼ぶコードが bot 側に1つも無く、
+`audit_log` は**書かれ続けているのに誰も読めない**状態だった。
+`/report audit` が読んでいたのは `reminders_log`（bot が送った通知）で別物。
+`/data export` も `TABLES` の7表だけで、年度・節目・桁マスタ・技能タグ・設定を持ち出せなかった。
+
+- ruff: `All checks passed!`
+- pytest: **1101 passed, 12 skipped**（着手前は 1072 passed, 12 skipped）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `repositories/table_repository.py` | 読み取り専用の6表（`audit_log` / `seasons` / `progress_milestones` / `layer_keta` / `skill_tags` / `settings`）と `TableSpec.min_level` |
+| `repositories/audit_log_repository.py` | `list_recent` に `actor_id` 絞り込み、`list_actors()`（補完用） |
+| `cogs/reports.py` | `/report changes`（L3・actor 補完付き）。`/report audit` → `/report notifications` へ改名 |
+| `dashboard/routers/tables.py` | `_visible_spec()` で `min_level` を一覧・取得・CSV・PATCH の4経路に効かせる |
+| `tests/test_report_changes.py`（新規） | 26件 |
+| `tests/test_dashboard_tables.py` ほか | 既存テストの前提更新＋レベル制御の3件を追加 |
+| `docs/*` `README.md` `cogs/{data,season}.py` | 「主要7テーブル」→「主要13テーブル」（8箇所）、コマンド表・早見表 |
+
+#### 設計判断
+
+**1. 表ごとの閲覧レベルを `TableSpec` に持たせた（`min_level`）。**
+`GET /settings` はロール ID の実値を **L4 にだけ**返している（G1-6）。
+`settings` を素で `TABLES` に足すと、**同じ値が表グリッド経由で L1 に見える**——
+G1-6 の修正が丸ごと無効になる。ルータ側の `if table_key == "settings"` で守る案は、
+表を足すときに書き忘れれば素通りするので採らなかった（ADR 0008 / 0016 の
+「規律ではなく構造で守る」）。既定は 1 なので、既存の7表の挙動は変わらない。
+
+割り当て: `settings` = L4（`GET /settings` と同じ）、`audit_log` = L3
+（`/report changes` と同じ。画面と Discord で食い違わせない）、残りは L1。
+`/data export` は元から L4 なので、この値の影響を受けない。
+
+**2. 新しい6表は編集可能な列をゼロにした。** 正本の入口は Discord コマンド側
+（`/season new` `/milestone add` `/layer keta-add` `/skill-add` `/setup`）にあり、
+表グリッドから直せると入口が二重になる。とくに `settings` を編集可にすると
+**ダッシュボードから権限ロールを差し替えられる**（`teams.leader_role_id` を
+編集不可にしたのと同じ理由。G1-6）。
+
+**3. 「秘密情報を含む列の除外」を、列名の検査に置き換えた。**
+`settings` の3列（`setting_key` / `setting_value` / `updated_at`）に
+秘密専用の列は無く、Todoist トークンは `todoist_configs`（`TABLES` 外）にある。
+そこで「この表のこの列を外す」ではなく、**全表を横断して
+`token` / `secret` / `password` / `credential` / `api_key` / `encrypted` を
+含む列名が1つも無いこと**をテストにした。次に表を足す人にも効く。
+
+**4. 表キーは `layer_ketas` ではなく `layer_keta`。**
+実テーブル名が `layer_keta`（単数）。タスク本文の表記に合わせて
+キーだけ複数形にすると、CSV のファイル名（`layer_ketas.csv`）と
+DB のテーブル名が食い違って混乱する。
+
+**5. `/report audit` は削除して改名した（別名を残していない）。**
+`test_the_old_audit_command_is_gone` で `hasattr` を検査している。
+残すと「audit なのに audit_log を読まない」という元の混乱がそのまま残る。
+早見表・OPERATION.md も同時に直した（`test_docs_commands.py` が両方向で検査する）。
+
+**6. 実行者の解決はギルドキャッシュ → `discord_name_cache` → ID の3段。**
+解決できないものは**伏せずに ID のまま出す**（伏せると追跡できなくなる）。
+`target` も同じ解決を通す（ロール ID・ユーザー ID が入ることがある）。
+これは G2-8 として起票されている「`/report audit` が生の18桁 ID を出す」の
+`changes` 側での解消にあたる。
+
+**7. actor の補完候補は「実際にログへ出てくる人」だけ。**
+ギルドの全メンバーを並べても、そのほとんどは1度も操作していない。
+`list_actors()` が `GROUP BY actor_id ORDER BY MAX(audit_id) DESC` で出す。
+
+#### 空振り確認（実測）
+
+| 一時的な改変 | 結果 |
+|---|---|
+| ルータの `scope.require(min_level)` を消す | ダッシュボードのレベル検査が失敗 |
+| 一覧の `min_level` フィルタだけ消す | 同上（一覧に L4 限定の表が出る） |
+| `settings` の `min_level=4` を消す | 2件が失敗 |
+| `list_recent` の `actor_id` 条件を外す | 絞り込み3件が失敗 |
+| `/report changes` が `reminders_log` を読むようにする | 3件が失敗 |
+| 名前解決をやめて ID を返す | 2件が失敗 |
+| `audit_log.action` を `editable=True` に | 読み取り専用の2件が失敗 |
+
+#### 次タスクへの申し送り
+
+- **G4-7（`progress_snapshots`）を足したら `TABLES` にも読み取り専用で加える。**
+  そのとき「主要13テーブル」の数字が `test_the_export_table_count_matches_the_whitelist`
+  で自動的に赤くなる（docs 4ファイル ＋ `cogs/{data,season}.py`）
+- `/report changes` の `target` は `members#1` のような複合文字列も入る。
+  `_resolve_actor` は数字でないものをそのまま返すので壊れないが、
+  表示名へ解決したいなら別の解決器が要る
+- G2-8（`/progress edit` が DB カラム名をそのまま出す）は**未着手のまま**。
+  `changes` 側は解消したが `progress.py` 側は手を付けていない
+
+---
+
+### 2026-08-29 — G4-4: `/me` 個人サマリー（ブランチ `feat/g4-4`）
+
+部員視点の入口が無かった。自分のタスク・未回答の投票・積層実績・担当ノードが
+それぞれ別コマンドで、`/task list` は全体を返す。
+**新入生が「今日自分は何をすればいいか」を1コマンドで確認できなかった。**
+
+- ruff: `All checks passed!`
+- pytest: **1120 passed, 12 skipped**（着手前は 1101 passed, 12 skipped）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `cogs/me.py`（新規） | `/me [user]`（L1・ephemeral）。集計は `unanswered_schedules` / `assigned_nodes` / `layer_summary` の3メソッドに分けた |
+| `bot.py` `cogs/help.py` | Cog の登録と `/help` のカテゴリ（「基本」） |
+| `tests/test_me.py`（新規） | 19件 |
+| `docs/OPERATION.md` `docs/GUIDE.md` | コマンド表・早見表・役割別の一覧 |
+
+**新しいテーブルもマイグレーションも無い**（受入基準どおり、既存クエリの合成のみ）。
+`test_no_new_table_was_added_for_me` で「表を足していないこと」を固定した。
+
+#### 設計判断
+
+**1. 未回答は投票「単位」で数える**（候補単位ではない）。G3-2 で
+`notify_unanswered` を予定単位にしたのと同じ定義に揃えた。候補単位で数えると
+「3候補のうち1つに答えた人」が `/me` では未回答、DM では回答済みになり、
+**画面ごとに違う数字**という一番たちの悪い形になる。
+テストの種データは、わざと候補2つのうち1つだけ回答した予定を含めてある。
+
+**2. 担当ノードは名前で照合する（ID ではない）。**
+`progress_nodes.assignee` は `/progress add assignee:` に手入力される
+**自由記述の名前**で、Discord ユーザー ID を持たない。ID で引く実装は
+書けるが常に0件になる。Discord の表示名と `members.display_name` の
+**両方**で照合し、改名した人でも台帳側で拾えるようにした。
+それでも取りこぼす場合があることは OPERATION.md に明記した。
+（`assignee` を ID 列にする改修は `/progress` 全体に波及するので別タスク。）
+
+**3. 権限判定を `Me.may_view()` に切り出した。**
+当初はコマンド本体から `is_self_or_level` を直接呼び、テストは
+`mock.patch("cogs.me.is_self_or_level", ...)` で差し替えていた。
+**これは単体では緑、フルセットでだけ赤になった。**
+`tests/test_docs_commands.py` が全 Cog を `load_extension` →
+`unload_extension` するとき `sys.modules["cogs.me"]` が消え、
+次の import で**別のモジュールオブジェクト**ができる。
+テストが import 済みのクラスが見ているのは古い方のモジュール辞書なので、
+新しい方へ当てたパッチは効かない。
+インスタンス属性（`cog.may_view = ...`）の差し替えならこの影響を受けない。
+
+必要レベルは `VIEW_OTHERS_LEVEL = Level.L2` というモジュール定数にし、
+**その値自体をテストで固定**した（差し替えたテストが「L2 であること」を
+検査しなくなるのを防ぐため）。
+
+**4. 判定できないときは通さない。** `may_view` は自分自身なら無条件 True、
+それ以外は `is_self_or_level`。`is_self_or_level` は `discord.Member` で
+なければ False を返すので、DM や解決できない実行者は**通らない**側に倒れる。
+
+**5. 各セクション5件まで。** 「今日何をすればいいか」を1画面で見るための
+コマンドなので、全件を出す意味がない。超過分は件数と、全部見るための
+コマンド（`/task list` / `/progress view`）を添える。
+
+#### 空振り確認（実測）
+
+| 一時的な改変 | 結果 |
+|---|---|
+| 未回答を候補単位で数える | 4件が失敗 |
+| 完了ノードも担当中に含める | 2件が失敗 |
+| タスクの `assignee_id` 絞り込みを外す | 1件が失敗 |
+| `VIEW_OTHERS_LEVEL` を L1 に下げる | レベル固定のテストが失敗 |
+| 権限判定そのものを外す | 2件が失敗 |
+| 台帳の `display_name` を照合に使わない | 1件が失敗 |
+| `bot.py` の Cog 登録を外す | 登録検査が失敗 |
+| 積層集計の期間指定（今月）を外す | 1件が失敗 |
+
+#### 次タスクへの申し送り
+
+- **`progress_nodes.assignee` が ID を持たない**のは `/me` に限らない問題。
+  `/report member-attendance`（G4-6）は `schedule_votes.user_id` を使うので
+  影響しないが、「担当者で絞る」系の機能を足すときは同じ壁に当たる
+- **フルセットでだけ赤くなるテストの型を1つ踏んだ。**
+  `unload_extension` を通る `tests/test_docs_commands.py` があるので、
+  **Cog のモジュール変数へ `mock.patch` を当てるテストは書かない**。
+  差し替えるならインスタンス属性にする（ClaudeVault の gotcha 候補）
+- `/me` は `aggregate_layer_stats`（G4-1）を再利用している。
+  G4-5 のダイジェストも同じ関数を使う予定
+
+---
+
+### 2026-08-29 — G4-5: `/report weekly` の公開版と週次ダイジェスト（ブランチ `feat/g4-5`）
+
+`/report weekly` は L2 以上・ephemeral 固定で、部員には
+「今週サークル全体で何が進んだか」が見えなかった。
+
+- ruff: `All checks passed!`
+- pytest: **1148 passed, 12 skipped**（着手前は 1120 passed, 12 skipped）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `services/weekly_digest_service.py`（新規） | `last_week_range()` / `count_completed_between()` / `week_label()`（純関数） |
+| `services/layer_stats_service.py` | `aggregate_layer_stats` に `until`（半開区間 `[since, until)`） |
+| `repositories/task_repository.py` | `list_completed()`（完了タスクの取得） |
+| `cogs/reports.py` | `build_weekly_embed()` を切り出し、`/report weekly` に `public: bool = False` |
+| `cogs/reminders.py` | `weekly_digest` ループ（指定曜日 08:30・既定 OFF） |
+| `config.py` | `WEEKLY_DIGEST_ENABLED`（既定 OFF）/ `WEEKLY_DIGEST_WEEKDAY`（既定 0＝月曜） |
+| `tests/test_weekly_digest.py`（新規） | 28件 |
+| `docs/OPERATION.md` `docs/GUIDE.md` | 設定表・通知表・コマンド表 |
+
+#### 設計判断
+
+**1. ADR 0023 は覆していない。0023 の「覆す条件」に沿った代替案として実装した。**
+0023 が却下したのは「遅延が無い週にも『問題ありません』を送る」こと。
+今回のダイジェストは**実績の報告**であって「異常なし」の通知ではない。
+線引きを実装で保つために、次の3つをテストで固定した:
+
+- ダイジェストの本文に「問題ありません / 遅延はありません / 遅れはありません /
+  異常なし」が**現れないこと**（現れたら 0023 が却下したものと同じになる）
+- マイルストーン警告とは**別のジョブ・別の `reminder_type`**であること
+- **既定 OFF** であること（既存ギルドの通知量は変わらない。ADR 0024）
+
+**2. `/report weekly` と自動投稿は同じ `build_weekly_embed()` を使う。**
+別々に組み立てると、同じ「今週」の数字が画面ごとに食い違う
+（G3-2 の「未回答が2つの定義で動いていた」と同じ形）。
+`Reminders` は既存の `bot.get_cog("Schedule")` と同じやり方で
+`bot.get_cog("Reports")` から呼ぶ。
+
+**3. 「先週」は半開区間 `[前の月曜 0:00, 今週の月曜 0:00)`。当日を含めない。**
+含めると「今日の朝までの実績」が混ざり、翌週の集計と二重になる。
+`aggregate_layer_stats` に `until` を足したのも同じ理由で、
+週をつなげても境界の記録が2回数えられない。
+
+**4. 「何も無い週」は送らない。** `build_weekly_embed()` が `None` を返す
+（未完了0・超過0・投票0・先週の完了0・先週の積層0）。
+0/0/0 のダイジェストは「うまくいっている」ではなく
+「まだ始まっていない」で、送っても読む人に何も伝えない。
+これは 0023 の考え方（言うことが無い週は黙る）と同じ方向。
+
+**5. 空状態は `public:true` でも公開しない。** 「まだデータがありません」を
+チャンネルへ流す意味がなく、部員には bot の不調に見える。
+
+**6. 投稿先はお知らせチャンネル →（無ければ）`resolve_default_channel_id()`。**
+解決は `guild.get_channel` 経由（`_guild_channel`）で、**他ギルドの
+チャンネルへは出せない**。送信先が無いときは部員には沈黙し、
+運用者には `log_to_channel` で残す（マイルストーン警告と同じ作法）。
+
+**7. 送信失敗を `reminders_log` に書かない。** `exists()` は status を見ないので、
+書くとその週は二度と送られない（G2-3）。G4-2 の DM とは事情が違う——
+チャンネル送信は次の週まで再試行の機会がないので、
+「直らない失敗」として殺す理由がない。
+
+**8. 曜日の不正値は既定に落とす（例外を投げない）。**
+`for_guild()` で例外が出るとそのギルドの全コマンドが死ぬ
+（gotcha `one-guild-loses-all-features`）。
+
+#### 空振り確認（実測）
+
+| 一時的な改変 | 結果 |
+|---|---|
+| 既定を ON にする | 既定 OFF のテストが失敗 |
+| `weekly_digest_enabled` の判定を消す | OFF のテストが失敗（**下の注記を参照**） |
+| 曜日の判定を消す | 曜日テストが失敗 |
+| 二重送信の防止を消す | 同週2回のテストが失敗 |
+| 送信失敗を `failed` で記録する | 再送テストが失敗 |
+| 本文に「遅延はありません」を足す | 定型文検査が失敗 |
+| `until` の判定を消す | 先週の数字テストが失敗 |
+| 「先週」に当日以降を含める | 5件が失敗 |
+| 空のダイジェストも送るようにする | 0件ギルドのテストが失敗 |
+| `public` を無視して常に ephemeral | 公開テストが失敗 |
+| `weekly_digest.start()` を消す | ループ登録テストが失敗 |
+
+**注記: 最初は「OFF」の検査が空振りしていた。**
+`weekly_digest_enabled` の判定を丸ごと消しても緑のままだった——
+テストが投稿先チャンネルを設定しておらず、
+**「チャンネルが無いから送れなかった」で同じ結果になっていた**ため。
+チャンネルと曜日を揃え「OFF だけが送信を止めている」状態にし、
+対になる ON のケース（`test_turning_it_on_is_the_only_difference`）を
+足して裏付けた。既定 OFF は ADR 0024 の核なので、ここが空振りしたままでは
+このタスクの受入基準を満たしていない。
+
+#### 次タスクへの申し送り
+
+- **G4-7（`progress_snapshots`）が溜まったら、ダイジェストに
+  「主桁 62%→68%」を足せる。** `build_weekly_embed()` の
+  「先週の実績」フィールドが差し込み先
+- `WEEKLY_DIGEST_ENABLED` は `/setup` のボタンにしていない
+  （`/settings_set` から設定する）。`/setup` に足すなら
+  G3-6 の `WELCOME_ENABLED` トグルと同じ形にできる
+- `/report weekly` の `public:true` は**実行したチャンネル**へ出る。
+  ダイジェストの自動投稿先（お知らせチャンネル）とは別なので、
+  「公開したのに違う場所に出た」という混同は起きない
+
+---
+
+### 2026-08-29 — G4-6: `/report member-attendance` メンバー軸の出欠（ブランチ `feat/g4-6`）
+
+`/report attendance-rate` は投票ごとの ok 率で、**「最近来ていない人」が
+特定できない**。「3回連続で未回答」は退部のほぼ確実な予兆。
+
+- ruff: `All checks passed!`
+- pytest: **1171 passed, 12 skipped**（着手前は 1148 passed, 12 skipped）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `services/attendance_service.py`（新規） | `ScheduleAnswers` / `MemberAttendance` / `aggregate_member_attendance()`（純関数） |
+| `cogs/reports.py` | `collect_member_attendance()` と `/report member-attendance [months]`（L2・ephemeral 固定） |
+| `tests/test_member_attendance.py`（新規） | 23件 |
+| `docs/OPERATION.md` `docs/GUIDE.md` | コマンド表・早見表・レポート例 |
+
+#### 設計判断
+
+**1. 母集団は `select_unanswered_targets` をそのまま呼んで作る。**
+自前の条件式で書き直すと、DM が飛ぶ相手とこの表の対象がずれ、
+G3-2 が潰した「未回答が2つの定義で動く」形に戻る。
+`answered_ids=set()` を渡して「差し引く前の対象そのもの」を得ている。
+呼んでいること自体を `inspect.getsource` で検査するテストを置いた
+（条件式に書き換えたら落ちる）。
+
+**2. ロールを解決できない予定は、集計から丸ごと外す。**
+「0名」として数えると全員が未回答扱いになり、**実在しない連続未回答**が
+出る。ADR 0021 / 0022 の「分からないものを数字にしない」をここにも当てた。
+`/schedule remind` が同じ状況で `None`（特定できない）を返すのと同じ判断。
+
+**3. 2つの率で分母を変えた。**
+- 回答率 = 回答した回数 ÷ **対象になった回数**
+- ok率 = 参加と答えた回数 ÷ **回答した回数**
+
+ok率の分母も「対象回数」にすると回答率との積になり、
+「答えてはいるが来られない人」と「そもそも答えない人」が同じ数字に潰れる。
+分けたので Embed の本文に定義を明記した（率だけ見せて解釈を委ねない）。
+
+**4. 連続未回答は直近から数え、対象外だった回は飛ばす。**
+`aggregate_member_attendance` は**新しい順**の入力を前提にする
+（`list_closed_schedules` が `deadline DESC` なのでそのまま渡せる）。
+順序を取り違えると「昔サボっていて最近は来ている人」が
+要注意人物として上がる——このコマンドの目的と正反対になる。
+順序依存はドキュメント文字列に書き、逆順を渡す変異でテストが落ちることを実測した。
+
+**5. ephemeral 固定。公開オプションを付けない。**
+「誰が来ていないか」を並べた表なので、公開できると晒しになる。
+`_params` に `public` が無いことをテストで固定した
+（あとから追加されたら落ちる）。
+
+**6. 期間は 30日 × months の近似。** 月末の境界を厳密にしても
+「最近来ていない人」の判断は変わらないので、
+`dateutil` のような依存を増やさない（ADR 0013 と同じ方向）。
+
+**7. ロールは「現在の」保持者しか分からない。**
+過去の予定について当時の保持者を復元する手段が無いので近似になる。
+これは実装の都合ではなくデータの限界なので、docstring に明記した。
+
+#### 空振り確認（実測）
+
+| 一時的な改変 | 結果 |
+|---|---|
+| 連続未回答を古い順に数える | 2件が失敗 |
+| 回答しても連続が切れないようにする | 2件が失敗 |
+| 対象外の回でも連続を数える | 2件が失敗 |
+| ok 率の分母を対象回数にする | 2件が失敗 |
+| 並び順を回答率の高い順にする | 1件が失敗 |
+| ロール解決失敗を「名簿全員」に落とす | 1件が失敗 |
+| 退部者を差し引かない | 1件が失敗 |
+| 期間の絞り込みを外す | 1件が失敗 |
+| ephemeral を外す | 1件が失敗 |
+| 母集団を自前の条件式に置き換える | 2件が失敗 |
+
+#### 次タスクへの申し送り
+
+- **`/report attendance-rate` と `/report member-attendance` は目的が違う。**
+  前者は「その予定にどれだけ集まったか」、後者は「誰が来ていないか」。
+  統合の提案が出たら、母集団（前者は票数、後者は対象者）が
+  そもそも別物であることを先に確認すること
+- G4-12（投票メッセージの未回答者数を催促と揃える）も
+  `select_unanswered_targets` を使う。**3箇所目**になるので、
+  そのときに「呼び出し側が毎回 role_member_ids を組み立てている」
+  重複をヘルパへまとめるかを検討する
+
+---
+
+### 2026-08-29 — G4-7: `progress_snapshots` 進捗の履歴（ブランチ `feat/g4-7`・スキーマ v18）
+
+`services/milestone_service.py` が自ら書いていたとおり、履歴が無いため
+ペースが「作成日→最終更新日の平均」でしか出せず、**停滞期間を含まない**
+近似だった。「先週から何%進んだか」も分からなかった。
+
+- ruff: `All checks passed!`
+- pytest: **1212 passed, 12 skipped**（着手前は 1171 passed, 12 skipped）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `utils/db.py` | `progress_snapshots` の DDL・索引・`SCHEMA_VERSION = 18`・`_migrate_v18_progress_snapshots()` |
+| `migrations/017_progress_snapshots.sql`（新規） | PostgreSQL 手動適用用の参照定義 |
+| `repositories/progress_repository.py` | `has_snapshot` / `save_snapshots` / `list_snapshots` / `snapshot_node_ids` / `latest_snapshot_dates` |
+| `services/milestone_service.py` | `snapshot_pace()` / `recent_gain()` / `sparkline()` と、ペースの出どころ3段の説明 |
+| `cogs/progress.py` | 20分ループ末尾の `save_daily_snapshot()`、`pace_overrides()` の優先順位、`/progress history [node] [days]`（L1） |
+| `repositories/table_repository.py` | 読み取り専用の TableSpec（`/data export` に含める。G4-3 の申し送り） |
+| `tests/test_progress_snapshots.py`（新規） | 41件 |
+| `tests/test_data_purge.py` ほか | 新テーブルぶんの前提更新（3ファイル） |
+| `docs/*` `README.md` `cogs/{data,season}.py` | 「主要13テーブル」→「主要14テーブル」、コマンド表・早見表 |
+
+#### 新しい ADR の草案（0035）
+
+**ADR 0022 の「覆す条件」に沿った移行なので、0022 を失効させるのではなく
+更新する。** 0022 の核（履歴が無い期間について予測を出さない）は残る。
+
+---
+
+**0035. 進捗の履歴を日次スナップショットで持つ**
+`supersedes:` なし / `updates: 0022`
+
+**文脈** — 0022 は「履歴テーブル（案 A）は正確だが、この機能のためだけに
+スキーマと書き込み経路を増やすべきではない。近似（案 B）で足りるかを先に見る」
+と決め、覆す条件に「**進捗の履歴が必要な別機能が出てきたとき。
+その時点で A に移行し、ペースも正確化する**」を挙げていた。
+`/progress history`（G4-7）と週次ダイジェストの「先週から何%」（G4-5）が
+それにあたる。近似では原理的に出せない。
+
+**選択肢**
+
+| 案 | 内容 | 欠点 |
+|---|---|---|
+| A. 全書き込み経路に履歴を記録する | 変化の瞬間まで正確 | 経路が7つあり、1つ漏らすと静かに歪む |
+| B. 定期ジョブが1日1回スナップショットを撮る | 書き込み経路を1つも触らない | 日内の変化は残らない |
+| C. 近似のまま（0022 を維持） | 変更ゼロ | `/progress history` が作れない |
+
+**決定** — **B。20分ごとの既存同期ループの末尾で、その日まだ書いていなければ
+1回だけ全ノードのスナップショットを保存する。**
+
+**理由**
+- 進捗は日単位で語られる（「先週から何%」「大会まであと N 日」）ので、
+  日内の解像度は要らない。**必要な精度の下限で止める**
+- 案 A は `/progress edit`・Todoist 同期・桁巻き反映・ダッシュボード編集・
+  `/weight set`・再集計・移行スクリプトの**全部**に記録を足すことになり、
+  1つ漏らすと履歴が静かに歪む。歪んだ履歴は近似より悪い
+- 集計後の値（`aggregated`）を撮るので、子の変更が親に伝わった結果が残る
+
+**却下した案とその理由**
+- **A** = 上記。書き込み経路を7箇所触る変更を、日次の解像度で足りる要件のために入れない
+- **C** = `/progress history` が作れない。0022 自身が「そのときは A に移行する」と書いている
+
+**影響範囲**
+- スキーマ v18。`UNIQUE (guild_id, node_id, snapshot_date)` が「1日1行」を
+  **構造で**保証する（ADR 0008 / 0016）。アプリ側の早期 return は
+  無駄な書き込みを省くための最適化にすぎない
+- `aggregated` / `actual_weight_g` は NULL 許容。未集計を 0.0 に丸めない（ADR 0021）
+- `node_id` に外部キーを張らない（ADR 0019 と同じ方針）。ノードが消えても履歴は残る
+- ペースの出どころは **snapshots > layer_records > node** の3段。
+  **履歴が足りないノードは snapshots を使わない**（`MIN_SNAPSHOTS_FOR_PACE = 3`、
+  `MIN_SNAPSHOT_SPAN_DAYS = 3`）。ここが 0022 の核をそのまま引き継ぐ部分
+- 保存されるのは「その日の最初の同期時点の値」＝実質は前日終了時点の状態
+- 既存 DB には**空のテーブルが増えるだけ**。導入直後は従来の推定のまま動く（ADR 0024）
+
+**覆す条件**
+- 日内の変化を追う必要が出たとき（例: 作業日の時間帯別の進み方）。
+  そのときは案 A（書き込み経路への記録）へ移す
+- ノード数 × 日数が実運用で問題になる規模に育ったとき（保持期間の設計が必要になる）
+
+**根拠** — `docs/IMPROVEMENT_TASKS.md` G4-7、`migrations/017_progress_snapshots.sql`、
+`services/milestone_service.py`（`snapshot_pace` の docstring に根拠を併記）
+
+---
+
+#### 設計判断（上記 ADR 草案に含まれないもの）
+
+**1. 同期がエラーを報告したギルドでもスナップショットは撮る。**
+Todoist 連携が壊れている間だけ履歴が抜けると、復旧後にペースが狂う
+（「その期間まったく進んでいない」ように見える）。同期の成否と切り離した。
+
+**2. `/progress history` は「伸び」を出せないときに 0% と書かない。**
+「比較できる記録がまだありません」と出す。記録が1点しか無い状態と
+「まったく進んでいない」は別物（ADR 0021）。
+一方で **`snapshot_pace` は伸び 0 を判定不能にしない**——
+十分な期間の実測で伸びが0なのは「分からない」ではなく
+「このままでは間に合わない」という情報だから。この2つは意図的に扱いが違う。
+
+**3. スパークラインは系列ごとに正規化しない。** 常に 0〜1 で描く。
+正規化すると 5%→6% の変化が満杯のグラフに見える。
+未集計は空白で、`▁`（0%）と区別する。
+
+**4. `/data export` の対象に入れた**（G4-3 の申し送りどおり）。
+新テーブルを足すたびに「持ち出せないデータ」が増えるのを防ぐ。
+「主要13テーブル」→「主要14テーブル」は
+`test_the_export_table_count_matches_the_whitelist` が自動で赤くしてくれた。
+
+#### 空振り確認（実測）
+
+| 一時的な改変 | 結果 |
+|---|---|
+| `ON CONFLICT DO NOTHING` を `DO UPDATE` に | 1日1行のテストが失敗 |
+| DDL から `UNIQUE` を外す | 15件が失敗 |
+| 値の列を `NOT NULL DEFAULT 0` に | 15件が失敗 |
+| `has_snapshot` の早期 return を消す | 効率のテストが失敗（**下の注記**） |
+| `MIN_SNAPSHOTS_FOR_PACE` を 2 に下げる | 件数条件のテストが失敗（**下の注記**） |
+| `MIN_SNAPSHOT_SPAN_DAYS` の判定を消す | 期間条件のテストが失敗 |
+| `aggregated` の None を 0.0 として数える | 1件が失敗 |
+| `recent_gain` が 0.0 を返すようにする | 2件が失敗 |
+| 未集計のスパークラインを `▁` にする | 1件が失敗 |
+| スパークラインを系列ごとに正規化 | 1件が失敗 |
+| スナップショット由来のペース上書きを消す | 1件が失敗 |
+| 履歴不足のノードにもペースを入れる | 1件が失敗 |
+| `list_snapshots` から `guild_id` 条件を外す | 1件が失敗 |
+
+**注記: 最初は2つの変異が素通りした。**
+
+- **`has_snapshot` の早期 return を消しても全部緑だった。**
+  `UNIQUE` 制約があるので行は増えず、**正しさは守られていた**——
+  つまりテストは正しく、消えたのは効率だけ。とはいえ
+  「制約が守るから if は不要」で消される種類のコードなので、
+  「2回目はツリーを読み直さない」ことをテストで固定した
+- **`MIN_SNAPSHOTS_FOR_PACE` を 3→2 に下げても緑だった。**
+  件数のテストが**期間の条件でも落ちる**データを使っていたため、
+  件数の下限を検査できていなかった。2点を30日離した種データを足して
+  件数条件だけを切り出した
+
+#### 次タスクへの申し送り
+
+- **G4-5 のダイジェストに「主桁 62%→68%」を足せる状態になった。**
+  `recent_gain(snapshots, 7, today)` がそのまま使える。
+  まだ足していない（G4-5 は完了済みで、混ぜると ADR 0014 に反する）
+- **保持期間の設計はしていない。** ノード100 × 365日 = 年3.6万行。
+  数年運用しても実害は無い見込みだが、`/data delete` の対象には入っている
+- **日内の変化は残らない。** 「その日の最初の同期時点の値」なので、
+  1日のうちに進んで戻した動きは記録されない（ADR 草案の「覆す条件」）
+- ダッシュボードの表に `progress_snapshots` が出る（読み取り専用・L1）。
+  行数が多いので、シート切替（`SHEET_TABLES`）に入れるかは別途検討
+
+---
+
+### 2026-08-29 — G4-8: `/stock` 資材・消耗品の在庫（ブランチ `feat/g4-8`・スキーマ v19）
+
+人力飛行機で最も痛いのは「プリプレグが無くて桁が巻けない」。
+カーボンプリプレグは納期が数週間で、切れてから気づくと工程が1ヶ月ずれる。
+発注判断は「残量が閾値を割った」という、bot が自動で見張れる条件。
+
+- ruff: `All checks passed!`
+- pytest: **1248 passed, 12 skipped**（着手前は 1212 passed, 12 skipped）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `utils/db.py` | `stock_items` / `stock_movements`・索引・`SCHEMA_VERSION = 19`・`_migrate_v19_stock()` |
+| `migrations/018_stock.sql`（新規） | PostgreSQL 手動適用用の参照定義 |
+| `services/stock_service.py`（新規） | `is_low` / `crossed_below` / `low_items` / `format_amount`（純関数） |
+| `repositories/stock_repository.py`（新規） | 品目・増減・通知状態の CRUD |
+| `cogs/inventory.py`（新規） | `/stock list\|add\|use\|set-threshold\|remove` |
+| `cogs/reminders.py` | 朝 08:30 の `_notify_low_stock`（割れが無い日は送らない） |
+| `utils/notify.py` | `resolve_notice_channel_id()` / `guild_channel()`（告知先の解決） |
+| `repositories/table_repository.py` | 読み取り専用の TableSpec 2つ（`/data export` に含める） |
+| `tests/test_stock.py`（新規） | 36件 |
+| `bot.py` `cogs/help.py` | Cog 登録とカテゴリ「資材・在庫」 |
+| `docs/*` `README.md` ほか | 「主要14テーブル」→「主要16テーブル」、コマンド表・早見表・通知表 |
+
+#### 設計判断
+
+**1. 閾値は NULL 許容。既定値を置かない**（ADR 0021）。
+`threshold` に `DEFAULT 0` を置くと「在庫0でも閾値割れではない」という
+嘘になる。**閾値を決めていない品目は判定そのものをしない**。
+一覧では「閾値 未設定」と明示し、0 とは書かない。
+一方で **`/stock set-threshold` の `0` は有効な閾値**（尽きたら知らせる）。
+解除は負の値で行う——この区別をテストで固定した。
+
+**2. 閾値は「以下」で割れ。** 「残り1本になったら発注」と設定した人は
+1本になった時点で知らせてほしいのであって、0本になってからでは
+納期に間に合わない。
+
+**3. 即時通知の重複防止に `reminders_log` を使わない。**
+`stock_items.low_notified_flag` を持たせ、閾値以上へ戻ったときに落とす。
+`reminders_log.exists()` はキー単位で「送ったか」しか見ないので、
+**同じ品目が何度も割りうる**この用途では2回目以降が永久に飛ばなくなる。
+G4-2（1セッションにつき1回）とは要件が違う。
+
+**4. 送信に成功してからフラグを立てる。**
+先に立てると、送信失敗した回が「通知済み」になり、
+次に割り直すまで二度と知らせられない。
+
+**5. 在庫は負にならない（`MAX(quantity + ?, 0)`）が、履歴には申告どおりの
+値を残す。** -3本という物理的にありえない値を作らず、かつ
+「使いすぎの申告があった」事実も消さない。
+利用者には「記録した消費は残量を上回っています」と伝える（黙って丸めない）。
+
+**6. 品目名の初期値をコードにも DDL にも持たない。**
+何を在庫管理するかはサークルごとに違う（AGENTS.md「組織構造は可変」）。
+一方で **`プリプレグ`・`桁`・`積層` といったドメイン語はテストとドキュメントに
+書いてよい**（対象が鳥人間サークルに限定されているため。ADR 0004）。
+
+**7. `/stock remove` は受入基準に無かったが追加した。**
+「マスタ管理は `layer_keta` と同型」という注記に従うと、
+有効フラグを持つのに無効化する手段が無い状態になる。
+論理削除で、増減の履歴は残す。
+
+**8. 告知先の解決を `utils/notify.py` へ切り出した。**
+「お知らせ →（無ければ）進捗 → タスク」の順。
+解決した ID は必ず `guild.get_channel` で引く（`guild_channel()`）ので、
+**他テナントのチャンネルへは出せない**（G4-11 が直そうとしている
+`log_to_channel` の穴を、新しいコードでは最初から作らない）。
+
+#### 空振り確認（実測）
+
+| 一時的な改変 | 結果 |
+|---|---|
+| 閾値未設定を 0 として判定する | 3件が失敗 |
+| 閾値の判定を「未満」にする | 2件が失敗 |
+| 割り込み判定から「直前の状態」を外す | 2件が失敗 |
+| 在庫が負になれるようにする | 1件が失敗 |
+| `get_item` から `guild_id` 条件を外す | 2件が失敗 |
+| 無効化を物理削除にする | 2件が失敗 |
+| 閾値以上へ戻ってもフラグを落とさない | 1件が失敗 |
+| 送信前にフラグを立てる | 1件が失敗 |
+| 朝の通知を割れが無くても送る | 2件が失敗 |
+| 朝の通知を品目ごとに連投する | 1件が失敗 |
+| DDL の閾値に `NOT NULL DEFAULT 0` | 12件が失敗 |
+| DDL から `UNIQUE (guild_id, item_name)` を外す | 1件が失敗 |
+| `set-threshold` の `0` を解除扱いにする | 1件が失敗 |
+
+#### 次タスクへの申し送り
+
+- **G4-9（工具の貸出）は同じ `cogs/inventory.py` に足す**（受入基準どおり）。
+  **新しいマイグレーションが要る。** `_migrate_versioned()` は
+  `version >= SCHEMA_VERSION` で早期 return するため、
+  **v19 に後から ALTER や CREATE を足しても既存 DB では実行されない**
+  （新規 DB にだけテーブルがある状態になる。gotcha
+  `bot-wont-start-undefined-column`）。表の v19 の欄は
+  「在庫・工具」と書かれていたが、**工具は v20 を使うこと**。
+  そのぶん G4-10（ヒヤリハット）は v21 へずれる
+- 督促ロジックの共用（G4-9 の注記）は、`classify_stale_sessions`
+  （G4-2）の閾値を「返却予定日からの経過」に読み替える形で使える
+- `/stock` に「発注済み」の状態は無い。閾値を割ったまま発注しても
+  毎朝通知が出続ける。運用で困るようなら `ordered_flag` を足す余地がある
+
+---
+
+### 2026-08-29 — G4-9: `/tool` 工具・機材の貸出（ブランチ `feat/g4-9`・スキーマ v20）
+
+`/layer start` → `/layer end` とまったく同じ「開始 → 進行中 → 終了」モデル。
+借りたまま返らない工具は、次に使う人の作業日をそのまま潰す。
+
+- ruff: `All checks passed!`
+- pytest: **1284 passed, 12 skipped**（着手前は 1248 passed, 12 skipped）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `utils/db.py` | `tools` / `tool_loans`・索引・`SCHEMA_VERSION = 20`・`_migrate_v20_tools()` |
+| `migrations/019_tools.sql`（新規） | PostgreSQL 手動適用用の参照定義 |
+| `services/tool_service.py`（新規） | `overdue_loans()` / `loan_status_label()`（純関数） |
+| `repositories/tool_repository.py`（新規） | 工具マスタと貸出の CRUD |
+| `cogs/inventory.py` | `/tool list\|borrow\|return\|add\|remove`（G4-8 と同じ Cog） |
+| `cogs/reminders.py` | 朝 08:30 の `_notify_overdue_tools`（本人へ DM・1貸出1回） |
+| `repositories/table_repository.py` | 読み取り専用の TableSpec 2つ |
+| `tests/test_tools.py`（新規） | 36件 |
+| `docs/*` `README.md` ほか | 「主要16テーブル」→「主要18テーブル」、コマンド表・早見表・通知表 |
+
+#### 設計判断
+
+**1. スキーマ版は v19 ではなく v20 を切った（表の記載と違う）。**
+表の v19 の欄は「G4-8（在庫・工具）」と1版にまとめる想定だったが、
+**G4-8 が先に v19 を切ってしまった後では、同じ版に足しても既存 DB へ届かない**。
+`_migrate_versioned()` は `version >= SCHEMA_VERSION` で早期 return するため、
+v19 済みの DB は二度と v19 を通らず、**新規 DB にだけテーブルがある**状態になる
+（gotcha `bot-wont-start-undefined-column` と同型。G3-3 / G3-4 が
+同じ罠を避けるために1版へまとめたのと**逆向きの**判断で、
+理由は同じ「早期 return」）。表の割り当ても更新し、
+G4-10 のヒヤリハットを v20 → **v21** へずらした。
+`v19` に工具が混ざっていないことを `inspect.getsource` で検査している。
+
+**2. 貸出中かどうかは `tool_loans.returned_at IS NULL` で表す。**
+`tools` 側に `borrowed_flag` を置く案は採らなかった——
+工具の行を消したときに貸出の事実まで消えるし、
+「誰がいつ借りたか」を別に持つ必要がどのみち出る。
+これは `/layer` が `layer_sessions`（進行中）と `layer_records`（完了）を
+分けているのと同じ形。
+
+**3. 返却予定日は NULL 許容で、未設定なら督促しない**（ADR 0021）。
+「予定日を決めていない貸出」を「本日返却」とみなすのは、
+分からないものを数字にすることにあたる。
+**予定日当日も督促しない**——「本日中に返す」つもりの人へ朝に
+「超過しています」と送るのは誤報になる。
+
+**4. `classify_stale_sessions`（G4-2）をそのまま呼ばず、形だけ揃えた。**
+受入基準は「督促ロジックは G4-2 の押し忘れ検知を共用する」だが、
+あちらの閾値は**分**で `started_at` からの経過を見るのに対し、
+こちらは**日**で `due_date` を過ぎたかを見る。共用するには貸出行を
+偽のセッション辞書（`keta` / `layer_num` を持つ）へ詰め替えることになり、
+読む人にとって意味不明になる。**共有したのは形**——
+「閾値を超えたものを選び、通知済みフラグで1回に絞り、
+送れたときだけフラグを立てる」——で、この3点は同じにしてある。
+`tool_service.py` の docstring に理由を書いた。
+
+**5. DM の失敗は G4-2 と同じ3分岐。**
+拒否（Forbidden）は翌朝も直らないのでフラグを立てて打ち切り、
+一時障害（HTTPException）は立てずに翌朝再試行、
+**メンバーが見つからない場合も立てない**（退部者が戻ってきたら督促できるように）。
+
+**6. 返却は借りた本人でなくても記録できる。**
+工具は現物が戻れば返却であって、借りた人が不在のときに
+記録できないと台帳が実物とずれる。誰の貸出を閉じたかは応答に出す。
+
+#### 空振り確認（実測）
+
+| 一時的な改変 | 結果 |
+|---|---|
+| 予定日未設定を「借りた日」で代用する | 2件が失敗 |
+| 予定日当日を超過扱いにする | 1件が失敗 |
+| 返却済みの貸出も督促する | 1件が失敗 |
+| 通知済みフラグを無視する | 2件が失敗 |
+| 貸出中の判定から `returned_at IS NULL` を外す | 1件が失敗 |
+| `give_back` から `guild_id` 条件を外す | 1件が失敗 |
+| 工具の無効化を物理削除にする | 1件が失敗 |
+| 二重貸出を許す | 1件が失敗 |
+| 不正な予定日を無視して記録する | 1件が失敗 |
+| 返却を借用者本人に限定する | 1件が失敗 |
+| 督促先が居なくてもフラグを立てる | 1件が失敗 |
+| 一時障害でもフラグを立てる | 1件が失敗 |
+| v19 に工具テーブルを足す | 1件が失敗 |
+
+**注記:** 最初に当てた「予定日未設定を `today` で代用する」変異は
+**等価変異**だった（`days_over` が 0 になり、当日の除外条件で同じく落ちるため）。
+テストの穴ではないと確認したうえで、実際に挙動が変わる
+「借りた日で代用する」に差し替えて検出を確かめた。
+
+#### 次タスクへの申し送り
+
+- **G4-10 のヒヤリハットは v21 / `020_incidents.sql`**（表も更新済み）
+- `/tool` に予約（次に使う人の登録）は無い。「借りたい」が競合したときは
+  `/tool list` で借用者に直接聞く運用になる
+- 督促は1貸出につき1回。長期の未返却を繰り返し知らせたいなら、
+  `overdue_notified_flag` を「最後に督促した日」へ変える余地がある
+
+---
+
+### 2026-08-29 — G4-10: `/incident` ヒヤリハット・事故報告（ブランチ `feat/g4-10`・スキーマ v21）
+
+工房での切削・溶剤・高所作業・機体運搬・テストフライトと危険度が高く、
+大学から安全管理体制の提示を求められることもある。
+今は「危なかった」が雑談チャンネルに流れて消えている。
+
+- ruff: `All checks passed!`
+- pytest: **1311 passed, 12 skipped**（着手前は 1284 passed, 12 skipped）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `utils/db.py` | `incidents`・索引・`SCHEMA_VERSION = 21`・`_migrate_v21_incidents()` |
+| `migrations/020_incidents.sql`（新規） | PostgreSQL 手動適用用の参照定義 |
+| `repositories/incident_repository.py`（新規） | 取得系は **`reporter_id` を返さない** |
+| `cogs/safety.py`（新規） | `/incident report [anonymous]`（L1・Modal）/ `/incident list`（L3） |
+| `repositories/table_repository.py` | 読み取り専用の TableSpec（**`reporter_id` を列に含めない**・L3 限定） |
+| `docs/PRIVACY.md` | §2.1 に収集項目、**§2.5 に匿名報告の扱い**を追記 |
+| `tests/test_incident.py`（新規） | 27件 |
+| `bot.py` `cogs/help.py` `docs/*` | Cog 登録・カテゴリ「安全」・コマンド表・早見表・「主要19テーブル」 |
+
+#### 設計判断
+
+**1. 匿名を「表示側の if」ではなくデータの形で守る。**
+列を2つに分けた:
+
+- `reporter_id`（NOT NULL）… 匿名でも**必ず**保存する。
+  虚偽・悪用の申告に運営者が対処できないと、匿名報告そのものが使えなくなる
+- `reporter_name`（NULL 許容）… 「表示してよい名前」。匿名報告では NULL
+
+そのうえで **`IncidentRepository` の取得系は `reporter_id` を返さない**
+（`DISPLAY_COLUMNS` に入れていない）。表示層が「うっかり出す」経路が無い。
+`TABLES` の列ホワイトリストにも入れていないので、ダッシュボードにも
+`/data export` にも構造的に現れない（ADR 0008 / 0016）。
+
+**表示側にも `anonymous_flag` の判定を残してある**（二重の守り）。
+移行や将来の別経路で「フラグは立っているのに名前がある」行が生まれても
+匿名のまま出る。片方だけだと、片方が壊れた瞬間に漏れる。
+
+**2. 「完全な匿名ではない」ことを PRIVACY.md に明記した。**
+ID を隠して保持するのは、匿名を謳いながら追跡できる状態を
+利用者に伏せることになる。§2.5 に「ID は保存されるが表示・エクスポートには
+出ない」「完全な匿名を要する内容は大学の相談窓口へ」と書いた。
+
+**3. 通知は「保存した行を読み直して」作る。**
+入力値をそのまま通知に流すと、匿名フラグの適用漏れが**通知にだけ**現れる
+形が作れてしまう（保存は匿名、通知には実名）。
+DB を経由させることで、保存と通知が同じ真実を見る。
+変異テストで確認済み（入力値から作るようにすると匿名テストが落ちる）。
+
+**4. 匿名指定は Modal ではなくコマンド引数。**
+Discord の Modal は入力欄が最大5つで、受入基準の5項目（発生日時 / 場所 /
+何が起きたか / けがの有無 / 再発防止案）でちょうど埋まる。
+`/incident report anonymous:true` で先に決める形にした。
+
+**5. 報告は通知に失敗しても残る。** 記録が本体で、通知は付随。
+通知先が無いギルドでは運用者ログにだけ残し、`/incident list` から読める。
+
+**6. Modal の `on_error` に報告の中身を出さない。**
+`todoist_admin` がトークンをログに出さないのと同じ理由。
+匿名報告の本文が運用ログへ流れると、匿名の意味が無くなる。
+`inspect.getsource` で「入力欄の値を参照していないこと」を検査している。
+
+**7. スキーマは v21（当初の予約は v20）。** G4-9 の工具が v20 を使ったため
+1つずらし、表の割り当ても更新した。`_migrate_v20_tools` に `incidents` が
+混ざっていないことを検査している。
+
+#### 空振り確認（実測）
+
+| 一時的な改変 | 結果 |
+|---|---|
+| 匿名でも `reporter_name` を保存する | 1件が失敗 |
+| 取得系が `reporter_id` を返すようにする | 1件が失敗 |
+| 表示の `anonymous_flag` 判定を外す | 二重の守りのテストが失敗（**下の注記**） |
+| 通知を保存行ではなく入力値から作る | 匿名通知のテストが失敗 |
+| `TABLES` に `reporter_id` を足す | 1件が失敗 |
+| `incidents` の `min_level` を外す | 1件が失敗 |
+| `incidents` の列を編集可にする | 1件が失敗 |
+| `reporter_id` を NULL 許容にする | 1件が失敗 |
+| Modal の実行者チェックを外す | 1件が失敗 |
+| `on_error` に本文を出す | 1件が失敗 |
+| v20 に `incidents` を足す | 1件が失敗 |
+| 通知失敗時に報告を消す | 4件が失敗 |
+
+**注記:** 「表示の `anonymous_flag` 判定を外す」変異は、最初は素通りした——
+リポジトリ経由なら匿名報告の `reporter_name` が必ず NULL なので、
+`or ANONYMOUS_LABEL` で同じ結果になるため。**保存側だけが守っている状態**を
+検出できていなかったので、`anonymous_flag=1` と名前が同時にある行
+（移行や別経路で生まれうる形）を手で組んで表示を検査するテストを足した。
+
+#### 次タスクへの申し送り
+
+- **残りは G4-11 〜 G4-14 の4件**（いずれも既存の穴の修正で、新テーブル不要）
+- `/incident` に編集・削除は無い。誤報告の訂正は「もう1件出す」しかない。
+  安全記録の改ざん防止としてはこれでよいが、運用で困るなら
+  `superseded_by` を足す形が考えられる（行は消さない）
+- 通知先は在庫アラートと共通（`resolve_notice_channel_id`）。
+  安全報告だけ別チャンネルへ出したいという要望が出たら、
+  ギルド別設定 `SAFETY_CHANNEL_ID` を足す余地がある
+
+---
+
+### 2026-08-29 — G4-11 / G4-12 / G4-13 / G4-14: 既存の穴4件（ブランチ `fix/g4-11` 〜 `fix/g4-14`）
+
+いずれも G3 の各ゲート（プラン審査・差分監査）で見つかった既存の穴。
+新しいテーブルもマイグレーションも無い。
+
+- ruff: `All checks passed!`
+- pytest: **1333 passed, 12 skipped**（着手前は 1311 passed, 12 skipped）
+
+#### G4-11: `log_to_channel` を同一ギルドに限定した
+
+**症状**: `BOT_LOG_CHANNEL_ID` を環境変数で設定すると、その値は
+`config.for_guild()` のフォールバックとして**全ギルドの GuildConfig へ配られる**。
+送信先を `self.get_channel()`（bot 全体のキャッシュ）で引いていたため、
+**他テナントの運用ログが1つのサーバーへ集まる**状態だった。
+
+| ファイル | 内容 |
+|---|---|
+| `bot.py` | `_log_channel_for()` を追加し、`guild.get_channel_or_thread` で**同一ギルド内に限定**。レガシー経路は `_fetch_legacy_log_channel()` に分離 |
+| `tests/test_multi_tenant.py` | 4件追加 |
+
+**設計判断**
+
+1. **解決できなければ送らない。** ギルドがキャッシュに無い、そのギルドに
+   チャンネルが無い、のどちらも None を返す。「たぶんこれだろう」で
+   フォールバックしない——誤送信よりログが出ないほうがましなので
+2. **レガシー単一ギルド運用（`GUILD_ID` 指定）は残した**（受入基準）。
+   起動直後は `guilds` が空なので API から取るが、
+   **取得したチャンネルが `GUILD_ID` のものかを必ず検査する**。
+   `GUILD_ID` 未指定（マルチテナント運用）では**そもそも fetch しない**——
+   どのギルドのものか確かめる手段が無いため
+3. **重複排除を書いて、変異テストで消した。** 最初は「複数ギルドが同じ
+   チャンネル ID を設定していたら1回にまとめる」コードを入れたが、
+   `guild.get_channel_or_thread` は**そのギルドのチャンネルしか返さない**ので
+   2つのギルドから同じチャンネルが返ることはない。**到達しないコード**だと
+   分かったので消した（変異させても落ちないテストが教えてくれた）
+
+#### G4-12: 投票メッセージの未回答者数を催促と揃えた
+
+**症状**: G3-2 で催促（`notify_unanswered`）の母集団は台帳ベースになったが、
+`build_option_embed` の「未回答者数」は**ロール基準のまま・候補単位**だった。
+部員が最初に見る数字はこちらなので、実際に DM が飛ぶ相手と食い違っていた
+（`target_role` 未設定なら表示は `-` のまま DM は飛ぶ）。
+
+| ファイル | 内容 |
+|---|---|
+| `services/schedule_service.py` | `count_unanswered()` を追加（`select_unanswered_targets` を通す）。`build_option_embed` / `build_summary_embed` が **`guild_id` を明示引数で受ける** |
+| `cogs/schedule.py` | プロキシを渡していた5箇所を書き換え。名簿は予定ごとに1回だけ引く |
+| `tests/test_schedule_unanswered_count.py`（新規） | 12件 |
+
+**設計判断**
+
+1. **ADR 0009 の完了条件2を実施した。** `repo.for_guild(guild_id)` プロキシを
+   Embed 生成へ渡す5箇所が消え、`services/` 側が `guild_id` を明示で受ける形になった。
+   **完了条件1（`LayerTrackingService`）・3・4 は未実施**なので、
+   ADR 0009 はまだ `accepted (not implemented)` のまま（下の申し送り）
+2. **未回答者数のラベルを「未回答者数（この予定）」に変えた。**
+   候補ごとのメッセージに出る数字が予定単位になったので、
+   単位が変わったことを画面に書かないと「この候補の未回答」と読まれる
+3. **「対象」の既定表示を「全員」→「名簿の現役」にした。**
+   数え方が名簿ベースになったのに「全員」と書き続けると、
+   名簿未登録の人が含まれると誤解される
+4. **名簿を渡さなければ `-`。** 推測で数字を出さない（ADR 0021）。
+   ロール解決不能・保持者0名も `-`（`notify_unanswered` と同じ判断）
+
+#### G4-13: オートコンプリートの登録検査が空振りしていた
+
+**症状**: `param.autocomplete is not None` は、discord.py の公開 API の
+`autocomplete` が **`bool` を返すプロパティ**なので
+`False is not None` → `True`。**補完が1つも登録されていなくても必ず通る**。
+G2-2 で追加した2つのテストが何も担保していなかった。
+
+| ファイル | 内容 |
+|---|---|
+| `tests/test_autocomplete.py` | `registered_autocomplete()`（`_params[...].autocomplete.__name__` を返す）へ書き換え。**検査自体が空振りしないこと**を見るテストを追加 |
+
+**設計判断**
+
+1. **コールバック名まで見る。** 「何かが付いている」ではなく
+   「どれが付いている」を検査する（`/schedule remind` に
+   開催中限定の `_schedule_ac_open` が付いていること、など）。
+   全件用にすり替える変異でも落ちる
+2. **private 属性 `_params` への依存を許容した**（受入基準どおり）。
+   公開 API では「どのコールバックが束ねられているか」を取れない。
+   消えたときは `AttributeError` / `KeyError` で大きな音を立てて落ちる
+3. **「検査が空振りしていないこと」自体をテストにした。**
+   補完が付いていない引数（`/schedule create` の `title`）で
+   `registered_autocomplete` が落ちることを固定する。
+   これが無いと、また同じ形の空振りに戻れてしまう
+
+#### G4-14: `/schedule remind` に締切済みのガードを追加した
+
+**症状**: `remind` は `closed_flag` を見ていなかったため、L2 が ID を直打ちすれば
+**締切済み・復元済みの予定でも未回答者へ DM が飛んだ**。
+
+| ファイル | 内容 |
+|---|---|
+| `cogs/schedule.py` | `closed_flag` を見て断る（文言は `edit-deadline` と揃えた） |
+| `tests/test_schedule_remind_guard.py`（新規） | 5件 |
+
+**設計判断** — テストは「断りの Embed が出る」ではなく
+**「`notify_unanswered` が呼ばれない」**を見る。前者だけだと、
+断る前に送ってしまう実装を素通りする。復元直後（`closed_flag` は戻らない）も
+断ることを固定した。
+
+#### 空振り確認（実測）
+
+| 一時的な改変 | 結果 |
+|---|---|
+| bot 全体のキャッシュでログチャンネルを引く | 2件が失敗（G4-11） |
+| レガシー経路のギルド検査を外す | 1件が失敗（G4-11） |
+| `GUILD_ID` 未指定でも fetch する | 1件が失敗（G4-11） |
+| `build_option_embed` の登録行を消す（`/schedule remind`） | 1件が失敗（G4-13） |
+| `/schedule status` の補完登録を消す | 1件が失敗（G4-13） |
+| `/task done` の補完登録を消す | 1件が失敗（G4-13） |
+| `/schedule remind` の補完を全件用にすり替える | 1件が失敗（G4-13） |
+| `remind` の締切済みガードを消す | 3件が失敗（G4-14） |
+
+G4-12 は変異ではなく**受入基準そのものをテストで固定**した
+（`inspect.signature` で `guild_id` を第2引数に取ること、
+`cogs/schedule.py` に `self.repo.for_guild(` が残っていないこと）。
+
+#### 次タスクへの申し送り
+
+- **ADR 0009 はまだ完了していない。** 残りの完了条件:
+  1. `LayerTrackingService` が `guild_id` を明示引数で受ける
+     （`cogs/layer_tracking.py:39` がプロキシを渡している）
+  3. `repositories/base.py` から `for_guild()` / `GuildBoundRepository` を撤去
+  4. その前に、`dashboard/security.py` の `GuildScope.bind()`（**意図的な用法**。
+     ADR 0008）の置き換え先を用意する
+
+  G4 の範囲外なので手を付けていない。**次の表（G5）に起票する価値がある**
+- G4-11 で `bot.py` の他の送信経路（`send_guild_notice`）は既に
+  `guild.get_channel` を使っており、直す必要は無かった
+- 「未回答者数（この予定）」は候補ごとのメッセージすべてに同じ数字が出る。
+  冗長だが、候補単位と誤読されるよりよいと判断した

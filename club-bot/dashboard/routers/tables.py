@@ -48,6 +48,7 @@ from repositories.table_repository import (
     rows_to_csv,
 )
 from utils.logger import get_logger
+from utils.permissions import Level
 
 log = get_logger("dashboard.tables")
 
@@ -105,13 +106,28 @@ async def _name_maps(scope: GuildScope, spec: TableSpec) -> NameMaps:
     return NameMaps(users=users, channels=channels, options=options, teams=teams)
 
 
+def _visible_spec(scope: GuildScope, table_key: str) -> TableSpec:
+    """表の定義を返す。権限が足りなければ 403、無い表なら 404。
+
+    必要レベルは **TableSpec が持つ**（`min_level`）。ルータ側の if で
+    守ると、表を足すときに書き忘れて素通りする（ADR 0016）。
+    """
+    try:
+        spec = get_spec(table_key)
+    except UnknownTableError:
+        raise HTTPException(status_code=404, detail="その表は存在しません。") from None
+    scope.require(Level(spec.min_level))
+    return spec
+
+
 @router.get("/tables")
 async def list_tables(scope: ScopedGuild):
-    """閲覧できる表の一覧を返す。"""
+    """閲覧できる表の一覧を返す（権限が足りない表は出さない）。"""
     return {
         "tables": [
             {"key": spec.key, "label": spec.label, "description": spec.description}
             for spec in TABLES.values()
+            if scope.level >= spec.min_level
         ],
         "can_edit": scope.level >= 2,
     }
@@ -131,10 +147,7 @@ async def read_table(
     `sheets` にタブ一覧を返し、`sheet` 未指定なら先頭のシートに絞る。
     予定・桁が 0 件でもエラーにしない（空のタブ一覧と空の行を返す）。
     """
-    try:
-        spec = get_spec(table_key)
-    except UnknownTableError:
-        raise HTTPException(status_code=404, detail="その表は存在しません。") from None
+    spec = _visible_spec(scope, table_key)
 
     repo = scope.bind(TableRepository(get_database()))
     sheets_payload: dict | None = None
@@ -210,10 +223,7 @@ async def export_table_csv(
     引き継ぎ用に落とした CSV から古い行が黙って欠ける。
     監査ログには正常終了として残るため、欠落に気づく手段が無い。
     """
-    try:
-        spec = get_spec(table_key)
-    except UnknownTableError:
-        raise HTTPException(status_code=404, detail="その表は存在しません。") from None
+    spec = _visible_spec(scope, table_key)
     if sheet is not None and table_key not in SHEET_TABLES:
         raise HTTPException(status_code=400, detail="この表はシート切替に対応していません。")
 
@@ -261,10 +271,7 @@ async def update_row(
     変更前後の値を audit_log に記録する。編集不可の列・存在しない行は
     エラーにし、その試み自体も監査ログへ残す。
     """
-    try:
-        spec = get_spec(table_key)
-    except UnknownTableError:
-        raise HTTPException(status_code=404, detail="その表は存在しません。") from None
+    spec = _visible_spec(scope, table_key)
     if not isinstance(values, dict) or not values:
         raise HTTPException(status_code=400, detail="変更内容がありません。")
 

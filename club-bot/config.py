@@ -108,6 +108,17 @@ def _get_team_role_map(name: str) -> dict[str, int]:
 # ギルド別設定 DATA_RETENTION_DAYS で上書きできる。
 DEFAULT_DATA_RETENTION_DAYS = 30
 
+# 積層セッションの押し忘れ検知（G4-2）。ギルド別設定
+# LAYER_SESSION_ALERT_MINUTES / LAYER_SESSION_AUTO_CANCEL_MINUTES で上書きできる。
+# **0 以下でその機能を無効にする**（催促だけ切る、自動取り消しだけ切る、が選べる）。
+DEFAULT_LAYER_SESSION_ALERT_MINUTES = 240
+DEFAULT_LAYER_SESSION_AUTO_CANCEL_MINUTES = 720
+
+# 週次ダイジェストを流す曜日（0 = 月曜）。ギルド別設定
+# WEEKLY_DIGEST_WEEKDAY で上書きできる。範囲外の値は既定に落とす。
+# 送るかどうかは WEEKLY_DIGEST_ENABLED（既定 OFF）が決める（ADR 0024）。
+DEFAULT_WEEKLY_DIGEST_WEEKDAY = 0
+
 # 複数のロールをカンマ区切りで保存する設定キー（GuildConfig 側は list[int]）。
 # 追加するときは GuildConfig の属性も list[int] にすること。
 # /setup（cogs/setup_wizard.py）と /set_role（cogs/settings.py）が
@@ -158,6 +169,16 @@ class GuildConfig:
     # 新入生オンボーディング（on_member_join で班選択を送る）。
     # **既定は OFF。** ON にしたギルドでだけ動く（ADR 0024）
     welcome_enabled: bool = False
+
+    # 週次ダイジェストの自動投稿（G4-5）。**既定は OFF**。
+    # ON にしたギルドでだけ、指定曜日の朝に /report weekly と同じ内容を
+    # 公開チャンネルへ投稿する。既存ギルドの通知量は変わらない
+    weekly_digest_enabled: bool = False
+    weekly_digest_weekday: int = DEFAULT_WEEKLY_DIGEST_WEEKDAY
+
+    # 積層セッションの押し忘れ検知（G4-2）。分。0 以下でその機能を無効にする
+    layer_session_alert_minutes: int = DEFAULT_LAYER_SESSION_ALERT_MINUTES
+    layer_session_auto_cancel_minutes: int = DEFAULT_LAYER_SESSION_AUTO_CANCEL_MINUTES
 
     # 日程調整のリアクション絵文字（カスタム絵文字 ID。未設定は既定 ✅❓❌）
     schedule_emoji_ok_id: int | None = None
@@ -321,6 +342,8 @@ class Config:
                 ("SCHEDULE_EMOJI_MAYBE_ID", "schedule_emoji_maybe_id"),
                 ("SCHEDULE_EMOJI_NG_ID", "schedule_emoji_ng_id"),
                 ("DATA_RETENTION_DAYS", "data_retention_days"),
+                ("LAYER_SESSION_ALERT_MINUTES", "layer_session_alert_minutes"),
+                ("LAYER_SESSION_AUTO_CANCEL_MINUTES", "layer_session_auto_cancel_minutes"),
             ):
                 val = await repo.get_int(guild_id, key)
                 if val is not None:
@@ -332,6 +355,13 @@ class Config:
 
             # 真偽値の設定。不正値は既定（OFF）扱いで例外を投げない
             gc.welcome_enabled = await repo.get_bool(guild_id, "WELCOME_ENABLED")
+            gc.weekly_digest_enabled = await repo.get_bool(guild_id, "WEEKLY_DIGEST_ENABLED")
+
+            # 曜日は 0〜6 以外を保存されても既定へ落とす（例外を投げると
+            # そのギルドの全コマンドが死ぬ。gotcha one-guild-loses-all-features）
+            weekday = await repo.get_int(guild_id, "WEEKLY_DIGEST_WEEKDAY")
+            if weekday is not None and 0 <= weekday <= 6:
+                gc.weekly_digest_weekday = weekday
 
             club_name = await repo.get(guild_id, "CLUB_NAME")
             if club_name:

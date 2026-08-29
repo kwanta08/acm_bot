@@ -458,6 +458,138 @@ CREATE TABLE IF NOT EXISTS seasons (
     UNIQUE (guild_id, name)
 );
 """,
+    # 進捗の日次スナップショット（G4-7）。
+    #
+    # progress_nodes は「現在値」しか持たないため、ペースが
+    # 「作成日→最終更新日の平均」でしか出せず、停滞期間を含まない近似に
+    # なっていた（ADR 0022）。1日1行だけ積むことで実測の履歴を持つ。
+    #
+    # - snapshot_date は 'YYYY-MM-DD'。UNIQUE (guild_id, node_id, snapshot_date)
+    #   が「1日1行」を**構造で**保証する（アプリ側の if に頼らない）
+    # - aggregated / actual_weight_g は **NULL 許容**。未集計・未計測を
+    #   0.0 に丸めない（ADR 0021）
+    # - node_id に外部キーを張らない（progress_nodes と同じ既存方針。ADR 0019）。
+    #   ノードが消えても過去の履歴は残る
+    "progress_snapshots": f"""
+CREATE TABLE IF NOT EXISTS progress_snapshots (
+    snapshot_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    {_GUILD_COL},
+    node_id         TEXT NOT NULL,
+    snapshot_date   TEXT NOT NULL,
+    aggregated      REAL,
+    actual_weight_g REAL,
+    UNIQUE (guild_id, node_id, snapshot_date)
+);
+""",
+    # 資材・消耗品の在庫（G4-8）。
+    #
+    # 人力飛行機で最も痛いのは「プリプレグが無くて桁が巻けない」。
+    # カーボンプリプレグは納期が数週間で、切れてから気づくと工程が1ヶ月ずれる。
+    #
+    # - **品目名の初期値はコードに持たない**（サークルごとに違う）。
+    #   マスタ管理は layer_keta と同型（有効フラグ・(guild_id, name) で一意）
+    # - threshold は **NULL 許容**。閾値を決めていない品目を 0 扱いにしない
+    #   （0 にすると「在庫0でも閾値割れではない」という嘘になる。ADR 0021）
+    # - quantity / threshold は REAL。「2.5 m」「0.5 L」のような単位を扱う
+    # - low_notified_flag は「閾値割れの即時通知を送ったか」。
+    #   閾値以上へ戻ったときに 0 へ戻すので、割り込むたびに1回だけ飛ぶ
+    "stock_items": f"""
+CREATE TABLE IF NOT EXISTS stock_items (
+    stock_item_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    {_GUILD_COL},
+    item_name         TEXT NOT NULL,
+    unit              TEXT NOT NULL DEFAULT '個',
+    quantity          REAL NOT NULL DEFAULT 0,
+    threshold         REAL,
+    note              TEXT,
+    active_flag       INTEGER NOT NULL DEFAULT 1,
+    low_notified_flag INTEGER NOT NULL DEFAULT 0,
+    created_by        TEXT NOT NULL,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    UNIQUE (guild_id, item_name)
+);
+""",
+    # 在庫の増減履歴（G4-8）。「誰がいつ何をどれだけ使ったか」を残す。
+    # stock_item_id に外部キーを張らない（progress_nodes と同じ既存方針。
+    # ADR 0019）。品目を消しても履歴は残る
+    "stock_movements": f"""
+CREATE TABLE IF NOT EXISTS stock_movements (
+    movement_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    {_GUILD_COL},
+    stock_item_id INTEGER NOT NULL,
+    delta         REAL NOT NULL,
+    reason        TEXT,
+    user_id       TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+);
+""",
+    # 工具・機材の貸出（G4-9）。
+    #
+    # `/layer start` → `/layer end` とまったく同じ「開始 → 進行中 → 終了」モデル。
+    # マスタ（tools）と貸出（tool_loans）を分け、貸出中かどうかは
+    # **tool_loans に returned_at が NULL の行があるか**で表す
+    # （tools 側にフラグを置くと、行を消したときに貸出の事実まで消える）。
+    #
+    # - due_date は **NULL 許容**。返却予定日を決めていない貸出を
+    #   「本日返却」にしない（ADR 0021）。督促は due_date がある貸出だけ
+    # - tools は layer_keta と同型（有効フラグ・(guild_id, tool_name) で一意）
+    "tools": f"""
+CREATE TABLE IF NOT EXISTS tools (
+    tool_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    {_GUILD_COL},
+    tool_name   TEXT NOT NULL,
+    note        TEXT,
+    active_flag INTEGER NOT NULL DEFAULT 1,
+    created_by  TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    UNIQUE (guild_id, tool_name)
+);
+""",
+    # 貸出1回ぶん。returned_at が NULL なら貸出中。
+    # tool_id に外部キーを張らない（progress_nodes と同じ既存方針。ADR 0019）
+    "tool_loans": f"""
+CREATE TABLE IF NOT EXISTS tool_loans (
+    loan_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    {_GUILD_COL},
+    tool_id       INTEGER NOT NULL,
+    user_id       TEXT NOT NULL,
+    borrowed_at   TEXT NOT NULL,
+    due_date      TEXT,
+    returned_at   TEXT,
+    note          TEXT,
+    overdue_notified_flag INTEGER NOT NULL DEFAULT 0
+);
+""",
+    # ヒヤリハット・事故報告（G4-10）。
+    #
+    # 工房での切削・溶剤・高所作業・機体運搬・テストフライトと危険度が高く、
+    # 大学から安全管理体制の提示を求められることもある。今は雑談に流れて消える。
+    #
+    # **匿名の扱いに2つの列を使う。**
+    #   - reporter_id は匿名でも必ず保存する（悪用・虚偽報告への対処に要る）。
+    #     ただし**表示にもエクスポートにも出さない**（TABLES の列ホワイトリスト
+    #     から外してある。ADR 0016 の仕組みをそのまま使う）
+    #   - reporter_name は「表示してよい名前」。匿名報告では NULL。
+    #     表示側はこちらしか見ないので、匿名の約束が構造で守られる
+    #
+    # injury（けがの有無）は自由記述。「軽い擦り傷」「無し」など、
+    # 選択肢に収まらない実態を書けるようにする。
+    "incidents": f"""
+CREATE TABLE IF NOT EXISTS incidents (
+    incident_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    {_GUILD_COL},
+    occurred_at   TEXT NOT NULL,
+    place         TEXT NOT NULL,
+    description   TEXT NOT NULL,
+    injury        TEXT,
+    prevention    TEXT,
+    anonymous_flag INTEGER NOT NULL DEFAULT 0,
+    reporter_id   TEXT NOT NULL,
+    reporter_name TEXT,
+    created_at    TEXT NOT NULL
+);
+""",
     # Discord の表示名キャッシュ（ギルド別）。bot がギルドキャッシュから
     # 書き込み、ダッシュボード（Bot トークンを持たない別プロセス）が
     # ID → 表示名の解決に読む。name はユーザーなら「そのギルドでの表示名」
@@ -498,6 +630,12 @@ CREATE INDEX IF NOT EXISTS idx_progress_milestones_guild_due ON progress_milesto
 CREATE INDEX IF NOT EXISTS idx_seasons_guild_ended ON seasons(guild_id, ended_at);
 CREATE INDEX IF NOT EXISTS idx_members_guild_status ON members(guild_id, status);
 CREATE INDEX IF NOT EXISTS idx_progress_spar_links_guild ON progress_spar_links(guild_id);
+CREATE INDEX IF NOT EXISTS idx_progress_snapshots_node ON progress_snapshots(guild_id, node_id, snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_stock_items_guild ON stock_items(guild_id, active_flag);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(guild_id, stock_item_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_tools_guild ON tools(guild_id, active_flag);
+CREATE INDEX IF NOT EXISTS idx_tool_loans_open ON tool_loans(guild_id, returned_at, tool_id);
+CREATE INDEX IF NOT EXISTS idx_incidents_guild ON incidents(guild_id, occurred_at);
 """
 
 # ---------------------------------------------------------------------------
@@ -588,10 +726,14 @@ POSTGRES_VIEW_DDL = "\n".join(
 #    （年度替わり。既存メンバーはすべて active。migrations/013）
 # 15: discord_name_cache を追加（ダッシュボードの ID → 表示名解決用。
 #    bot がギルドキャッシュから書き、Web 側が読む。migrations/014）
+# 21: incidents を追加（ヒヤリハット・事故報告。G4-10）
+# 20: tools / tool_loans を追加（工具・機材の貸出。G4-9）
+# 19: stock_items / stock_movements を追加（資材・消耗品の在庫。G4-8）
+# 18: progress_snapshots を追加（進捗の日次履歴。G4-7）
 # 16: layer_sessions.layer_num を INTEGER から TEXT へ変更（/layer start は
 #    「シュリンク」等のテキスト層番号を受け付ける仕様。PostgreSQL では
 #    asyncpg の DataError になっていた。migrations/015）
-SCHEMA_VERSION = 17
+SCHEMA_VERSION = 21
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
@@ -619,6 +761,12 @@ _PK_COLUMNS: dict[str, str] = {
     "progress_nodes": "progress_node_id",
     "progress_todoist_links": "link_id",
     "progress_spar_links": "spar_link_id",
+    "progress_snapshots": "snapshot_id",
+    "stock_items": "stock_item_id",
+    "stock_movements": "movement_id",
+    "tools": "tool_id",
+    "tool_loans": "loan_id",
+    "incidents": "incident_id",
 }
 
 _INSERT_TABLE_RE = re.compile(r"INSERT\s+INTO\s+(\w+)", re.IGNORECASE)
@@ -1028,6 +1176,18 @@ class Database:
         if version < 17:
             await self._migrate_v17_schedule_confirmed()
 
+        if version < 18:
+            await self._migrate_v18_progress_snapshots()
+
+        if version < 19:
+            await self._migrate_v19_stock()
+
+        if version < 20:
+            await self._migrate_v20_tools()
+
+        if version < 21:
+            await self._migrate_v21_incidents()
+
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
 
@@ -1242,6 +1402,82 @@ class Database:
         ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
         await self._executescript(ddl_map["discord_name_cache"])
         log.info("discord_name_cache テーブルを作成しました（v15）。")
+
+    async def _migrate_v21_incidents(self) -> None:
+        """
+        v21: incidents テーブルを追加する（冪等）。
+
+        ヒヤリハット・事故報告（G4-10）。
+
+        **v19（在庫）にも v20（工具）にも足さない。**
+        `_migrate_versioned()` は `version >= SCHEMA_VERSION` で早期 return する
+        ため、既に適用済みの版へ後から CREATE を足しても既存 DB には届かない
+        （gotcha `bot-wont-start-undefined-column`）。
+
+        **既存データには一切触れない。** 追加されるのは空のテーブル1つだけ。
+        """
+        ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
+        await self._executescript(ddl_map["incidents"])
+        log.info("incidents テーブルを作成しました（v21）。")
+
+    async def _migrate_v20_tools(self) -> None:
+        """
+        v20: tools / tool_loans テーブルを追加する（冪等）。
+
+        工具・機材の貸出管理（G4-9）。
+
+        **v19（在庫）に足さない。** `_migrate_versioned()` は
+        `version >= SCHEMA_VERSION` で早期 return するため、v19 済みの DB は
+        二度と v19 の処理を通らない。後から v19 へ CREATE を足すと
+        **新規 DB にだけテーブルがある**状態になり、本番だけ
+        「relation does not exist」で落ちる（gotcha
+        `bot-wont-start-undefined-column` と同型）。
+
+        **既存データには一切触れない。** 追加されるのは空のテーブル2つだけで、
+        工具の初期値も入れない（何を貸出管理するかはサークルごとに違う）。
+        """
+        ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
+        for name in ("tools", "tool_loans"):
+            await self._executescript(ddl_map[name])
+        log.info("tools / tool_loans テーブルを作成しました（v20）。")
+
+    async def _migrate_v19_stock(self) -> None:
+        """
+        v19: stock_items / stock_movements テーブルを追加する（冪等）。
+
+        資材・消耗品の在庫と発注アラート（G4-8）。
+
+        新規 DB では init_schema / _connect_pg が CREATE TABLE IF NOT EXISTS で
+        作成済みだが、既存 DB でも確実に作られるようここでも実行する
+        （v10 / v13 / v15 / v18 と同じ方式）。
+
+        **既存データには一切触れない。** 追加されるのは空のテーブル2つだけで、
+        **品目の初期値も入れない**（何を在庫管理するかはサークルごとに違う）。
+        品目が0件のギルドでは `/stock list` が空状態を出し、朝の通知も飛ばない。
+        """
+        ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
+        for name in ("stock_items", "stock_movements"):
+            await self._executescript(ddl_map[name])
+        log.info("stock_items / stock_movements テーブルを作成しました（v19）。")
+
+    async def _migrate_v18_progress_snapshots(self) -> None:
+        """
+        v18: progress_snapshots テーブルを追加する（冪等）。
+
+        進捗の日次履歴。`/progress history` とマイルストーンのペース算出が読む。
+
+        新規 DB では init_schema / _connect_pg が CREATE TABLE IF NOT EXISTS で
+        作成済みだが、既存 DB でも確実に作られるようここでも実行する
+        （v10 / v13 / v15 と同じ方式）。
+
+        **既存データには一切触れない。** 追加されるのは空のテーブルだけで、
+        履歴は次の定期同期から1日1行ずつ積まれる。溜まるまでは
+        ペース算出が従来の推定（作成日→更新日）にフォールバックするため、
+        マイグレーション直後に判定結果が変わることはない（ADR 0024）。
+        """
+        ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
+        await self._executescript(ddl_map["progress_snapshots"])
+        log.info("progress_snapshots テーブルを作成しました（v18）。")
 
     async def _migrate_v17_schedule_confirmed(self) -> None:
         """

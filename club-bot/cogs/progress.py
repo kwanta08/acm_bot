@@ -13,7 +13,9 @@ progress_nodes テーブル（ギルドごとに独立）。Google Sheets は不
 - /progress setup      : Todoist プロジェクトを進捗ツリーに紐付ける
                          セルフサービス登録ウィザード（班長以上）
 - /progress sync       : Todoist 同期＋桁巻き反映＋再集計を即時実行（管理者）
-- 定期同期             : 20分ごとに全ギルドを同期。エラーは #bot-log へ通知
+- /progress history    : 進捗の履歴（スパークラインと直近の伸び。全員）
+- 定期同期             : 20分ごとに全ギルドを同期し、その日の
+                         スナップショットを1回だけ保存。エラーは #bot-log へ通知
 """
 
 from __future__ import annotations
@@ -45,7 +47,10 @@ from services.milestone_service import (
     days_until_competition,
     evaluate_all,
     parse_date,
+    recent_gain,
+    snapshot_pace,
     spar_pace,
+    sparkline,
 )
 from services.progress_tree import (
     ProgressNode,
@@ -84,6 +89,9 @@ BAR_WIDTH = 12
 
 # 手入力ノードの ID プレフィックス（Todoist 由来 td_ / プロジェクト pj_ と区別）
 MANUAL_ID_PREFIX = "n_"
+
+# /progress history で一度に並べるノード数（Embed の field 上限に収める）
+MAX_HISTORY_NODES = 10
 
 _EMPTY_TREE_DESC = (
     "まだ機体が登録されていません。\n"
@@ -820,12 +828,53 @@ class Progress(commands.Cog):
             log.warning("進捗定期同期失敗: %s", type(e).__name__)
             return
         for result in results:
+            # スナップショットは**同期の成否に関わらず**その日1回だけ試みる。
+            # エラーがあったギルドを飛ばすと、Todoist 連携が壊れている間だけ
+            # 履歴が抜け、あとからペースが狂う
+            try:
+                await self.save_daily_snapshot(result.guild_id)
+            except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
+                log.warning(
+                    "進捗スナップショットの保存に失敗 (guild=%s): %s",
+                    result.guild_id,
+                    type(e).__name__,
+                )
             if not result.errors:
                 continue
-            lines = "\n".join(f"- {e}" for e in result.errors[:10])
+            lines = "LINEBREAK".join(f"- {e}" for e in result.errors[:10])
             await self.bot.log_to_channel(
-                f"[進捗同期] 問題があります:\n{lines}", guild_id=result.guild_id
+                f"[進捗同期] 問題があります:LINEBREAK{lines}", guild_id=result.guild_id
             )
+
+    async def save_daily_snapshot(self, guild_id: int, today=None) -> int:
+        """その日の進捗スナップショットを保存する（G4-7）。戻り値は書けた行数。
+
+        **1日1行。** 20分ごとのループから呼ばれるが、その日の分が既にあれば
+        何も書かない。実際の一意性は UNIQUE (guild_id, node_id, snapshot_date)
+        が保証していて、ここの早期 return は無駄な書き込みを省くためのもの
+        （ADR 0008: 規律ではなく構造で守る）。
+
+        保存されるのは「その日の最初の同期時点の値」＝実質は前日終了時点の状態。
+        """
+        day = (today or now().date()).isoformat()
+        if await self.repo.has_snapshot(guild_id, day):
+            return 0
+        tree = await self.load_tree(guild_id)
+        if not tree.by_id:
+            return 0
+        rows = [
+            {
+                "node_id": node.node_id,
+                # 未集計・未計測は None のまま入れる（0.0 に丸めない。ADR 0021）
+                "aggregated": node.aggregated,
+                "actual_weight_g": node.aggregated_actual_weight_g,
+            }
+            for node in tree.by_id.values()
+        ]
+        written = await self.repo.save_snapshots(guild_id, day, rows)
+        if written:
+            log.info("進捗スナップショットを保存しました (guild=%s, %d件)", guild_id, written)
+        return written
 
     @periodic_sync.before_loop
     async def _before_sync(self):
@@ -1283,6 +1332,89 @@ class Progress(commands.Cog):
         view = ProgressView(self, tree, None, interaction.user.id, guild_id)
         view.message = await interaction.followup.send(embed=embed, view=view)
 
+    # ---------- /progress history ----------
+    @group.command(name="history", description="進捗の履歴（推移と直近の伸び）を表示します。")
+    @app_commands.describe(
+        node="対象ノード（省略時は機体全体）", days="さかのぼる日数（既定60日）"
+    )
+    @require(Level.L1)
+    async def progress_history(
+        self,
+        interaction: discord.Interaction,
+        node: str | None = None,
+        days: app_commands.Range[int, 7, 365] = 60,
+    ):
+        """日次スナップショットから推移を出す（G4-7）。
+
+        **履歴が無い期間について何も主張しない。** 記録が1点しか無ければ
+        「伸び」を 0% とは書かず、いつから溜まっているかだけを伝える
+        （ADR 0021 / 0022）。
+        """
+        await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        tree = await self.load_tree(guild_id)
+        if not tree.by_id:
+            await interaction.followup.send(
+                embed=info_embed("進捗データがありません", _EMPTY_TREE_DESC), ephemeral=True
+            )
+            return
+
+        targets = [tree.by_id[node]] if node and node in tree.by_id else None
+        if node and targets is None:
+            await interaction.followup.send(
+                embed=error_embed(
+                    f"ノード `{node}` が見つかりません。オートコンプリートの候補から選んでください。"
+                ),
+                ephemeral=True,
+            )
+            return
+        if targets is None:
+            # 省略時は機体（根）ぜんぶ。ツリーの頂点が知りたいことの大半
+            targets = list(tree.roots)
+
+        today = now().date()
+        since = (today - timedelta(days=days)).isoformat()
+        embed = info_embed(
+            f"📈 進捗の履歴（直近 {days} 日）",
+            "1日1件の記録から作っています。導入直後は記録が溜まるまで表示できません。",
+        )
+        has_any = False
+        for target in targets[:MAX_HISTORY_NODES]:
+            rows = await self.repo.list_snapshots(guild_id, target.node_id, since_date=since)
+            if not rows:
+                embed.add_field(
+                    name=target.name or target.node_id,
+                    value="この期間の記録はまだありません。",
+                    inline=False,
+                )
+                continue
+            has_any = True
+            values = [r.get("aggregated") for r in rows]
+            gain = recent_gain(rows, 7, today)
+            first = next((v for v in values if v is not None), None)
+            last = next((v for v in reversed(values) if v is not None), None)
+            lines = [f"`{sparkline(values)}`"]
+            if first is not None and last is not None:
+                lines.append(f"{first * 100:.0f}% → {last * 100:.0f}%（{len(rows)} 日ぶん）")
+            # **伸びが出せないときは 0% と書かない。** 比較できる記録が無い
+            lines.append(
+                f"直近7日の伸び: {gain * 100:+.1f} ポイント"
+                if gain is not None
+                else "直近7日の伸び: —（比較できる記録がまだありません）"
+            )
+            embed.add_field(
+                name=target.name or target.node_id, value="\n".join(lines), inline=False
+            )
+        if not has_any:
+            embed.description = (
+                "まだ履歴がありません。20分ごとの同期が1日1件ずつ記録するので、"
+                "数日たつと推移が出ます。"
+            )
+        add_truncation_note(embed, len(targets), MAX_HISTORY_NODES)
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
     # ---------- /weight ----------
     weight_group = app_commands.Group(name="weight", description="機体重量の記録と集計")
 
@@ -1504,22 +1636,36 @@ class Progress(commands.Cog):
 
     # ---------- /countdown ----------
     async def pace_overrides(self, guild_id: int) -> dict[str, Pace]:
-        """桁巻きに紐付いたノードのペースを layer_records から作る。
+        """推定より確かなペースが出せるノードだけ、その値を返す。
 
-        積層は作業日の履歴が残っているので、created_at / updated_at から
-        推定するより実際の作業ペースに近い。
+        優先順位（G4-7 / ADR 0022 の更新）:
+
+        1. **progress_snapshots の日次履歴** — 実測。停滞期間も含む
+        2. layer_records の作業日 — 桁巻きに紐付いたノードだけ
+        3. （ここに無いノードは `node_pace` の推定へフォールバックする）
+
+        **履歴が足りないノードは 1 を返さない。** `snapshot_pace` が
+        `per_day=None` を返すので、その場合は 2 → 3 へ落ちる。
+        導入直後や新しいノードで嘘の予測を出さないための線引き。
         """
-        links = await self.repo.list_spar_links(guild_id)
-        if not links:
-            return {}
-        dates_by_keta = await self.repo.list_layer_dates(guild_id)
         overrides: dict[str, Pace] = {}
-        for link in links:
-            raw = dates_by_keta.get(link["keta_name"], [])
-            days = [d for d in (parse_date(x) for x in raw) if d is not None]
-            pace = spar_pace(days, int(link["target_layers"] or 0))
+
+        # 2. 桁巻き（先に入れて、スナップショットがあれば上書きする）
+        links = await self.repo.list_spar_links(guild_id)
+        if links:
+            dates_by_keta = await self.repo.list_layer_dates(guild_id)
+            for link in links:
+                raw = dates_by_keta.get(link["keta_name"], [])
+                days = [d for d in (parse_date(x) for x in raw) if d is not None]
+                pace = spar_pace(days, int(link["target_layers"] or 0))
+                if pace.per_day is not None:
+                    overrides[link["node_id"]] = pace
+
+        # 1. スナップショット（十分に溜まっているノードだけ）
+        for node_id in await self.repo.snapshot_node_ids(guild_id):
+            pace = snapshot_pace(await self.repo.list_snapshots(guild_id, node_id))
             if pace.per_day is not None:
-                overrides[link["node_id"]] = pace
+                overrides[node_id] = pace
         return overrides
 
     @app_commands.command(
@@ -1575,6 +1721,7 @@ Progress.weight_set.autocomplete("node")(Progress._node_autocomplete)
 Progress.weight_view.autocomplete("node")(Progress._node_autocomplete)
 Progress.milestone_add.autocomplete("node")(Progress._node_autocomplete)
 Progress.milestone_remove.autocomplete("node")(Progress._node_autocomplete)
+Progress.progress_history.autocomplete("node")(Progress._node_autocomplete)
 
 
 async def setup(bot: commands.Bot):

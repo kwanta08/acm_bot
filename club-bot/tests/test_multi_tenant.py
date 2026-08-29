@@ -463,6 +463,218 @@ def test_guild_bound_proxy():
     run(_main())
 
 
+# ---------------------------------------------------------------------
+# bot-log の送信先（G4-11）
+#
+# `BOT_LOG_CHANNEL_ID` を環境変数で設定すると、その値は
+# `config.for_guild()` のフォールバックとして**全ギルドの GuildConfig へ
+# 配られる**。送信先を bot 全体のキャッシュ（`self.get_channel`）で引くと、
+# 設定していないギルドの運用ログまで1つのサーバーへ集まる。
+# ---------------------------------------------------------------------
+class _LogChannel:
+    def __init__(self, channel_id: int, guild):
+        self.id = channel_id
+        self.guild = guild
+        self.sent: list[str] = []
+
+    async def send(self, content=None, **kwargs):
+        self.sent.append(content)
+
+
+class _LogGuild:
+    def __init__(self, guild_id: int, channels: dict[int, "_LogChannel"] | None = None):
+        self.id = guild_id
+        self.name = str(guild_id)
+        self._channels = channels or {}
+
+    def get_channel_or_thread(self, channel_id: int):
+        return self._channels.get(channel_id)
+
+
+class _LogBot:
+    """`log_to_channel` の実装だけを借りて呼ぶための最小の bot。
+
+    `discord.Client.guilds` は property なので、実インスタンスを作って
+    差し替えることができない。**実装は本物を使い**（下でメソッドを束ねる）、
+    周辺だけを差し替える。
+    """
+
+    def __init__(self, guilds, fetched=None):
+        self.guilds = list(guilds)
+        self._fetched = fetched
+        #: API を叩いた回数。マルチテナント運用では 0 であること
+        self.fetch_calls = 0
+
+    def get_guild(self, guild_id: int):
+        return next((g for g in self.guilds if g.id == guild_id), None)
+
+    async def fetch_channel(self, _channel_id: int):
+        self.fetch_calls += 1
+        if self._fetched is None:
+            raise RuntimeError("not found")
+        return self._fetched
+
+
+def _log_bot(guilds, *, fetched=None):
+    from unittest import mock
+
+    sys.modules.setdefault("dotenv", mock.MagicMock())
+    from bot import ClubBot
+
+    # **本物の実装を束ねる。** ここでコピーを書くと、実装が壊れても緑になる
+    _LogBot.log_to_channel = ClubBot.log_to_channel
+    _LogBot._log_channel_for = ClubBot._log_channel_for
+    _LogBot._fetch_legacy_log_channel = ClubBot._fetch_legacy_log_channel
+    return _LogBot(guilds, fetched)
+
+
+def test_bot_log_never_leaves_the_guild_it_belongs_to():
+    """他ギルドのチャンネル ID を設定した状態で、送信先が0件になること。"""
+
+    async def _main():
+        from unittest import mock
+
+        sys.modules.setdefault("dotenv", mock.MagicMock())
+        from config import config as global_config
+
+        db = await _connected_db()
+        try:
+            # G1 のログチャンネル（ID 777）は G1 にしか無い
+            g1_channel = _LogChannel(777, guild=None)
+            g1 = _LogGuild(G1, {777: g1_channel})
+            # G2 は同じ 777 を設定しているが、G2 にそのチャンネルは無い
+            g2 = _LogGuild(G2, {})
+            g1_channel.guild = g1
+
+            repo = SettingsRepository(db)
+            await repo.set(G1, "BOT_LOG_CHANNEL_ID", "777")
+            await repo.set(G2, "BOT_LOG_CHANNEL_ID", "777")
+            global_config._db = db
+            global_config.clear_guild_cache()
+
+            client = _log_bot([g1, g2])
+            await client.log_to_channel("テスト", guild_id=G2)
+            assert g1_channel.sent == [], "他ギルドのログチャンネルへ流れている"
+
+            await client.log_to_channel("テスト", guild_id=G1)
+            assert len(g1_channel.sent) == 1, "自ギルドへは届くこと"
+        finally:
+            global_config.clear_guild_cache()
+            global_config._db = None
+            await db.close()
+
+    run(_main())
+
+
+def test_bot_log_broadcast_only_reaches_guilds_that_own_the_channel():
+    """env フォールバックで全ギルドに同じ ID が配られても1箇所にしか出さない。"""
+
+    async def _main():
+        from unittest import mock
+
+        sys.modules.setdefault("dotenv", mock.MagicMock())
+        from config import config as global_config
+
+        db = await _connected_db()
+        try:
+            g1_channel = _LogChannel(777, guild=None)
+            g1 = _LogGuild(G1, {777: g1_channel})
+            g1_channel.guild = g1
+            g2 = _LogGuild(G2, {})
+
+            # DB には何も入れない。env 相当のフォールバックだけを立てる
+            global_config._db = db
+            global_config.bot_log_channel_id = 777
+            global_config.clear_guild_cache()
+
+            client = _log_bot([g1, g2])
+            await client.log_to_channel("全体通知")
+            assert len(g1_channel.sent) == 1, "実在するギルドへ1回だけ出ること"
+        finally:
+            global_config.bot_log_channel_id = None
+            global_config.clear_guild_cache()
+            global_config._db = None
+            await db.close()
+
+    run(_main())
+
+
+def test_the_legacy_fallback_verifies_the_channel_belongs_to_the_legacy_guild():
+    """GUILD_ID 指定の単一ギルド運用（後方互換）を壊さないこと。
+
+    起動直後は guilds キャッシュが空なので API から取るが、
+    **取得したチャンネルが GUILD_ID のものかを必ず検査する**。
+    """
+
+    async def _main():
+        from unittest import mock
+
+        sys.modules.setdefault("dotenv", mock.MagicMock())
+        from config import config as global_config
+
+        db = await _connected_db()
+        try:
+            global_config._db = db
+            global_config.bot_log_channel_id = 777
+            global_config.guild_id = G1
+            global_config.clear_guild_cache()
+
+            # 正しいギルドのチャンネル → 届く
+            legacy = _LogChannel(777, guild=_LogGuild(G1))
+            client = _log_bot([], fetched=legacy)
+            await client.log_to_channel("起動しました")
+            assert len(legacy.sent) == 1
+
+            # 別ギルドのチャンネル → 送らない
+            foreign = _LogChannel(777, guild=_LogGuild(G2))
+            client = _log_bot([], fetched=foreign)
+            await client.log_to_channel("起動しました")
+            assert foreign.sent == [], "GUILD_ID 以外のサーバーへ流れている"
+        finally:
+            global_config.bot_log_channel_id = None
+            global_config.guild_id = None
+            global_config.clear_guild_cache()
+            global_config._db = None
+            await db.close()
+
+    run(_main())
+
+
+def test_no_legacy_fallback_without_an_explicit_guild_id():
+    """マルチテナント運用（GUILD_ID 未指定）では env フォールバックを使わない。
+
+    どのギルドのチャンネルか確かめる手段が無いため。
+    """
+
+    async def _main():
+        from unittest import mock
+
+        sys.modules.setdefault("dotenv", mock.MagicMock())
+        from config import config as global_config
+
+        db = await _connected_db()
+        try:
+            global_config._db = db
+            global_config.bot_log_channel_id = 777
+            global_config.guild_id = None
+            global_config.clear_guild_cache()
+
+            fetched = _LogChannel(777, guild=_LogGuild(G2))
+            client = _log_bot([], fetched=fetched)
+            await client.log_to_channel("起動しました")
+            assert fetched.sent == []
+            # **API すら叩かない。** どのギルドのチャンネルか確かめる手段が
+            # ないので、取得を試みること自体が無駄（かつ誤送信の入口になる）
+            assert client.fetch_calls == 0, "GUILD_ID 未指定なのに fetch している"
+        finally:
+            global_config.bot_log_channel_id = None
+            global_config.clear_guild_cache()
+            global_config._db = None
+            await db.close()
+
+    run(_main())
+
+
 def test_config_for_guild_resolution():
     """ギルド別設定解決: DB（ギルド別） > env フォールバック。"""
 

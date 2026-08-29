@@ -69,6 +69,27 @@ class LayerSessionRepository(BaseRepository):
         )
         return cur.lastrowid
 
+    async def list_records(self, guild_id: int, keta: str | None = None) -> list[dict[str, Any]]:
+        """完了記録を古い順に返す（`/layer stats` の集計用）。
+
+        期間の絞り込みは呼び出し側（services/layer_stats_service）で行う。
+        ended_at は ISO 文字列で、オフセット表記が混ざると SQL の文字列比較が
+        壊れるため、境界判定は datetime へ直してから行う。
+        """
+        columns = "user_id, keta, layer_num, started_at, ended_at, minutes"
+        if keta is None:
+            rows = await self.db.fetchall(
+                f"SELECT {columns} FROM layer_records WHERE guild_id = ? ORDER BY ended_at",
+                (guild_id,),
+            )
+        else:
+            rows = await self.db.fetchall(
+                f"SELECT {columns} FROM layer_records"
+                " WHERE guild_id = ? AND keta = ? ORDER BY ended_at",
+                (guild_id, keta),
+            )
+        return [dict(r) for r in rows]
+
     async def mark_synced(self, guild_id: int, record_id: int) -> None:
         await self.db.execute(
             "UPDATE layer_records SET synced_flag = 1 WHERE guild_id = ? AND record_id = ?",

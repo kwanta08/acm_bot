@@ -221,6 +221,52 @@ _SEED_SQL: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
         (),
     ),
+    "progress_snapshots": (
+        (
+            "INSERT INTO progress_snapshots (guild_id, node_id, snapshot_date,"
+            " aggregated, actual_weight_g)"
+            " VALUES (?, 'n1', '2026-08-01', 0.4, NULL)"
+        ),
+        (),
+    ),
+    "stock_items": (
+        (
+            "INSERT INTO stock_items (guild_id, item_name, unit, quantity,"
+            " created_by, created_at, updated_at)"
+            " VALUES (?, 'プリプレグ', 'm', 10, 'u1', '2026-01-01', '2026-01-01')"
+        ),
+        (),
+    ),
+    "stock_movements": (
+        (
+            "INSERT INTO stock_movements (guild_id, stock_item_id, delta,"
+            " user_id, created_at)"
+            " VALUES (?, 1, -1, 'u1', '2026-01-01')"
+        ),
+        (),
+    ),
+    "tools": (
+        (
+            "INSERT INTO tools (guild_id, tool_name, created_by, created_at)"
+            " VALUES (?, 'トルクレンチ', 'u1', '2026-01-01')"
+        ),
+        (),
+    ),
+    "tool_loans": (
+        (
+            "INSERT INTO tool_loans (guild_id, tool_id, user_id, borrowed_at)"
+            " VALUES (?, 1, 'u1', '2026-01-01')"
+        ),
+        (),
+    ),
+    "incidents": (
+        (
+            "INSERT INTO incidents (guild_id, occurred_at, place, description,"
+            " reporter_id, created_at)"
+            " VALUES (?, '2026-01-01 10:00', '工房', '転びかけた', 'u1', '2026-01-01')"
+        ),
+        (),
+    ),
 }
 
 

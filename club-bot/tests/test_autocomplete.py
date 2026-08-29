@@ -21,6 +21,8 @@ import sys
 import tempfile
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from discord import app_commands
@@ -221,6 +223,40 @@ def test_schedule_autocomplete_outside_a_guild_is_empty():
     run(_main())
 
 
+def registered_autocomplete(command, param_name: str) -> str:
+    """コマンドの引数に**実際に束ねられている**補完コールバック名を返す（G4-13）。
+
+    **公開 API の `Parameter.autocomplete` は `bool` を返すプロパティ**なので、
+    `param.autocomplete is not None` は補完が1つも登録されていなくても
+    `False is not None` → `True` で通ってしまう。
+    G2-2 で追加した2つの検査は、これで**何も担保していなかった**
+    （実測: `/schedule create` の `title` は補完が無いのに `True`）。
+
+    private 属性 `_params` に依存するが、公開 API では「どのコールバックが
+    束ねられているか」を取れない。消えたときは `AttributeError` / `KeyError` で
+    **大きな音を立てて落ちる**ので、テスト専用の依存として許容する。
+    """
+    return command._params[param_name].autocomplete.__name__
+
+
+def test_the_registration_check_is_not_vacuous():
+    """**この検査自体が空振りしていないこと**を先に固定する（G4-13）。
+
+    補完が付いていない引数に対して `registered_autocomplete` が
+    落ちること——公開 API の `autocomplete` プロパティを見ていたときは
+    ここが `True` を返して素通りしていた。
+    """
+    create = next(
+        c
+        for c in Schedule.group.commands
+        if isinstance(c, app_commands.Command) and c.name == "create"
+    )
+    # 補完が付いていない引数（title）。公開 API では False が返るだけ
+    assert create.get_parameter("title").autocomplete is False
+    with pytest.raises(AttributeError):
+        registered_autocomplete(create, "title")
+
+
 def test_schedule_autocomplete_is_registered_on_the_right_commands():
     """開催中のみ: close / remind / edit-deadline、全件: status / delete。"""
     open_only = {"close", "remind", "edit-deadline"}
@@ -229,9 +265,12 @@ def test_schedule_autocomplete_is_registered_on_the_right_commands():
         if not isinstance(command, app_commands.Command):
             continue
         if command.name in open_only | with_closed:
-            param = command.get_parameter("schedule_id")
-            assert param is not None and param.autocomplete is not None, (
-                f"/schedule {command.name} の schedule_id に補完が無い"
+            # **公開 API の `autocomplete` は bool。** 名前まで見ないと
+            # 「登録されていないのに緑」になる（G4-13）
+            name = registered_autocomplete(command, "schedule_id")
+            expected = "_schedule_ac_open" if command.name in open_only else "_schedule_ac_all"
+            assert name == expected, (
+                f"/schedule {command.name} の schedule_id に付いている補完が {name}"
             )
 
 
@@ -305,7 +344,7 @@ def test_task_autocomplete_is_registered_on_the_right_commands():
         if not isinstance(command, app_commands.Command):
             continue
         if command.name in targets:
-            param = command.get_parameter("task_id")
-            assert param is not None and param.autocomplete is not None, (
-                f"/task {command.name} の task_id に補完が無い"
+            name = registered_autocomplete(command, "task_id")
+            assert name == "_task_autocomplete", (
+                f"/task {command.name} の task_id に付いている補完が {name}"
             )

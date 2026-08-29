@@ -380,6 +380,94 @@ class ProgressRepository(BaseRepository):
         return cur.rowcount > 0
 
     # ------------------------------------------------------------------
+    # 日次スナップショット（G4-7）
+    # ------------------------------------------------------------------
+    async def has_snapshot(self, guild_id: int, snapshot_date: str) -> bool:
+        """その日のスナップショットが既にあるか（1日1回だけ書くための確認）。
+
+        実際の「1日1行」は UNIQUE (guild_id, node_id, snapshot_date) が
+        構造で保証する。ここは無駄な書き込みを省くための早期 return 用で、
+        **これだけに頼らない**（ADR 0008: 規律ではなく構造で守る）。
+        """
+        row = await self.db.fetchone(
+            "SELECT 1 AS hit FROM progress_snapshots"
+            " WHERE guild_id = ? AND snapshot_date = ? LIMIT 1",
+            (guild_id, snapshot_date),
+        )
+        return row is not None
+
+    async def save_snapshots(
+        self, guild_id: int, snapshot_date: str, rows: list[dict[str, Any]]
+    ) -> int:
+        """その日のスナップショットを保存する。戻り値は実際に書けた行数。
+
+        rows の各要素は node_id / aggregated / actual_weight_g。
+        **同じ日の2回目以降は書かない**（ON CONFLICT DO NOTHING）。
+        つまり保存されるのは「その日の最初の同期時点の値」で、
+        実質は前日終了時点の状態になる。
+        """
+        written = 0
+        for row in rows:
+            cur = await self.db.execute(
+                """
+                INSERT INTO progress_snapshots
+                    (guild_id, node_id, snapshot_date, aggregated, actual_weight_g)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT (guild_id, node_id, snapshot_date) DO NOTHING
+                """,
+                (
+                    guild_id,
+                    str(row["node_id"]),
+                    snapshot_date,
+                    row.get("aggregated"),
+                    row.get("actual_weight_g"),
+                ),
+            )
+            written += max(cur.rowcount, 0)
+        return written
+
+    async def list_snapshots(
+        self, guild_id: int, node_id: str, since_date: str | None = None
+    ) -> list[dict[str, Any]]:
+        """1ノードの履歴を古い順に返す。
+
+        snapshot_date は 'YYYY-MM-DD' 固定なので、ここは文字列比較で
+        正しく並ぶ（ISO 日時と違いオフセット表記が混ざらない）。
+        """
+        if since_date is None:
+            rows = await self.db.fetchall(
+                "SELECT snapshot_date, aggregated, actual_weight_g FROM progress_snapshots"
+                " WHERE guild_id = ? AND node_id = ? ORDER BY snapshot_date",
+                (guild_id, str(node_id)),
+            )
+        else:
+            rows = await self.db.fetchall(
+                "SELECT snapshot_date, aggregated, actual_weight_g FROM progress_snapshots"
+                " WHERE guild_id = ? AND node_id = ? AND snapshot_date >= ?"
+                " ORDER BY snapshot_date",
+                (guild_id, str(node_id), since_date),
+            )
+        return [dict(r) for r in rows]
+
+    async def snapshot_node_ids(self, guild_id: int) -> list[str]:
+        """履歴が1件でもあるノード ID を返す（ペース算出の対象）。"""
+        rows = await self.db.fetchall(
+            "SELECT DISTINCT node_id FROM progress_snapshots WHERE guild_id = ?"
+            " ORDER BY node_id",
+            (guild_id,),
+        )
+        return [str(r["node_id"]) for r in rows]
+
+    async def latest_snapshot_dates(self, guild_id: int) -> dict[str, str]:
+        """ノードごとの最新スナップショット日（デバッグ・表示用）。"""
+        rows = await self.db.fetchall(
+            "SELECT node_id, MAX(snapshot_date) AS latest FROM progress_snapshots"
+            " WHERE guild_id = ? GROUP BY node_id",
+            (guild_id,),
+        )
+        return {str(r["node_id"]): str(r["latest"]) for r in rows}
+
+    # ------------------------------------------------------------------
     # 桁巻きの完了層数（layer_records から集計）
     # ------------------------------------------------------------------
     async def count_completed_layers(self, guild_id: int) -> dict[str, int]:

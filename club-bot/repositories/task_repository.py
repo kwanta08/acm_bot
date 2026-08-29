@@ -136,6 +136,21 @@ class TaskRepository(BaseRepository):
         )
         return [dict(r) for r in rows]
 
+    async def list_completed(self, guild_id: int) -> list[dict[str, Any]]:
+        """完了済みタスクを返す（週次ダイジェストの集計用）。
+
+        期間の絞り込みは呼び出し側（services/weekly_digest_service）が行う。
+        `completed_at` は ISO 文字列で、オフセット表記が混ざると SQL の
+        文字列比較が黙って壊れるため、境界判定は datetime に直してから行う。
+        """
+        rows = await self.db.fetchall(
+            "SELECT local_task_id, title, team_key, assignee_id, completed_at FROM tasks"
+            " WHERE guild_id = ? AND status = 'done' AND completed_at IS NOT NULL"
+            " ORDER BY completed_at",
+            (guild_id,),
+        )
+        return [dict(r) for r in rows]
+
     async def list_all_for_export(self, guild_id: int) -> list[dict[str, Any]]:
         rows = await self.db.fetchall(
             "SELECT * FROM tasks WHERE guild_id = ? AND status != 'archived' ORDER BY local_task_id",

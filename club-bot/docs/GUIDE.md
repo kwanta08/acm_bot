@@ -31,6 +31,8 @@
 | ミーティングの日程を決める | `/schedule create` → メンバーがリアクションで回答 |
 | やることを配って追いかける | `/task add` `/task list` `/task done` |
 | 桁巻きの作業を記録する | `/layer start` → `/layer end` |
+| 危なかったことを報告する | `/incident report`（`anonymous:true` で匿名） |
+| 自分がやることを確認する | `/me` |
 | 機体の進捗を見える化する | `/progress add` `/progress view` |
 | 手伝える人を探す | `/member support` |
 | 今週の状況を振り返る | `/report weekly` `/report attendance-rate` |
@@ -191,7 +193,8 @@ ONにしない限り参加者には何も送りません。
 
 ```
 /member setup               所属班・班長をまとめて設定
-/report audit               直近の操作履歴
+/report notifications       直近の通知履歴
+/report changes             設定・マスタ変更の操作ログ
 /schedule delete            日程調整の削除（票データは残ります）
 /schedule restore           削除した日程調整を戻す
 ```
@@ -364,9 +367,12 @@ ONにしない限り参加者には何も送りません。
 
 ```
 /report weekly              今週のサマリー（班長以上）
-/report attendance-rate     出欠率の一覧（班長以上）
+/report weekly public:true  同じ内容をチャンネルへ公開投稿（班長以上）
+/report attendance-rate     投票ごとの出欠率（班長以上）
+/report member-attendance   メンバー別の回答率・連続未回答（班長以上・自分にだけ表示）
 /report export-tasks        タスク一覧を CSV で出力（班長以上）
-/report audit               直近の操作履歴（幹部以上）
+/report notifications       直近の通知履歴（幹部以上）
+/report changes             設定・マスタ変更の操作ログ（幹部以上）
 ```
 
 ### 4.7 Todoist と連携する（任意）
@@ -419,13 +425,17 @@ ONにしない限り参加者には何も送りません。
 |---|---|
 | 締切1時間前 | 日程調整の未回答者へ DM（DM が届かない人にはチャンネルでメンション）。対象は `target_role` を指定していればそのロール、していなければ**名簿の現役メンバー** |
 | 5分ごと | 締切を過ぎた日程調整を自動で締め切り、結果を投稿 |
+| 5分ごと | `/layer end` の押し忘れ検知。4時間経過で本人へ DM、12時間経過で自動取り消し（記録は残しません）|
 | 前日 20:00 | `/schedule confirm` で確定した日程の前日通知（「明日 …」） |
 | 当日 08:30 | 同じく当日通知（「本日 2026/10/01 18:00 **合宿**（部室）」） |
 | 毎朝 08:30 | 今日〜7日以内が期限の未完了タスク |
 | 毎朝 08:30 | 「今日やること」ラベルの付いたタスク |
+| 毎朝 08:30 | 発注閾値を割っている資材（割れが無い日は送りません） |
+| 毎朝 08:30 | 返却予定日を過ぎた工具を借りている人へ DM（1貸出につき1回） |
 | 毎朝 08:30 | Todoist のセクション別タスク（期限7日以内・超過）を班チャンネル（未設定ならタスク通知チャンネル）へ（連携している場合） |
 | 毎朝 08:30 | Todoist 連携プロジェクトの期限タスク（連携している場合） |
 | 毎週月曜 08:30 | **遅れている**マイルストーンのお知らせ（遅れが無い週は送りません） |
+| 毎週（既定は月曜）08:30 | 週次ダイジェスト（先週の完了タスク・積層・参加人数）。**既定 OFF**。`/settings_set setting_key:WEEKLY_DIGEST_ENABLED value:1` で有効化 |
 | 20分ごと | 機体進捗の同期・再集計（Todoist と桁巻きの反映） |
 | 毎日 21:00 | 期限切れの未完了タスク |
 | 毎日 04:00 | `/data delete` を申告したサーバーのデータ削除を実行し、結果を `#bot-log` へ（退出済みサーバーは通知先が無いため送られません） |
@@ -461,7 +471,8 @@ ONにしない限り参加者には何も送りません。
 | 投票のリアクションが反映されない | Bot に「リアクションを追加」「メッセージ履歴を読む」権限があるか確認してください |
 | 催促の DM が届かない | 受け取る側の DM 設定です。届かない場合はチャンネルでのメンションに自動で切り替わります |
 | `/layer end` で「進行中のセッションがありません」 | 先に `/layer start` を実行してください。誰かの記録を代わりに終わらせることはできません |
-| 桁名を間違えて開始した | 一度 `/layer end` で終了してから、正しい桁名で `/layer start` し直してください |
+| 桁名を間違えて開始した | `/layer cancel` で記録を残さず取り消し、正しい桁名で `/layer start` し直してください |
+| `/layer end` を押し忘れて帰った | 4時間で DM が届きます。12時間で自動的に取り消され、記録は残りません（分数は `/settings_set` で変更可） |
 | `/progress view` に何も出ない | まだ機体が未登録です。`/progress add name:1号機` から始めてください |
 | Todoist が「未登録」 | 管理者が `/todoist-setup` を実行してください |
 | 通知が来ない | `/setup` で通知チャンネルを設定したか、Bot がそのチャンネルに書き込めるか確認してください |
@@ -488,7 +499,7 @@ ONにしない限り参加者には何も送りません。
 - 現在の年度を終了し、新しい年度を開始する
 - 選んだ人を **卒業（alumni）** に切り替える
 - **班長フラグを全員リセット**する（新体制で付け直すため）
-- 切り替え時点の主要7テーブルを **年度スナップショット**（ZIP）として添付する
+- 切り替え時点の主要19テーブルを **年度スナップショット**（ZIP）として添付する
 
 **卒業者のデータは削除されません。** 過去の作業記録に残る担当者名を
 引けるようにするためです。卒業した人は `/member support` などの
@@ -527,7 +538,7 @@ ONにしない限り参加者には何も送りません。
 **他のサークルとの関係**: すべてのデータはサーバー単位で完全に分離されています。
 他大学のサークルからあなたのデータが見えることはありません。
 
-**持ち出し**: `/data export` でこのサーバーの主要7テーブルを ZIP（CSV 群）として
+**持ち出し**: `/data export` でこのサーバーの主要19テーブルを ZIP（CSV 群）として
 受け取れます（管理者のみ）。サーバーIDや Todoist トークンは含まれません。
 
 **利用をやめるとき**: 運営者への連絡は不要です。Bot をサーバーから
@@ -549,7 +560,7 @@ ONにしない限り参加者には何も送りません。
 
 | 分類 | コマンド | 権限 |
 |---|---|---|
-| 確認 | `/ping` `/health` `/help` | 全員 |
+| 確認 | `/ping` `/health` `/help` `/me` | 全員 |
 | | `/setup-status` | 全員 |
 | 日程調整 | `/schedule list` `/schedule status` `/schedule list-closed` | 全員 |
 | | `/schedule create` `/schedule close` `/schedule remind` `/schedule edit-deadline` | L2〜 |
@@ -561,9 +572,13 @@ ONにしない限り参加者には何も送りません。
 | | `/task delete` `/task assign` `/task sections` `/task push` | L2〜 |
 | | `/task link-section` `/task unlink-section` `/task unlink-team-sections` | L3〜 |
 | | `/task sync` | L4 |
-| 桁巻き | `/layer start` `/layer end` `/layer status` `/layer keta-list` | 全員 |
+| 桁巻き | `/layer start` `/layer end` `/layer cancel` `/layer status` `/layer stats` `/layer keta-list` | 全員 |
+| 安全 | `/incident report` | 全員 |
+| | `/incident list` | L3〜 |
+| 資材・在庫 | `/stock list` `/stock use` `/tool list` `/tool borrow` `/tool return` | 全員 |
+| | `/stock add` `/stock set-threshold` `/stock remove` `/tool add` `/tool remove` | L2〜 |
 | | `/layer keta-add` `/layer keta-remove` | L2〜 |
-| 機体進捗 | `/progress view` | 全員 |
+| 機体進捗 | `/progress view` `/progress history` | 全員 |
 | | `/progress add` `/progress edit` `/progress remove` `/progress spar-link` `/progress setup` | L2〜 |
 | | `/progress sync` | L4 |
 | 重量 | `/weight view` `/weight top` | 全員 |
@@ -575,8 +590,8 @@ ONにしない限り参加者には何も送りません。
 | | `/member setup` `/member set-leader` `/member set-channel` | L3〜 |
 | 班・技能 | `/team-add` `/team-remove` `/team-list` `/team-role` | L4 |
 | | `/skill-add` `/skill-remove` `/skill-list` | L4 |
-| レポート | `/report weekly` `/report attendance-rate` `/report export-tasks` | L2〜 |
-| | `/report audit` | L3〜 |
+| レポート | `/report weekly` `/report attendance-rate` `/report member-attendance` `/report export-tasks` | L2〜 |
+| | `/report notifications` `/report changes` | L3〜 |
 | 年度替わり | `/season list` | 全員 |
 | | `/season new` `/season rollover` | L4 |
 | データ | `/data export` `/data delete` `/data delete-cancel` | L4 |
