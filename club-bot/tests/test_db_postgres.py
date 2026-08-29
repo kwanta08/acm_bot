@@ -688,8 +688,10 @@ def test_pg_live_confirmed_schedule_join():
             assert len(rows) == 1, "境界（00:00:00）の候補を取りこぼしている"
             assert rows[0]["confirmed_start_at"] == to_iso(start)
 
-            (listed,) = await repo.list_open_schedules(G1)
-            assert listed["confirmed_start_at"] == to_iso(start)
+            # 予定は2件あるので1件決め打ちで unpack しない
+            listed = {r["schedule_id"]: r for r in await repo.list_open_schedules(G1)}
+            assert listed["pg_conf"]["confirmed_start_at"] == to_iso(start)
+            assert listed["pg_conf2"]["confirmed_start_at"] is None, "確定していない予定に日時が付いている"
         finally:
             await db.execute("DELETE FROM schedules WHERE guild_id = ?", (G1,))
             await db.close()
