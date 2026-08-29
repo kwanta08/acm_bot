@@ -1,7 +1,8 @@
 """
 Reports モジュール（仕様 11.6）。
 
-週次サマリー、CSV エクスポート、監査ログ閲覧。
+週次サマリー、CSV エクスポート、通知ログ（reminders_log）と
+操作ログ（audit_log）の閲覧。
 出力例: 期限超過タスク一覧、月次出欠率、支援依頼頻度（11.6.2）。
 マルチテナント版: 全集計を interaction.guild.id でスコープする。
 """
@@ -16,6 +17,8 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import config
+from repositories.audit_log_repository import AuditLogRepository
+from repositories.name_cache_repository import ENTITY_USER, NameCacheRepository
 from repositories.progress_repository import ProgressRepository
 from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.schedule_repository import ScheduleRepository
@@ -43,6 +46,8 @@ class Reports(commands.Cog):
         self.task_repo = TaskRepository(bot.db)
         self.schedule_repo = ScheduleRepository(bot.db)
         self.log_repo = RemindersLogRepository(bot.db)
+        self.audit_repo = AuditLogRepository(bot.db)
+        self.name_repo = NameCacheRepository(bot.db)
 
     group = app_commands.Group(name="report", description="集計・エクスポート・監査")
 
@@ -185,11 +190,15 @@ class Reports(commands.Cog):
             ephemeral=True,
         )
 
-    # ---------- audit (監査ログ) ----------
-    @group.command(name="audit", description="直近の通知・監査ログを表示します。")
+    # ---------- notifications (通知ログ) ----------
+    #
+    # **旧 `/report audit` はこれ。** 読んでいるのは reminders_log
+    # （bot が送った通知の記録）で、管理者操作の証跡である audit_log とは
+    # 別物だった。証跡側は `/report changes` が読む（G4-3）。
+    @group.command(name="notifications", description="直近の通知ログを表示します。")
     @app_commands.describe(limit="表示件数（最大25）")
     @require(Level.L3)
-    async def audit(
+    async def notifications(
         self, interaction: discord.Interaction, limit: app_commands.Range[int, 1, 25] = 10
     ):
         await interaction.response.defer(ephemeral=True)
@@ -202,7 +211,7 @@ class Reports(commands.Cog):
             # 何も無い＝まだ通知が発生する運用が始まっていない
             await interaction.followup.send(
                 embed=empty_state_embed(
-                    "監査・通知ログ",
+                    "通知ログ",
                     "通知はまだ記録されていません。日程調整やタスクを作ると、"
                     "締切前のリマインドがここに記録されます。",
                     "/schedule create",
@@ -210,7 +219,7 @@ class Reports(commands.Cog):
                 ephemeral=True,
             )
             return
-        embed = info_embed("監査・通知ログ")
+        embed = info_embed("通知ログ")
         for r in rows:
             d = dict(r)
             embed.add_field(
@@ -219,6 +228,93 @@ class Reports(commands.Cog):
                 + (f"\nエラー: {d['error_message']}" if d.get("error_message") else ""),
                 inline=False,
             )
+        await interaction.followup.send(embed=embed, ephemeral=True)
+
+    # ---------- changes (操作ログ / audit_log) ----------
+    async def _actor_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """操作ログに実際に出てくる実行者だけを候補に出す。
+
+        ギルドの全メンバーを並べても、そのほとんどは1度も操作していない。
+        """
+        if interaction.guild is None:
+            return []
+        actors = await self.audit_repo.list_actors(interaction.guild.id, limit=25)
+        names = await self.name_repo.names(interaction.guild.id, ENTITY_USER)
+        out: list[app_commands.Choice[str]] = []
+        for actor_id in actors:
+            label = self._resolve_actor(interaction.guild, names, actor_id)
+            if current and current.lower() not in label.lower():
+                continue
+            out.append(app_commands.Choice(name=label[:100], value=actor_id))
+        return out[:25]
+
+    @staticmethod
+    def _resolve_actor(guild, names: dict[str, str], actor_id: str | None) -> str:
+        """ID を表示名へ。ギルドキャッシュ → discord_name_cache → ID の順。
+
+        退部した人・bot 再起動直後でも生の ID が並ばないようにする。
+        解決できないものは ID のまま出す（伏せると追跡できなくなる）。
+        """
+        raw = str(actor_id or "")
+        if not raw:
+            return "（不明）"
+        if guild is not None and raw.isdigit():
+            member = guild.get_member(int(raw))
+            if member is not None:
+                return member.display_name
+        return names.get(raw, raw)
+
+    @group.command(name="changes", description="設定・マスタ変更の操作ログを表示します。")
+    @app_commands.describe(limit="表示件数（最大25）", actor="実行者で絞り込む")
+    @app_commands.autocomplete(actor=_actor_autocomplete)
+    @require(Level.L3)
+    async def changes(
+        self,
+        interaction: discord.Interaction,
+        limit: app_commands.Range[int, 1, 25] = 10,
+        actor: str | None = None,
+    ):
+        """audit_log を読む。/report notifications が読む reminders_log とは別物。"""
+        await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        rows = await self.audit_repo.list_recent(guild_id, limit, actor_id=actor)
+        names = await self.name_repo.names(guild_id, ENTITY_USER)
+        guild = interaction.guild
+        if not rows:
+            situation = (
+                "この実行者の操作ログはありません。"
+                if actor
+                else "設定やマスタの変更はまだ記録されていません。"
+            )
+            await interaction.followup.send(
+                embed=empty_state_embed("操作ログ", situation, "/setup"),
+                ephemeral=True,
+            )
+            return
+        title = "操作ログ"
+        if actor:
+            title += f" — {self._resolve_actor(guild, names, actor)}"
+        embed = info_embed(title)
+        for r in rows:
+            d = dict(r)
+            parts = [f"実行者: {self._resolve_actor(guild, names, d.get('actor_id'))}"]
+            if d.get("target"):
+                # target は ID が入ることがある（ロール ID・表#行 ID など）
+                parts.append(f"対象: {self._resolve_actor(guild, names, d['target'])}")
+            if d.get("detail"):
+                parts.append(str(d["detail"])[:300])
+            try:
+                parts.append(fmt_jp(from_iso(str(d["created_at"]))))
+            except (TypeError, ValueError):
+                parts.append(str(d.get("created_at")))
+            embed.add_field(
+                name=str(d["action"])[:250], value="\n".join(parts)[:1024], inline=False
+            )
+        add_truncation_note(embed, len(rows), MAX_EMBED_FIELDS)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
     # ---------- attendance rate ----------

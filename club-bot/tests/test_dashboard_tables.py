@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 
 from dashboard.config import DashboardConfig
 from dashboard.main import create_app
+from repositories.audit_log_repository import AuditLogRepository
 from repositories.guild_repository import GuildRepository
 from repositories.layer_session_repository import LayerSessionRepository
 from repositories.member_repository import MemberRepository
@@ -45,6 +46,8 @@ GUILD_B = 200000000000000002
 USER_ID = "42"
 NOW = "2026-08-11 10:00"
 
+# G4-3 で読み取り専用の6表を追加した。**件数ではなくキー集合で書く**
+# （件数だけだと、別の表と入れ替わっても緑のまま通る）。
 EXPECTED_TABLES = {
     "tasks",
     "members",
@@ -53,6 +56,13 @@ EXPECTED_TABLES = {
     "schedule_votes",
     "layer_records",
     "progress",
+    # 読み取り専用（G4-3）
+    "audit_log",
+    "seasons",
+    "progress_milestones",
+    "layer_keta",
+    "skill_tags",
+    "settings",
 }
 
 
@@ -159,10 +169,14 @@ def test_unknown_table_is_rejected():
         await db.connect()
         try:
             repo = TableRepository(db)
-            with pytest.raises(UnknownTableError):
-                await repo.list_rows(GUILD_A, "settings")
+            # settings は G4-3 でホワイトリスト入りしたが（閲覧は L4 限定）、
+            # 認証情報のテーブルと bot 運用テーブルは今も対象外
             with pytest.raises(UnknownTableError):
                 await repo.list_rows(GUILD_A, "todoist_configs")
+            with pytest.raises(UnknownTableError):
+                await repo.list_rows(GUILD_A, "guilds")
+            with pytest.raises(UnknownTableError):
+                await repo.list_rows(GUILD_A, "reminders_log")
         finally:
             await db.close()
 
@@ -274,7 +288,7 @@ def test_unknown_table_returns_404():
     asyncio.run(_seed(db_path))
     client = _logged_in_client(db_path)
     try:
-        for key in ("settings", "todoist_configs", "guilds", "'; DROP TABLE"):
+        for key in ("todoist_configs", "guilds", "reminders_log", "'; DROP TABLE"):
             assert client.get(f"/api/guilds/{GUILD_A}/tables/{key}").status_code == 404
     finally:
         client.__exit__(None, None, None)
@@ -302,6 +316,75 @@ def test_read_only_viewer_sees_can_edit_false():
     try:
         body = client.get(f"/api/guilds/{GUILD_A}/tables/members").json()
         assert body["can_edit"] is False
+    finally:
+        client.__exit__(None, None, None)
+
+
+# ---------------------------------------------------------------------
+# 表ごとの閲覧レベル（G4-3）
+#
+# `GET /settings` はロール ID の実値を L4 にだけ返している（G1-6）。
+# 同じ値が表グリッド経由で L1 に見えるのでは意味がないので、
+# 表の定義（TableSpec.min_level）で必要レベルを持たせている。
+# ---------------------------------------------------------------------
+def test_a_plain_member_cannot_see_the_settings_table():
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    client = _logged_in_client(db_path, permissions="0")
+    try:
+        keys = {t["key"] for t in client.get(f"/api/guilds/{GUILD_A}/tables").json()["tables"]}
+        assert "settings" not in keys, "一覧に L4 限定の表が出ている"
+        assert "audit_log" not in keys, "一覧に L3 限定の表が出ている"
+        assert "members" in keys, "通常の表まで隠している"
+
+        assert client.get(f"/api/guilds/{GUILD_A}/tables/settings").status_code == 403
+        assert client.get(f"/api/guilds/{GUILD_A}/tables/audit_log").status_code == 403
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/settings/export.csv")
+        assert res.status_code == 403, "CSV 経由なら見えてしまう"
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_an_admin_can_see_the_settings_table():
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    client = _logged_in_client(db_path)  # permissions=32（Manage Server）→ L4
+    try:
+        keys = {t["key"] for t in client.get(f"/api/guilds/{GUILD_A}/tables").json()["tables"]}
+        assert {"settings", "audit_log"} <= keys
+        assert client.get(f"/api/guilds/{GUILD_A}/tables/settings").status_code == 200
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_the_new_tables_reject_edits():
+    """読み取り専用の表は、行が実在しても PATCH を受け付けないこと。
+
+    行が無いと 404 になり「編集できないから断った」のか
+    「行が無いから断った」のか区別できないので、先に1行入れる。
+    """
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+
+    async def _add_row():
+        db = Database(db_path)
+        await db.connect()
+        try:
+            await AuditLogRepository(db).record(GUILD_A, "42", "setup.save", "CLUB_NAME", "A大学")
+        finally:
+            await db.close()
+
+    asyncio.run(_add_row())
+    client = _logged_in_client(db_path)
+    try:
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/audit_log").json()
+        assert body["total"] >= 1
+        row_id = body["rows"][0]["audit_id"]
+        res = client.patch(
+            f"/api/guilds/{GUILD_A}/tables/audit_log/{row_id}",
+            json={"action": "書き換え"},
+        )
+        assert res.status_code == 400, "読み取り専用の表を編集できてしまう"
     finally:
         client.__exit__(None, None, None)
 
@@ -358,7 +441,8 @@ def test_csv_export_unknown_table_is_404():
     asyncio.run(_seed(db_path))
     client = _logged_in_client(db_path)
     try:
-        assert client.get(f"/api/guilds/{GUILD_A}/tables/settings/export.csv").status_code == 404
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/todoist_configs/export.csv")
+        assert res.status_code == 404
     finally:
         client.__exit__(None, None, None)
 

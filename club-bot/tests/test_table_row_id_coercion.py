@@ -75,7 +75,11 @@ def test_declared_pk_type_matches_the_ddl():
 
 
 def test_integer_primary_keys_are_the_majority_case():
-    """回帰の範囲を固定する（G0-3 で PG 実機が落ちたのはこの6表）。"""
+    """回帰の範囲を固定する（G0-3 で PG 実機が落ちたのは先頭の6表）。
+
+    G4-3 で読み取り専用の表を足した。**編集しない表でも `get_row` は通る**
+    （PATCH の 400 を返す前に行の存在を見る）ので、型宣言の対象からは外さない。
+    """
     int_tables = {k for k, s in TABLES.items() if s.pk_type == "int"}
     assert int_tables == {
         "tasks",
@@ -84,8 +88,15 @@ def test_integer_primary_keys_are_the_majority_case():
         "schedule_votes",
         "layer_records",
         "progress",
+        # 読み取り専用（G4-3）
+        "audit_log",
+        "seasons",
+        "progress_milestones",
+        "layer_keta",
+        "skill_tags",
     }
-    assert TABLES["schedules"].pk_type == "text"
+    text_tables = {k for k, s in TABLES.items() if s.pk_type == "text"}
+    assert text_tables == {"schedules", "settings"}
 
 
 # ---------------------------------------------------------------------

@@ -52,7 +52,7 @@ Bot管理者」というラベルで出ます（`utils/permissions.LEVEL_LABELS`
 ### Data（エクスポート・削除）
 | コマンド | 権限 | 説明 |
 |---|---|---|
-| `/data export` | L4 または Manage Server | このサーバーの主要7テーブルを ZIP（CSV 群）で受け取る。サーバーIDと認証情報は含まれない |
+| `/data export` | L4 または Manage Server | このサーバーの主要13テーブルを ZIP（CSV 群）で受け取る。サーバーIDと認証情報は含まれない |
 | `/data delete` | L4 または Manage Server | データ削除を申告する。確認のためサーバー名の入力が必要。最後のバックアップが添付される |
 | `/data delete-cancel` | L4 または Manage Server | 予約済みの削除を取り消す |
 
@@ -307,7 +307,8 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 |---|---|---|
 | `/report weekly` | L2 | 週次サマリー |
 | `/report export-tasks` | L2 | タスク一覧 CSV 出力 |
-| `/report audit [limit]` | L3 | 通知・監査ログ表示 |
+| `/report notifications [limit]` | L3 | bot が送った通知の記録（`reminders_log`）を表示 |
+| `/report changes [limit] [actor]` | L3 | 設定・マスタ変更の操作ログ（`audit_log`）を表示。実行者は表示名に解決 |
 | `/report attendance-rate` | L2 | 出欠率一覧 |
 
 ### LayerTracking（桁巻き積層記録）
@@ -457,7 +458,7 @@ API 障害→`#bot-log` に記録、送信履歴を保存し多重送信を防�
 
 - **状態確認**: `/health` で DB（PostgreSQL / SQLite）・Todoist（ギルド別）・暗号鍵の状態と遅延を確認。
 - **ログ**: さくらのVPS（systemd常駐）では `journalctl -u club-bot -f`、ファイルは `logs/bot.log`。
-- **監査**: `/report audit` で直近の通知履歴と失敗理由を確認。
+- **監査**: `/report notifications` で直近の通知履歴と失敗理由を、`/report changes` で設定・マスタ変更の操作ログを確認。
 - **日次バックアップ**: 本番（PostgreSQL）は `pg_dump -Fc` を日次で取得（ADR 0006。
   SQLite は開発・テスト用なので、開発環境では `data/club.db` をコピー）。週1で `/report export-tasks`。
 - **再起動前のバックアップ**: bot を再起動する前にも必ず `pg_dump -Fc` を取る。 起動時にスキーマ

@@ -133,7 +133,7 @@ def test_keta_list_empty_state_suggests_keta_add():
     run(_main())
 
 
-def test_report_audit_empty_state_names_a_command():
+def test_report_notifications_empty_state_names_a_command():
     from cogs.reports import Reports
 
     async def _main():
@@ -143,7 +143,7 @@ def test_report_audit_empty_state_names_a_command():
             bot = SimpleNamespace(db=db, guilds=[], get_channel=lambda cid: None)
             cog = Reports(bot)
             interaction = _Interaction()
-            await Reports.audit.callback(cog, interaction)
+            await Reports.notifications.callback(cog, interaction)
             text = _text(interaction.last_embed)
             assert "/" in text and "`" in text, f"次のコマンドが示されていない: {text}"
         finally:

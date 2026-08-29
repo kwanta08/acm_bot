@@ -35,10 +35,36 @@ class AuditLogRepository(BaseRepository):
         )
         return cur.lastrowid
 
-    async def list_recent(self, guild_id: int, limit: int = 10) -> list[dict[str, Any]]:
-        """指定ギルドの直近ログを新しい順に返す。"""
+    async def list_recent(
+        self, guild_id: int, limit: int = 10, actor_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """指定ギルドの直近ログを新しい順に返す。
+
+        actor_id を渡すとその実行者の分だけに絞る（`/report changes` の
+        `actor` 引数）。絞り込みは SQL の bind 値で行い、
+        リクエスト由来の文字列を SQL へ埋め込まない。
+        """
+        if actor_id is None:
+            rows = await self.db.fetchall(
+                "SELECT * FROM audit_log WHERE guild_id = ? ORDER BY audit_id DESC LIMIT ?",
+                (guild_id, limit),
+            )
+        else:
+            rows = await self.db.fetchall(
+                "SELECT * FROM audit_log WHERE guild_id = ? AND actor_id = ?"
+                " ORDER BY audit_id DESC LIMIT ?",
+                (guild_id, str(actor_id), limit),
+            )
+        return [dict(r) for r in rows]
+
+    async def list_actors(self, guild_id: int, limit: int = 25) -> list[str]:
+        """最近操作した実行者の ID を新しい順に返す（オートコンプリート用）。
+
+        ギルドの全メンバーではなく**実際にログへ出てくる人**だけを候補にする。
+        """
         rows = await self.db.fetchall(
-            "SELECT * FROM audit_log WHERE guild_id = ? ORDER BY audit_id DESC LIMIT ?",
+            "SELECT actor_id, MAX(audit_id) AS latest FROM audit_log"
+            " WHERE guild_id = ? GROUP BY actor_id ORDER BY latest DESC LIMIT ?",
             (guild_id, limit),
         )
-        return [dict(r) for r in rows]
+        return [str(r["actor_id"]) for r in rows]

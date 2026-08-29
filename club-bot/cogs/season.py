@@ -286,7 +286,7 @@ class Season(commands.Cog):
     async def _snapshot_file(self, guild_id: int, embed: discord.Embed) -> discord.File | None:
         """年度スナップショット（/data export と同じ ZIP）を作る。
 
-        引き継ぎのために、切り替えた時点の主要7テーブル（/data export と同じ範囲）を渡す。
+        引き継ぎのために、切り替えた時点の主要13テーブル（/data export と同じ範囲）を渡す。
         エクスポート処理は再実装せず cogs/data.py のものを共有する。
         """
         try:

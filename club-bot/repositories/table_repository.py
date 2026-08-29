@@ -90,6 +90,16 @@ class TableSpec:
     # guild_id 以外に必ず付ける絞り込み（例: 論理削除の除外）
     extra_where: str = ""
     tags: tuple[str, ...] = field(default_factory=tuple)
+    # ダッシュボードでこの表を**閲覧**するのに必要な権限レベル（G4-3）。
+    #
+    # 既定の 1 は「サーバー参加者なら誰でも」。運用の証跡（audit_log）や
+    # ロール ID を含む設定（settings）はここを上げる。
+    # `GET /settings` がロール ID の実値を L4 にだけ返している（G1-6）のに、
+    # 同じ値が表グリッド経由で L1 に見えるのでは意味がないため、
+    # **表ごとに必要レベルを定義側が持つ**（ADR 0016 と同じ考え方。
+    # ルータ側の if で守ると、表を足すときに書き忘れる）。
+    # `/data export` は元から L4 なので、この値の影響を受けない。
+    min_level: int = 1
 
     @property
     def column_names(self) -> tuple[str, ...]:
@@ -271,6 +281,116 @@ TABLES: dict[str, TableSpec] = {
             _c("actual_weight_g", "実測重量(g)", "number", editable=True, number_type="real"),
             _c("source", "ソース"),
             _c("todoist_task_id", "TodoistタスクID"),
+            _c("updated_at", "更新日時", "datetime"),
+        ),
+    ),
+    # ------------------------------------------------------------------
+    # 読み取り専用の表（G4-3）。
+    #
+    # ここまでの7表は「Discord から入れたデータを表で直す」ためのもので、
+    # 以下は**溜まっているのに持ち出せなかった**もの。編集可能な列は
+    # 1つも置かない（正本の入口は Discord コマンド側にある）。
+    # ------------------------------------------------------------------
+    "audit_log": TableSpec(
+        key="audit_log",
+        label="操作ログ",
+        table="audit_log",
+        pk="audit_id",
+        pk_type="int",
+        description="/setup・班マスタ変更・年度替わり・ダッシュボード編集の証跡",
+        order_by="audit_id DESC",
+        # 誰がいつ何を変えたかの記録。/report changes と同じ L3 に揃える
+        min_level=3,
+        columns=(
+            _c("audit_id", "ID", "number", number_type="int"),
+            _c("actor_id", "実行者", "user"),
+            _c("action", "操作"),
+            _c("target", "対象"),
+            _c("detail", "詳細"),
+            _c("created_at", "日時", "datetime"),
+        ),
+    ),
+    "seasons": TableSpec(
+        key="seasons",
+        label="年度",
+        table="seasons",
+        pk="season_id",
+        pk_type="int",
+        description="/season new・/season rollover で区切った年度",
+        order_by="started_at DESC",
+        columns=(
+            _c("season_id", "ID", "number", number_type="int"),
+            _c("name", "年度名"),
+            _c("started_at", "開始", "datetime"),
+            _c("ended_at", "終了", "datetime"),
+            _c("created_at", "作成日時", "datetime"),
+        ),
+    ),
+    "progress_milestones": TableSpec(
+        key="progress_milestones",
+        label="節目（マイルストーン）",
+        table="progress_milestones",
+        pk="milestone_id",
+        pk_type="int",
+        description="大会から逆算した節目の期限",
+        order_by="due_date, name",
+        columns=(
+            _c("milestone_id", "ID", "number", number_type="int"),
+            _c("node_id", "ノードID"),
+            _c("name", "節目名"),
+            _c("due_date", "期限"),
+            _c("created_at", "作成日時", "datetime"),
+            _c("updated_at", "更新日時", "datetime"),
+        ),
+    ),
+    "layer_keta": TableSpec(
+        key="layer_keta",
+        label="桁マスタ",
+        table="layer_keta",
+        pk="keta_id",
+        pk_type="int",
+        description="/layer keta-add で登録した桁名",
+        order_by="active_flag DESC, keta_name",
+        columns=(
+            _c("keta_id", "ID", "number", number_type="int"),
+            _c("keta_name", "桁名"),
+            _c("active_flag", "有効", "bool"),
+            _c("created_by", "登録者", "user"),
+            _c("created_at", "登録日時", "datetime"),
+        ),
+    ),
+    "skill_tags": TableSpec(
+        key="skill_tags",
+        label="技能タグ",
+        table="skill_tags",
+        pk="skill_tag_id",
+        pk_type="int",
+        description="/skill-add で登録した技能タグ",
+        order_by="active_flag DESC, skill_name",
+        columns=(
+            _c("skill_tag_id", "ID", "number", number_type="int"),
+            _c("skill_name", "技能名"),
+            _c("active_flag", "有効", "bool"),
+            _c("created_by", "登録者", "user"),
+            _c("created_at", "登録日時", "datetime"),
+        ),
+    ),
+    "settings": TableSpec(
+        key="settings",
+        label="サーバー設定",
+        table="settings",
+        # (guild_id, setting_key) が主キー。guild_id は scope 側が付けるので
+        # 表としての行 ID は setting_key
+        pk="setting_key",
+        pk_type="text",
+        description="/setup・/settings_set で保存したこのサーバーの設定",
+        order_by="setting_key",
+        # 値にロール ID・チャンネル ID が入る。GET /settings が
+        # ロール ID の実値を L4 にだけ返している（G1-6）ので、同じ扱いにする
+        min_level=4,
+        columns=(
+            _c("setting_key", "設定キー"),
+            _c("setting_value", "値"),
             _c("updated_at", "更新日時", "datetime"),
         ),
     ),

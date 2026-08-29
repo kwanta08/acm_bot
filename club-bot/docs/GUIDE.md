@@ -191,7 +191,8 @@ ONにしない限り参加者には何も送りません。
 
 ```
 /member setup               所属班・班長をまとめて設定
-/report audit               直近の操作履歴
+/report notifications       直近の通知履歴
+/report changes             設定・マスタ変更の操作ログ
 /schedule delete            日程調整の削除（票データは残ります）
 /schedule restore           削除した日程調整を戻す
 ```
@@ -366,7 +367,8 @@ ONにしない限り参加者には何も送りません。
 /report weekly              今週のサマリー（班長以上）
 /report attendance-rate     出欠率の一覧（班長以上）
 /report export-tasks        タスク一覧を CSV で出力（班長以上）
-/report audit               直近の操作履歴（幹部以上）
+/report notifications       直近の通知履歴（幹部以上）
+/report changes             設定・マスタ変更の操作ログ（幹部以上）
 ```
 
 ### 4.7 Todoist と連携する（任意）
@@ -490,7 +492,7 @@ ONにしない限り参加者には何も送りません。
 - 現在の年度を終了し、新しい年度を開始する
 - 選んだ人を **卒業（alumni）** に切り替える
 - **班長フラグを全員リセット**する（新体制で付け直すため）
-- 切り替え時点の主要7テーブルを **年度スナップショット**（ZIP）として添付する
+- 切り替え時点の主要13テーブルを **年度スナップショット**（ZIP）として添付する
 
 **卒業者のデータは削除されません。** 過去の作業記録に残る担当者名を
 引けるようにするためです。卒業した人は `/member support` などの
@@ -529,7 +531,7 @@ ONにしない限り参加者には何も送りません。
 **他のサークルとの関係**: すべてのデータはサーバー単位で完全に分離されています。
 他大学のサークルからあなたのデータが見えることはありません。
 
-**持ち出し**: `/data export` でこのサーバーの主要7テーブルを ZIP（CSV 群）として
+**持ち出し**: `/data export` でこのサーバーの主要13テーブルを ZIP（CSV 群）として
 受け取れます（管理者のみ）。サーバーIDや Todoist トークンは含まれません。
 
 **利用をやめるとき**: 運営者への連絡は不要です。Bot をサーバーから
@@ -578,7 +580,7 @@ ONにしない限り参加者には何も送りません。
 | 班・技能 | `/team-add` `/team-remove` `/team-list` `/team-role` | L4 |
 | | `/skill-add` `/skill-remove` `/skill-list` | L4 |
 | レポート | `/report weekly` `/report attendance-rate` `/report export-tasks` | L2〜 |
-| | `/report audit` | L3〜 |
+| | `/report notifications` `/report changes` | L3〜 |
 | 年度替わり | `/season list` | 全員 |
 | | `/season new` `/season rollover` | L4 |
 | データ | `/data export` `/data delete` `/data delete-cancel` | L4 |
