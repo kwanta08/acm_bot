@@ -573,7 +573,7 @@
       - **注意**: `docs/PRIVACY.md` に収集項目を追記する。
         Modal は `cogs/todoist_admin.py:39` の実装を流用
 
-- [ ] **G4-11** `log_to_channel` の送信先を同一ギルドに限定する。
+- [x] **G4-11** `log_to_channel` の送信先を同一ギルドに限定する。
       `bot.py` の `log_to_channel` は `BOT_LOG_CHANNEL_ID` を `self.get_channel`
       （bot 全体のチャンネルキャッシュ）で解決し、`guild_id` 未指定時は
       `config.bot_log_channel_id`（env 由来。**全ギルドの GuildConfig に配られる**）へも
@@ -589,7 +589,7 @@
       - **注意**: レガシー単一ギルド運用（`GUILD_ID` 指定）の後方互換を壊さない。
         起源は G3-5 のプラン審査（acm-plan-reviewer）で指摘された既存の穴
 
-- [ ] **G4-12** 投票メッセージの「未回答者数」を催促の母集団へ揃える。
+- [x] **G4-12** 投票メッセージの「未回答者数」を催促の母集団へ揃える。
       G3-2 で催促（`notify_unanswered`）の母集団は「ロール保持者 − 台帳の退部者」または
       「台帳の現役」になったが、`services/schedule_service.py` の `build_option_embed` が出す
       **「未回答者数」はロール基準のまま**で、しかも候補単位で数えている。
@@ -604,7 +604,7 @@
       - **出どころ**: G3-2 のゲート1・ゲート2（`build_option_embed` を同じ差分に混ぜると
         ADR 0014 に反するため分離した）
 
-- [ ] **G4-13** オートコンプリートの登録検査が空振りしている。
+- [x] **G4-13** オートコンプリートの登録検査が空振りしている。
       `tests/test_autocomplete.py:233` と `:309` の
       `assert param is not None and param.autocomplete is not None` は、
       discord.py の公開 API の `autocomplete` が **`bool` を返すプロパティ**なので
@@ -620,7 +620,7 @@
         `AttributeError` / `KeyError` で大きな音を立てて落ちるので、テスト専用の依存として許容する
       - **出どころ**: G3-3 のゲート2（差分監査）
 
-- [ ] **G4-14** `/schedule remind` に締切済みのガードが無い。
+- [x] **G4-14** `/schedule remind` に締切済みのガードが無い。
       `cogs/schedule.py` の `remind` は `closed_flag` を見ないため、L2 が ID を直打ちすれば
       **締切済み・復元済みの予定でも未回答者へ DM が飛ぶ**（オートコンプリートは開催中のみなので
       踏みにくい）。`edit-deadline` は既に `closed_flag` を見て断っている。
@@ -3369,3 +3369,141 @@ Discord の Modal は入力欄が最大5つで、受入基準の5項目（発生
 - 通知先は在庫アラートと共通（`resolve_notice_channel_id`）。
   安全報告だけ別チャンネルへ出したいという要望が出たら、
   ギルド別設定 `SAFETY_CHANNEL_ID` を足す余地がある
+
+---
+
+### 2026-08-29 — G4-11 / G4-12 / G4-13 / G4-14: 既存の穴4件（ブランチ `fix/g4-11` 〜 `fix/g4-14`）
+
+いずれも G3 の各ゲート（プラン審査・差分監査）で見つかった既存の穴。
+新しいテーブルもマイグレーションも無い。
+
+- ruff: `All checks passed!`
+- pytest: **1333 passed, 12 skipped**（着手前は 1311 passed, 12 skipped）
+
+#### G4-11: `log_to_channel` を同一ギルドに限定した
+
+**症状**: `BOT_LOG_CHANNEL_ID` を環境変数で設定すると、その値は
+`config.for_guild()` のフォールバックとして**全ギルドの GuildConfig へ配られる**。
+送信先を `self.get_channel()`（bot 全体のキャッシュ）で引いていたため、
+**他テナントの運用ログが1つのサーバーへ集まる**状態だった。
+
+| ファイル | 内容 |
+|---|---|
+| `bot.py` | `_log_channel_for()` を追加し、`guild.get_channel_or_thread` で**同一ギルド内に限定**。レガシー経路は `_fetch_legacy_log_channel()` に分離 |
+| `tests/test_multi_tenant.py` | 4件追加 |
+
+**設計判断**
+
+1. **解決できなければ送らない。** ギルドがキャッシュに無い、そのギルドに
+   チャンネルが無い、のどちらも None を返す。「たぶんこれだろう」で
+   フォールバックしない——誤送信よりログが出ないほうがましなので
+2. **レガシー単一ギルド運用（`GUILD_ID` 指定）は残した**（受入基準）。
+   起動直後は `guilds` が空なので API から取るが、
+   **取得したチャンネルが `GUILD_ID` のものかを必ず検査する**。
+   `GUILD_ID` 未指定（マルチテナント運用）では**そもそも fetch しない**——
+   どのギルドのものか確かめる手段が無いため
+3. **重複排除を書いて、変異テストで消した。** 最初は「複数ギルドが同じ
+   チャンネル ID を設定していたら1回にまとめる」コードを入れたが、
+   `guild.get_channel_or_thread` は**そのギルドのチャンネルしか返さない**ので
+   2つのギルドから同じチャンネルが返ることはない。**到達しないコード**だと
+   分かったので消した（変異させても落ちないテストが教えてくれた）
+
+#### G4-12: 投票メッセージの未回答者数を催促と揃えた
+
+**症状**: G3-2 で催促（`notify_unanswered`）の母集団は台帳ベースになったが、
+`build_option_embed` の「未回答者数」は**ロール基準のまま・候補単位**だった。
+部員が最初に見る数字はこちらなので、実際に DM が飛ぶ相手と食い違っていた
+（`target_role` 未設定なら表示は `-` のまま DM は飛ぶ）。
+
+| ファイル | 内容 |
+|---|---|
+| `services/schedule_service.py` | `count_unanswered()` を追加（`select_unanswered_targets` を通す）。`build_option_embed` / `build_summary_embed` が **`guild_id` を明示引数で受ける** |
+| `cogs/schedule.py` | プロキシを渡していた5箇所を書き換え。名簿は予定ごとに1回だけ引く |
+| `tests/test_schedule_unanswered_count.py`（新規） | 12件 |
+
+**設計判断**
+
+1. **ADR 0009 の完了条件2を実施した。** `repo.for_guild(guild_id)` プロキシを
+   Embed 生成へ渡す5箇所が消え、`services/` 側が `guild_id` を明示で受ける形になった。
+   **完了条件1（`LayerTrackingService`）・3・4 は未実施**なので、
+   ADR 0009 はまだ `accepted (not implemented)` のまま（下の申し送り）
+2. **未回答者数のラベルを「未回答者数（この予定）」に変えた。**
+   候補ごとのメッセージに出る数字が予定単位になったので、
+   単位が変わったことを画面に書かないと「この候補の未回答」と読まれる
+3. **「対象」の既定表示を「全員」→「名簿の現役」にした。**
+   数え方が名簿ベースになったのに「全員」と書き続けると、
+   名簿未登録の人が含まれると誤解される
+4. **名簿を渡さなければ `-`。** 推測で数字を出さない（ADR 0021）。
+   ロール解決不能・保持者0名も `-`（`notify_unanswered` と同じ判断）
+
+#### G4-13: オートコンプリートの登録検査が空振りしていた
+
+**症状**: `param.autocomplete is not None` は、discord.py の公開 API の
+`autocomplete` が **`bool` を返すプロパティ**なので
+`False is not None` → `True`。**補完が1つも登録されていなくても必ず通る**。
+G2-2 で追加した2つのテストが何も担保していなかった。
+
+| ファイル | 内容 |
+|---|---|
+| `tests/test_autocomplete.py` | `registered_autocomplete()`（`_params[...].autocomplete.__name__` を返す）へ書き換え。**検査自体が空振りしないこと**を見るテストを追加 |
+
+**設計判断**
+
+1. **コールバック名まで見る。** 「何かが付いている」ではなく
+   「どれが付いている」を検査する（`/schedule remind` に
+   開催中限定の `_schedule_ac_open` が付いていること、など）。
+   全件用にすり替える変異でも落ちる
+2. **private 属性 `_params` への依存を許容した**（受入基準どおり）。
+   公開 API では「どのコールバックが束ねられているか」を取れない。
+   消えたときは `AttributeError` / `KeyError` で大きな音を立てて落ちる
+3. **「検査が空振りしていないこと」自体をテストにした。**
+   補完が付いていない引数（`/schedule create` の `title`）で
+   `registered_autocomplete` が落ちることを固定する。
+   これが無いと、また同じ形の空振りに戻れてしまう
+
+#### G4-14: `/schedule remind` に締切済みのガードを追加した
+
+**症状**: `remind` は `closed_flag` を見ていなかったため、L2 が ID を直打ちすれば
+**締切済み・復元済みの予定でも未回答者へ DM が飛んだ**。
+
+| ファイル | 内容 |
+|---|---|
+| `cogs/schedule.py` | `closed_flag` を見て断る（文言は `edit-deadline` と揃えた） |
+| `tests/test_schedule_remind_guard.py`（新規） | 5件 |
+
+**設計判断** — テストは「断りの Embed が出る」ではなく
+**「`notify_unanswered` が呼ばれない」**を見る。前者だけだと、
+断る前に送ってしまう実装を素通りする。復元直後（`closed_flag` は戻らない）も
+断ることを固定した。
+
+#### 空振り確認（実測）
+
+| 一時的な改変 | 結果 |
+|---|---|
+| bot 全体のキャッシュでログチャンネルを引く | 2件が失敗（G4-11） |
+| レガシー経路のギルド検査を外す | 1件が失敗（G4-11） |
+| `GUILD_ID` 未指定でも fetch する | 1件が失敗（G4-11） |
+| `build_option_embed` の登録行を消す（`/schedule remind`） | 1件が失敗（G4-13） |
+| `/schedule status` の補完登録を消す | 1件が失敗（G4-13） |
+| `/task done` の補完登録を消す | 1件が失敗（G4-13） |
+| `/schedule remind` の補完を全件用にすり替える | 1件が失敗（G4-13） |
+| `remind` の締切済みガードを消す | 3件が失敗（G4-14） |
+
+G4-12 は変異ではなく**受入基準そのものをテストで固定**した
+（`inspect.signature` で `guild_id` を第2引数に取ること、
+`cogs/schedule.py` に `self.repo.for_guild(` が残っていないこと）。
+
+#### 次タスクへの申し送り
+
+- **ADR 0009 はまだ完了していない。** 残りの完了条件:
+  1. `LayerTrackingService` が `guild_id` を明示引数で受ける
+     （`cogs/layer_tracking.py:39` がプロキシを渡している）
+  3. `repositories/base.py` から `for_guild()` / `GuildBoundRepository` を撤去
+  4. その前に、`dashboard/security.py` の `GuildScope.bind()`（**意図的な用法**。
+     ADR 0008）の置き換え先を用意する
+
+  G4 の範囲外なので手を付けていない。**次の表（G5）に起票する価値がある**
+- G4-11 で `bot.py` の他の送信経路（`send_guild_notice`）は既に
+  `guild.get_channel` を使っており、直す必要は無かった
+- 「未回答者数（この予定）」は候補ごとのメッセージすべてに同じ数字が出る。
+  冗長だが、候補単位と誤読されるよりよいと判断した
