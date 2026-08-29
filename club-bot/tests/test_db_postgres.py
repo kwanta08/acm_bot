@@ -173,19 +173,19 @@ def test_pg_ddl_no_unsupported_constructs():
 def test_prepare_converts_placeholders():
     db = Database("./dummy.db", database_url="postgresql://u:p@localhost/d")
     stmt, args = db._prepare(
-        "SELECT * FROM tasks WHERE guild_id = ? AND status = ? AND local_task_id = ?",
-        (1, "open", 42),
+        "SELECT * FROM members WHERE guild_id = ? AND status = ? AND member_id = ?",
+        (1, "active", 42),
     )
     assert stmt == (
-        "SELECT * FROM tasks WHERE guild_id = $1 AND status = $2 AND local_task_id = $3"
+        "SELECT * FROM members WHERE guild_id = $1 AND status = $2 AND member_id = $3"
     )
-    assert args == [1, "open", 42]
+    assert args == [1, "active", 42]
 
 
 def test_prepare_sqlite_passthrough():
     db = Database("./dummy.db")
-    stmt, args = db._prepare("SELECT * FROM tasks WHERE guild_id = ?", (1,))
-    assert stmt == "SELECT * FROM tasks WHERE guild_id = ?"
+    stmt, args = db._prepare("SELECT * FROM members WHERE guild_id = ?", (1,))
+    assert stmt == "SELECT * FROM members WHERE guild_id = ?"
     assert args == [1]
 
 
@@ -309,7 +309,7 @@ def test_pg_live_schema_and_crud():
             assert len(views) == 3
         finally:
             # 後片付け（テストデータ削除）
-            await db.execute("DELETE FROM tasks WHERE guild_id IN (?, ?)", (G1, G2))
+            await db.execute("DELETE FROM layer_records WHERE guild_id IN (?, ?)", (G1, G2))
             await db.execute("DELETE FROM teams WHERE guild_id IN (?, ?)", (G1, G2))
             await db.close()
 
@@ -326,21 +326,23 @@ def test_pg_live_sequence_fix():
         try:
             # 明示 ID で大きな値を挿入（SQLite 移行を再現）
             await db.execute(
-                "INSERT INTO tasks (local_task_id, guild_id, title, status,"
-                " created_by, created_at) VALUES (900001, ?, '明示ID', 'open', 'u1', '2026-01-01')",
+                "INSERT INTO layer_records (record_id, guild_id, user_id, keta, layer_num,"
+                " started_at, ended_at, minutes)"
+                " VALUES (900001, ?, 'u1', '主桁', '明示ID', '2026-01-01', '2026-01-01', 30)",
                 (G1,),
             )
             # シーケンス修復（connect 時にも走るが明示的に再実行）
             await db._pg_fix_sequences()
             # 次の自動採番が衝突しない
             cur = await db.execute(
-                "INSERT INTO tasks (guild_id, title, status, created_by, created_at)"
-                " VALUES (?, '自動採番', 'open', 'u1', '2026-01-01')",
+                "INSERT INTO layer_records (guild_id, user_id, keta, layer_num,"
+                " started_at, ended_at, minutes)"
+                " VALUES (?, 'u1', '主桁', '自動採番', '2026-01-01', '2026-01-01', 30)",
                 (G1,),
             )
             assert cur.lastrowid > 900001
         finally:
-            await db.execute("DELETE FROM tasks WHERE guild_id IN (?, ?)", (G1, G2))
+            await db.execute("DELETE FROM layer_records WHERE guild_id IN (?, ?)", (G1, G2))
             await db.close()
 
     run(_main())
