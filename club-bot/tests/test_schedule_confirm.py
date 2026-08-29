@@ -757,15 +757,15 @@ def test_the_summary_does_not_grow_the_field_count():
         db = await _make_db()
         try:
             repo = await _seed(db)
-            scoped = repo.for_guild(G1)
             bot = SimpleNamespace(get_user=lambda _uid: None)
 
             schedule = await repo.get_schedule(G1, "sch_1")
-            before = len((await svc.build_summary_embed(scoped, bot, schedule, None)).fields)
+            # G4-12 で guild_id を明示引数で受ける形になった（ADR 0009 完了条件2）
+            before = len((await svc.build_summary_embed(repo, G1, bot, schedule, None)).fields)
 
             await repo.set_confirmed_option(G1, "sch_1", "sch_1_o1")
             schedule = await repo.get_schedule(G1, "sch_1")
-            embed = await svc.build_summary_embed(scoped, bot, schedule, None)
+            embed = await svc.build_summary_embed(repo, G1, bot, schedule, None)
             assert len(embed.fields) == before, "確定日で field が増えている"
             assert "確定した日程" in (embed.description or "")
         finally:

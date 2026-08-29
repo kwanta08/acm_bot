@@ -136,15 +136,69 @@ def build_emoji_maps(gconf, guild: discord.Guild | None = None) -> dict:
     }
 
 
+async def count_unanswered(
+    repo: ScheduleRepository,
+    guild_id: int,
+    schedule: dict[str, Any],
+    guild: discord.Guild | None,
+    roster_active_ids: set[str],
+    roster_retired_ids: set[str],
+) -> int | None:
+    """予定単位の未回答者数。特定できないときは None（G4-12）。
+
+    **`cogs/schedule.py` の `notify_unanswered` と同じ母集団・同じ単位**にする。
+    部員が最初に見る数字は投票メッセージのこれなので、
+    実際に DM が飛ぶ相手と食い違うと「催促されたのに未回答は0人」になる。
+
+    None は「対象を特定できない」（ロール削除済み・保持者0名・名簿も空）。
+    0 は「対象は特定でき、未回答が0名」。**この2つを混ぜない**（ADR 0021 / 0022）。
+    """
+    role_member_ids: set[str] | None = None
+    if schedule.get("target_role_id"):
+        if guild is None:
+            return None
+        try:
+            role = guild.get_role(int(schedule["target_role_id"]))
+        except (TypeError, ValueError):
+            return None
+        if role is None:
+            return None
+        role_member_ids = {str(m.id) for m in role.members if not m.bot}
+        if not role_member_ids:
+            # ロールは生きているのに保持者が見えない。0 とは主張しない
+            # （notify_unanswered と同じ判断）
+            return None
+    answered = await repo.list_voters_for_schedule(guild_id, schedule["schedule_id"])
+    targets = select_unanswered_targets(
+        role_member_ids=role_member_ids,
+        roster_active_ids=roster_active_ids,
+        roster_retired_ids=roster_retired_ids,
+        answered_ids=answered,
+    )
+    return None if targets is None else len(targets)
+
+
 async def build_option_embed(
     repo: ScheduleRepository,
+    guild_id: int,
     bot: discord.Client,
     schedule: dict[str, Any],
     option: dict[str, Any],
     guild: discord.Guild | None,
+    *,
+    roster_active_ids: set[str] | None = None,
+    roster_retired_ids: set[str] | None = None,
 ) -> discord.Embed:
-    """候補日程1件分の投票状況 Embed を生成する（仕様 11.2.4）。"""
-    votes = await repo.list_votes(option["option_id"])
+    """候補日程1件分の投票状況 Embed を生成する（仕様 11.2.4）。
+
+    `guild_id` を**明示引数で受ける**（ADR 0009 の完了条件2）。
+    以前は `repo.for_guild(guild_id)` のプロキシを渡していた。
+
+    未回答者数は**予定単位**で、`notify_unanswered` と同じ母集団を使う（G4-12）。
+    名簿（`roster_*_ids`）を渡さないと母集団を決められないので、
+    渡されなかった場合は「特定できない」＝ `-` を表示する。
+    """
+    votes = await repo.list_votes(guild_id, option["option_id"])
     ok_users, ng_users, maybe_users = [], [], []
     for v in votes:
         name = await _resolve_name(bot, guild, v["user_id"])
@@ -155,15 +209,21 @@ async def build_option_embed(
         elif v["status"] == "maybe":
             maybe_users.append(name)
 
-    target_role_name = "全員"
-    unanswered_count = "-"
+    target_role_name = "名簿の現役"
     if schedule.get("target_role_id") and guild:
         role = guild.get_role(int(schedule["target_role_id"]))
         if role:
             target_role_name = role.name
-            answered = {v["user_id"] for v in votes}
-            targets = {str(m.id) for m in role.members if not m.bot}
-            unanswered_count = str(len(targets - answered))
+
+    # **未回答者数は候補単位ではなく予定単位。** 候補ごとに数えると
+    # 「3候補のうち1つに答えた人」が未回答として出る（G4-12）
+    unanswered_count = "-"
+    if roster_active_ids is not None and roster_retired_ids is not None:
+        count = await count_unanswered(
+            repo, guild_id, schedule, guild, roster_active_ids, roster_retired_ids
+        )
+        if count is not None:
+            unanswered_count = str(count)
 
     embed = schedule_embed(f"【日程調整】{schedule['title']}")
     embed.add_field(name="候補日時", value=option["label"], inline=False)
@@ -176,7 +236,7 @@ async def build_option_embed(
     embed.add_field(
         name=f"未定 ({len(maybe_users)})", value="\n".join(maybe_users) or "—", inline=True
     )
-    embed.add_field(name="未回答者数", value=unanswered_count, inline=True)
+    embed.add_field(name="未回答者数（この予定）", value=unanswered_count, inline=True)
     if schedule.get("description"):
         embed.add_field(name="説明", value=schedule["description"], inline=False)
     return embed
@@ -195,12 +255,16 @@ async def _resolve_name(bot: discord.Client, guild: discord.Guild | None, user_i
 
 async def build_summary_embed(
     repo: ScheduleRepository,
+    guild_id: int,
     bot: discord.Client,
     schedule: dict[str, Any],
     guild: discord.Guild | None,
 ) -> discord.Embed:
-    """締切後の結果要約 Embed（仕様 11.2.5）。"""
-    options = await repo.list_options(schedule["schedule_id"])
+    """締切後の結果要約 Embed（仕様 11.2.5）。
+
+    `guild_id` を明示引数で受ける（ADR 0009 の完了条件2）。
+    """
+    options = await repo.list_options(guild_id, schedule["schedule_id"])
     embed = schedule_embed(f"【締切】{schedule['title']} 集計結果")
     if schedule.get("place"):
         embed.add_field(name="場所", value=schedule["place"], inline=True)
@@ -209,7 +273,7 @@ async def build_summary_embed(
     best_label = None
     best_ok = -1
     for opt in options:
-        votes = await repo.list_votes(opt["option_id"])
+        votes = await repo.list_votes(guild_id, opt["option_id"])
 
         ok_users, ng_users, maybe_users = [], [], []
         for v in votes:

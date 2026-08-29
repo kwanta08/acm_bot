@@ -6,11 +6,12 @@ Schedule モジュール（仕様 11.2）。
 Bot 再起動後も on_raw_reaction_add/remove で処理可能。
 
 マルチテナント版: 全データを interaction.guild.id（または payload.guild_id）
-でスコープする。Embed 生成には guild 固定プロキシ repo.for_guild(guild_id)
-を渡す（services/schedule_service.py の Embed 生成側は guild_id を
-受け取らないまま。ADR 0009 の完了条件2は未実施）。未回答者の母集団を
-決める select_unanswered_targets は、ギルドも DB も触らない純関数として
-同じモジュールに置いてある。
+でスコープする。Embed 生成（services/schedule_service.py）は **guild_id を
+明示引数で受け取る**——repo.for_guild() のプロキシは渡さない
+（ADR 0009 の完了条件2。G4-12 で実施）。未回答者の母集団を決める
+select_unanswered_targets は、ギルドも DB も触らない純関数として
+同じモジュールに置いてある。投票メッセージの「未回答者数」も
+この関数を通すので、催促の DM が飛ぶ相手と食い違わない（G4-12）。
 """
 
 from __future__ import annotations
@@ -242,7 +243,9 @@ class Schedule(commands.Cog):
         )
 
         schedule = await self.repo.get_schedule(guild_id, schedule_id)
-        scoped_repo = self.repo.for_guild(guild_id)
+        # 未回答者数は催促と同じ母集団で出す（G4-12）。名簿は予定ごとに
+        # 1回だけ引き、候補の数だけ引き直さない
+        roster_active, roster_retired = await self._roster_ids(guild_id)
 
         # 候補ごとに1メッセージ投稿（仕様 11.2.3）
         # リアクション絵文字はギルド別設定（/schedule emoji set）を参照
@@ -256,7 +259,14 @@ class Schedule(commands.Cog):
             )
             opt = {"option_id": option_id, "label": label}
             embed = await svc.build_option_embed(
-                scoped_repo, self.bot, schedule, opt, interaction.guild
+                self.repo,
+                guild_id,
+                self.bot,
+                schedule,
+                opt,
+                interaction.guild,
+                roster_active_ids=roster_active,
+                roster_retired_ids=roster_retired,
             )
             # 対象ロールへは先頭の1通だけでメンションする（候補の数だけ
             # 鳴らさない）。従来はメンションが無く、対象者は投票の開始に
@@ -544,11 +554,18 @@ class Schedule(commands.Cog):
         schedule = await self._find_schedule(interaction, guild_id, schedule_id)
         if schedule is None:
             return
-        scoped_repo = self.repo.for_guild(guild_id)
+        roster_active, roster_retired = await self._roster_ids(guild_id)
         options = await self.repo.list_options(guild_id, schedule_id)
         for opt in options:
             embed = await svc.build_option_embed(
-                scoped_repo, self.bot, schedule, opt, interaction.guild
+                self.repo,
+                guild_id,
+                self.bot,
+                schedule,
+                opt,
+                interaction.guild,
+                roster_active_ids=roster_active,
+                roster_retired_ids=roster_retired,
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -607,6 +624,18 @@ class Schedule(commands.Cog):
             return
         schedule = await self._find_schedule(interaction, guild_id, schedule_id)
         if schedule is None:
+            return
+        if schedule["closed_flag"]:
+            # 締切済みへの催促は「もう答えられない投票」への DM になる。
+            # オートコンプリートは開催中しか出さないので踏みにくいが、
+            # L2 が ID を直打ちすれば通っていた（G4-14）。
+            # 文言は edit-deadline と揃える
+            await interaction.followup.send(
+                embed=error_embed(
+                    "この投票は既に締切済みです。締切済みの投票には再通知できません。"
+                ),
+                ephemeral=True,
+            )
             return
         count = await self.notify_unanswered(schedule)
         if count is None:
@@ -963,7 +992,7 @@ class Schedule(commands.Cog):
         updated_schedule = await self.repo.get_schedule(guild_id, schedule_id)
 
         # 各候補メッセージの締切表示を更新
-        scoped_repo = self.repo.for_guild(guild_id)
+        roster_active, roster_retired = await self._roster_ids(guild_id)
         options = await self.repo.list_options(guild_id, schedule_id)
         channel = self.bot.get_channel(int(schedule["channel_id"]))
         updated_msgs = 0
@@ -974,7 +1003,14 @@ class Schedule(commands.Cog):
                 try:
                     msg = await channel.fetch_message(int(opt["message_id"]))
                     embed = await svc.build_option_embed(
-                        scoped_repo, self.bot, updated_schedule, opt, interaction.guild
+                        self.repo,
+                        guild_id,
+                        self.bot,
+                        updated_schedule,
+                        opt,
+                        interaction.guild,
+                        roster_active_ids=roster_active,
+                        roster_retired_ids=roster_retired,
                     )
                     await msg.edit(embed=embed)
                     updated_msgs += 1
@@ -1095,8 +1131,16 @@ class Schedule(commands.Cog):
             return
         guild = getattr(channel, "guild", None)
         guild_id = schedule.get("guild_id") or (guild.id if guild else 0)
+        roster_active, roster_retired = await self._roster_ids(guild_id)
         embed = await svc.build_option_embed(
-            self.repo.for_guild(guild_id), self.bot, schedule, option, guild
+            self.repo,
+            guild_id,
+            self.bot,
+            schedule,
+            option,
+            guild,
+            roster_active_ids=roster_active,
+            roster_retired_ids=roster_retired,
         )
         try:
             await message.edit(embed=embed)
@@ -1212,9 +1256,7 @@ class Schedule(commands.Cog):
         guild_id = schedule["guild_id"]
         await self.repo.close_schedule(guild_id, schedule["schedule_id"])
         guild = self.bot.get_guild(guild_id)
-        embed = await svc.build_summary_embed(
-            self.repo.for_guild(guild_id), self.bot, schedule, guild
-        )
+        embed = await svc.build_summary_embed(self.repo, guild_id, self.bot, schedule, guild)
         channel = self.bot.get_channel(int(schedule["channel_id"]))
         if channel:
             try:
