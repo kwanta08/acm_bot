@@ -471,7 +471,7 @@
       - **検証**: `tests/test_layer_stats.py`（新規）。集計は `services/` の純関数に切り出して単体テストする
       - **注意**: 新規テーブル不要。桁引数は既存の `_keta_autocomplete` を再利用
 
-- [ ] **G4-2** `/layer cancel` と押し忘れ検知。
+- [x] **G4-2** `/layer cancel` と押し忘れ検知。
       `/layer start` したまま帰宅すると `/layer end` が「1200分」を記録し、
       完了層数が増えるので**進捗率まで水増しされる**。打ち間違えて start した場合の
       取り消し手段も無い（`end` するしかなくゴミ行が残る）。
@@ -2452,3 +2452,88 @@ HTTPException で落ち、利用者には「予期せぬエラー」としか出
 - `/layer stats` は**進行中セッションを含めない**（`layer_records` のみ）。
   G4-2 の押し忘れ検知で `layer_sessions` を見るときに、
   「集計に出ないのに進行中」という状態が生まれることに注意
+
+---
+
+### 2026-08-29 — G4-2: `/layer cancel` と押し忘れ検知（ブランチ `feat/g4-2`）
+
+`/layer start` したまま帰宅すると `/layer end` が「1200分」を記録し、
+**完了層数が増えるので `/progress` の進捗率まで水増しされる**。
+打ち間違えた場合の取り消し手段も無く、`end` するしかなかった。
+
+- ruff: `All checks passed!`
+- pytest: **1072 passed, 12 skipped**（着手前は 1046 passed, 12 skipped）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `services/layer_tracking_service.py` | `LayerTrackingService.cancel()`（記録を残さない）と `classify_stale_sessions()`（純関数） |
+| `config.py` | `LAYER_SESSION_ALERT_MINUTES`（既定240）/ `LAYER_SESSION_AUTO_CANCEL_MINUTES`（既定720）をギルド別設定に |
+| `cogs/layer_tracking.py` | `/layer cancel`（L1） |
+| `cogs/reminders.py` | 5分ループに `_process_layer_sessions()` を相乗り。`reminders_log` で二重通知を防ぐ |
+| `tests/test_layer_session_alert.py`（新規） | 26件 |
+| `docs/OPERATION.md` `docs/GUIDE.md` | コマンド表・早見表・通知表・トラブル表 |
+
+#### 設計判断
+
+**1. `cancel` は `end` の別名ではない。記録を1行も書かない。**
+`end` で閉じると押し忘れの分数が `layer_records` に入り、
+`count_completed_layers` が数える層番号の種類数が増えて進捗率が上がる。
+これがこのタスクの発端そのものなので、テストで
+「`list_records` が空のまま」を固定した。
+
+**2. DM の失敗を「拒否（Forbidden）」と「一時障害（HTTPException）」で分けた。**
+`reminders_log.exists()` は status を見ないので、書けば再試行は止まる。
+
+- Forbidden → `failed` で**記録する**。次の tick でも直らないので、
+  5分ごとに永久に叩き続けないため
+- HTTPException → **記録しない**。次の tick で再試行する（G2-3 の
+  「送っていないなら送信済みにしない」）
+
+G2-3 の原則をそのまま全部に当てると、DM を閉じている部員1人のために
+セッション中ずっと5分おきに Forbidden を叩くことになる。
+**「直らない失敗」と「直るかもしれない失敗」を分けた**のがこのタスクの判断。
+
+**3. 自動取り消しは DM より先に実行する。**
+通知が届かなくても水増しは止める。DM は付随であって本体ではない。
+メンバーがキャッシュに無い（退部済み・キャッシュ欠落）場合も取り消しは進む。
+
+**4. 催促と自動取り消しは排他。** 閾値を両方超えたセッションは
+自動取り消しだけを行い、催促には入れない（同じ tick で2通届く）。
+`classify_stale_sessions` の `elif` がその担保で、
+`if` に変えるとテストが落ちる。
+
+**5. `reminders_log` のキーは `layer_session:<session_id>`。**
+`session_id` は AUTOINCREMENT なので「1セッションにつき1回」を素直に表せる。
+ユーザー単位にすると、次に始めたセッションで催促が飛ばなくなる。
+
+**6. 0 でその機能だけ無効。** 「催促は要らないが自動取り消しは欲しい」
+（またはその逆）が選べる。既定値を変えていないので、既存ギルドの挙動は
+4時間・12時間で**新しく**動きだす——ここは ADR 0024 の「既定値で既存データを
+動かさない」に照らして迷ったが、(a) データを書き換えるのではなく
+セッション行を消すだけ、(b) 押し忘れセッションを残すこと自体が
+進捗率を壊している状態、(c) 受入基準が既定値を明示している、の3点で
+**既定 ON のまま**とした。無効化の手段（0）を用意し、ドキュメントに書いた。
+
+**7. 5分ループでは日程調整とは別の `try` にした。**
+同じ `try` に入れると、日程調整側が落ちたギルドで押し忘れの自動取り消しまで
+止まり、進捗率の水増しが残り続ける（gotcha `all-guilds-stop-getting-notifications`
+と同じ形の、ジョブ間版）。
+
+#### 空振り確認（実測）
+
+| 一時的な改変 | 結果 |
+|---|---|
+| `cancel` が `add_record` するようにする | 記録なしの2件が失敗 |
+| 自動取り消しの境界を `>=` から `>` へ | 自動取り消し系3件が失敗 |
+| 催促の分岐を `elif` から `if` へ | 二重通知の2件が失敗 |
+| Forbidden を一時障害扱い（`None` を返す）に | 再試行しないことのテストが失敗 |
+
+#### 次タスクへの申し送り
+
+- **G4-9（工具の貸出）は `classify_stale_sessions` を再利用できる。**
+  「開始 → 進行中 → 終了」が同型で、返却予定日超過の督促は
+  閾値を「予定日からの経過」に読み替えるだけ
+- `/layer stats` は `layer_records` だけを見るので、自動取り消しされた
+  セッションは集計に一切現れない（これは意図どおり）
