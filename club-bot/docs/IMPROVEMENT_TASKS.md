@@ -212,7 +212,7 @@
       `club-bot-dashboard.service` の restart、`ReadWritePaths` 用ディレクトリ作成まで入っている。
       **分析前に `git fetch` していなかったのが原因**（`docs/IMPROVEMENT_REPORT.md` の P0-7 も取り下げ）。
       - **残る作業**: 「restart 前に `pg_dump -Fc` を取る」の追記（`docs/DASHBOARD_SETUP.md` §11 /
-        `docs/OPERATION.md` §8.2）は未実施。申し送りから G3-6 として再起票する
+        `docs/OPERATION.md` §6）は未実施。申し送りから **G3-7** として再起票する（G3-7 で実施済み）
       - 以下は取り下げた元の記述:
       `.github/workflows/deploy.yml:24-30` は bot しか restart していないのに、
       `deploy/club-bot-dashboard.service:9-11` は「deploy.yml も同じ前提でデプロイします」と書いている。
@@ -445,7 +445,7 @@
         L3 スラッシュコマンドで、流用できるのは `MemberRepository.list_teams` と
         `_sync_roles` だけ。Select View は新規に書いた。完了ログの設計判断5）
 
-- [ ] **G3-7** ドキュメントを実装に合わせ、GUIDE.md を回帰テストの対象にする。
+- [x] **G3-7** ドキュメントを実装に合わせ、GUIDE.md を回帰テストの対象にする。
       齟齬: GUIDE.md:364-365 は「毎朝 **08:00**」だが実装は **08:30**（`cogs/reminders.py:193`）。
       通知表（GUIDE.md:360-368）に `weekly_milestone_alert` / `daily_purge` /
       `cogs/progress.py:803` が無い。早見表（GUIDE.md:484-509）に `/help` `/setup-status`
@@ -809,7 +809,7 @@ gotcha `test-asserts-permission-but-decorator-missing` と同型の嘘を防ぐ�
 | 仮ID | 内容 | 出どころ |
 |---|---|---|
 | G2-8 | 内部名表示の統一（`/progress edit` が DB カラム名をそのまま出す / `/report audit` が生の18桁ユーザーIDを出す。`discord_name_cache` があるのに使っていない） | G1-5 の未実施分 |
-| G3-6 | 「restart 前に `pg_dump -Fc` を取る」を `docs/DASHBOARD_SETUP.md` §11 と `docs/OPERATION.md` §8.2 へ追記（マイグレーションに down が無い） | G1-8 の残件 |
+| ~~G3-7~~ | 「restart 前に `pg_dump -Fc` を取る」を `docs/DASHBOARD_SETUP.md` §11 と `docs/OPERATION.md` **§6** へ追記（マイグレーションに down が無い） | G1-8 の残件。**G3-7 で実施済み**（当初 G3-6 と書いていたが、その枠はオンボーディングで埋まっていた） |
 | — | ADR 0023 の「影響範囲」に `#bot-log` への例外を1行追記 | 設計判断1 |
 | — | `bot.py:426-428` に `allowed_mentions=discord.AllowedMentions.none()` を明示 | 設計判断5 |
 | — | `tests/test_table_value_coercion.py:21` の `pytest.importorskip("fastapi")` を削除（書き換えで dashboard 依存が消えたのに残っている。無いと `_coerce` の全テストが不要に skip される＝gotcha `dashboard-tests-silently-skipped` と同型） | レビュー時に発見 |
@@ -2283,3 +2283,100 @@ try の外に置いていた。ここで例外が出ると `setup_hook` ごと�
   コミットしてしまい、G3-4 の実装コミットに変異が混ざった（`77f38bd` で復旧）。
   以降は「フルセット緑」だけを根拠にせず、**戻した項目それぞれを実装側の grep で確認**してから
   コミットする。adversary 側もサンドボックス複製で実測する運用に変えた
+
+### 2026-08-29 — G3-7: ドキュメントの整合と GUIDE.md の回帰テスト化（ブランチ `fix/g3-7`）
+
+GUIDE.md の通知表は「毎朝 08:00」と書いていたが実装は 08:30。早見表には
+`/close` `/remind` のような**実在しないコマンド名**が並び、`/status` は
+`/schedule status` と `/layer status` を同じ表記で指していた。
+
+- ruff: `All checks passed!`
+- pytest: **1017 passed, 12 skipped**（着手前は 1013 passed, 12 skipped。skip は据え置き）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `docs/GUIDE.md` | §5 通知表を実装の8ループと1対1に。付録の早見表を**全92コマンドの完全名**へ |
+| `tests/test_docs_commands.py` | 付録セクションの**双方向**検査（+4テスト）。`len(TABLES)` との突き合わせ |
+| `docs/OPERATION.md` | ジョブ表と本文の 08:00 → 08:30（計7箇所）、`pg_dump -Fc`、`/health` の DB 表記 |
+| `docs/{PRIVACY,DASHBOARD_SETUP}.md` `README.md` `cogs/{data,season}.py` | `/data export` の「全データ」→「主要7テーブル」、`pg_dump` 手順 |
+
+#### 設計判断
+
+**1. 早見表は全件必須。除外リストを作らない。**
+「よく使うものだけ」に絞る案は、(a) その役割は既に §3「役割別・最初に覚えること」が
+担っており第3の層ができる、(b) 付録は「全コマンドの詳細は OPERATION.md」と自称している、
+(c) 行数の増分は12 → 18行程度（既存12行が既に約70件を詰めていた）、という理由で採らなかった。
+決め手は構造で、**除外リストは逃げ道**になる——将来テストが赤くなったときの最小手が
+「ドキュメントに書く」ではなく「除外リストに1行足す」になる（ADR 0008 / 0016）。
+
+**2. 検査対象は付録セクションのみ。ファイル全体ではない。**
+全体を対象にすると、`/schedule restore` は3章の幹部向け一覧にも書かれているので
+**付録から抜けていても緑になる**。見出しで切り出し、見出しが見つからなければ
+「抽出0件」ではなく「見出しが無い」で落ちるようにした。
+
+**3. 完全名への書き換えは検査を通すための改変ではなく、欠陥修正。**
+`/close` `/remind` `/delete` `/edit-deadline` `/show` `/reset` はどれも実在せず、
+読者がそのまま打てない。「完全名の行だけ検査する」折衷案は、付録の大半を
+検査対象外にしたうえで緑を返す形になるので採らなかった。
+
+**4. `/data delete` の「全データ」は正しいので変えていない。**
+`purge_target_tables()` は `TABLE_DDL` の全テーブルから導出されるので本当に全データ。
+ここを「主要7テーブル」に書き換えると**プライバシーポリシーで削除範囲を過小に記載する**
+ことになり、G3-6 で直したのと逆向きの虚偽になる。直したのは `/data export` 側だけ。
+
+**5. 数字は直書きしない。** `len(TABLES)` と突き合わせるテストを入れた。
+docs 4ファイルに加えて `cogs/data.py` と `cogs/season.py` の docstring も対象に含める
+（数字が散っているので、片方だけ直して片方が静かに古いまま残る形を防ぐ）。
+G4-3 で `audit_log` 等が加わったときにテスト失敗として現れる。
+
+#### 空振り確認（実測）
+
+新しい検査が本当に効くことを、実際に改変して確かめた:
+
+| 一時的な改変 | 結果 |
+|---|---|
+| 付録から `/countdown` を消す | `test_every_command_is_in_the_guide_appendix` が失敗 |
+| 付録に `/nonexistent` を足す | `test_the_guide_appendix_has_no_stale_commands` が失敗 |
+| 付録から `/schedule restore` **だけ**消す | missing 方向が失敗（**3章に記載があっても緑にならない**） |
+| 同一セルに `/bogus` を足す | stale 方向が失敗 |
+| `docs/PRIVACY.md` を「全データ」へ差し戻す | `test_the_export_table_count_matches_the_whitelist` が失敗 |
+| `cogs/data.py` を「主要8テーブル」に | 同上が失敗（**.py 側も検査範囲に入っている**） |
+
+差分監査も独自に8種の変異（typo・表の全削除・同一セル中間への挿入など）を当て、
+すべて検出されることを確認している。
+
+#### ゲートの判定
+
+| ゲート | 判定 | 経過 |
+|---|---|---|
+| ゲート1（acm-plan-reviewer） | REVISE → **APPROVE** | **`/weight` は実装に存在する**（トップレベル群 `weight set` / `weight view` / `weight top`。受入基準の「全体で0ヒット」は GUIDE.md 内で0件の意味）という私の事実誤認のほか、不足コマンドが7件では足りない／検査は双方向／`/data delete` を変えるな／`push_section_tasks` の漏れ／`pg_dump` の追記先は §8.2 ではなく §6、など13件 |
+| ゲート2（acm-diff-auditor） | FINDINGS ×3 → 残2件も対応 | 1回目に4件、2回目に6件（**OPERATION.md 本文の 08:00 が4箇所残っていた**／`cogs/reminders.py` の docstring ／**新テストの guard が「全データ」への差し戻しを素通りさせていた**／`cogs/data.py` の docstring ほか）、3回目に2件 |
+
+**test-adversary は回していない。** 実装コードの変更が docstring 2行のみで、
+戻して赤くなるかを見る対象が無いため。代わりに**ドキュメント側の変異6種を自分で当てて実測**し、
+差分監査にも独自の変異検査を依頼した。
+
+#### 差分監査が見つけた「自分の修正が中途半端だった」箇所
+
+- ジョブ表だけ 08:30 に直し、**同一ファイルの本文4箇所は 08:00 のまま**残していた
+  （同じファイル内で併記された状態になり、受入基準を満たしていなかった）
+- 呼び出し側（`cogs/season.py`）の「丸ごと」は直したのに、
+  **エクスポート本体（`cogs/data.py`）の docstring が「全データ」のまま**だった
+- 新テストに `if "主要" not in text: continue` の guard を置いたため、
+  **「全データ」へ差し戻す回帰が素通り**していた（数字を8に変える改ざんは検出できるが、
+  表記ごと戻す回帰は検出できない、という非対称）
+
+#### 次タスクへの申し送り
+
+- **`/set_sheet` `/sheet_sync` の記述が矛盾している。** `docs/OPERATION.md:139` は
+  「撤去しました」、`:182` と `:704` は「利用できます」と書いており、**実装にはどちらも無い**。
+  既存の `test_documented_commands_still_exist` は**表の行しか見ない**ので、
+  本文のこの矛盾は永久に検出されない。G3-7 の受入対象外なので直していない
+- **付録の権限列は機械検査されていない。** 同じコマンドを権限の違う2行に重複掲載しても
+  `>=` 比較で緑のまま（現状は重複なし）
+- **GUIDE.md の3章・4章のコマンド例はコードブロック内**なので、今回の検査の死角。
+  現時点で齟齬が無いことは目視で確認済み（差分監査も全件突き合わせ済み）
+- `cogs/data.py` の `EXPORT_README`（ZIP に同梱され利用者が読む文面）は範囲を限定していない。
+  ファイル一覧は併記されているので実害は小さいが、将来 PRIVACY と揃えるなら候補
