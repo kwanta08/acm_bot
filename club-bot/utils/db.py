@@ -561,6 +561,35 @@ CREATE TABLE IF NOT EXISTS tool_loans (
     overdue_notified_flag INTEGER NOT NULL DEFAULT 0
 );
 """,
+    # ヒヤリハット・事故報告（G4-10）。
+    #
+    # 工房での切削・溶剤・高所作業・機体運搬・テストフライトと危険度が高く、
+    # 大学から安全管理体制の提示を求められることもある。今は雑談に流れて消える。
+    #
+    # **匿名の扱いに2つの列を使う。**
+    #   - reporter_id は匿名でも必ず保存する（悪用・虚偽報告への対処に要る）。
+    #     ただし**表示にもエクスポートにも出さない**（TABLES の列ホワイトリスト
+    #     から外してある。ADR 0016 の仕組みをそのまま使う）
+    #   - reporter_name は「表示してよい名前」。匿名報告では NULL。
+    #     表示側はこちらしか見ないので、匿名の約束が構造で守られる
+    #
+    # injury（けがの有無）は自由記述。「軽い擦り傷」「無し」など、
+    # 選択肢に収まらない実態を書けるようにする。
+    "incidents": f"""
+CREATE TABLE IF NOT EXISTS incidents (
+    incident_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    {_GUILD_COL},
+    occurred_at   TEXT NOT NULL,
+    place         TEXT NOT NULL,
+    description   TEXT NOT NULL,
+    injury        TEXT,
+    prevention    TEXT,
+    anonymous_flag INTEGER NOT NULL DEFAULT 0,
+    reporter_id   TEXT NOT NULL,
+    reporter_name TEXT,
+    created_at    TEXT NOT NULL
+);
+""",
     # Discord の表示名キャッシュ（ギルド別）。bot がギルドキャッシュから
     # 書き込み、ダッシュボード（Bot トークンを持たない別プロセス）が
     # ID → 表示名の解決に読む。name はユーザーなら「そのギルドでの表示名」
@@ -606,6 +635,7 @@ CREATE INDEX IF NOT EXISTS idx_stock_items_guild ON stock_items(guild_id, active
 CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(guild_id, stock_item_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_tools_guild ON tools(guild_id, active_flag);
 CREATE INDEX IF NOT EXISTS idx_tool_loans_open ON tool_loans(guild_id, returned_at, tool_id);
+CREATE INDEX IF NOT EXISTS idx_incidents_guild ON incidents(guild_id, occurred_at);
 """
 
 # ---------------------------------------------------------------------------
@@ -696,13 +726,14 @@ POSTGRES_VIEW_DDL = "\n".join(
 #    （年度替わり。既存メンバーはすべて active。migrations/013）
 # 15: discord_name_cache を追加（ダッシュボードの ID → 表示名解決用。
 #    bot がギルドキャッシュから書き、Web 側が読む。migrations/014）
+# 21: incidents を追加（ヒヤリハット・事故報告。G4-10）
 # 20: tools / tool_loans を追加（工具・機材の貸出。G4-9）
 # 19: stock_items / stock_movements を追加（資材・消耗品の在庫。G4-8）
 # 18: progress_snapshots を追加（進捗の日次履歴。G4-7）
 # 16: layer_sessions.layer_num を INTEGER から TEXT へ変更（/layer start は
 #    「シュリンク」等のテキスト層番号を受け付ける仕様。PostgreSQL では
 #    asyncpg の DataError になっていた。migrations/015）
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 21
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
@@ -735,6 +766,7 @@ _PK_COLUMNS: dict[str, str] = {
     "stock_movements": "movement_id",
     "tools": "tool_id",
     "tool_loans": "loan_id",
+    "incidents": "incident_id",
 }
 
 _INSERT_TABLE_RE = re.compile(r"INSERT\s+INTO\s+(\w+)", re.IGNORECASE)
@@ -1153,6 +1185,9 @@ class Database:
         if version < 20:
             await self._migrate_v20_tools()
 
+        if version < 21:
+            await self._migrate_v21_incidents()
+
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
 
@@ -1367,6 +1402,23 @@ class Database:
         ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
         await self._executescript(ddl_map["discord_name_cache"])
         log.info("discord_name_cache テーブルを作成しました（v15）。")
+
+    async def _migrate_v21_incidents(self) -> None:
+        """
+        v21: incidents テーブルを追加する（冪等）。
+
+        ヒヤリハット・事故報告（G4-10）。
+
+        **v19（在庫）にも v20（工具）にも足さない。**
+        `_migrate_versioned()` は `version >= SCHEMA_VERSION` で早期 return する
+        ため、既に適用済みの版へ後から CREATE を足しても既存 DB には届かない
+        （gotcha `bot-wont-start-undefined-column`）。
+
+        **既存データには一切触れない。** 追加されるのは空のテーブル1つだけ。
+        """
+        ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
+        await self._executescript(ddl_map["incidents"])
+        log.info("incidents テーブルを作成しました（v21）。")
 
     async def _migrate_v20_tools(self) -> None:
         """

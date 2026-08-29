@@ -31,6 +31,7 @@
 | ミーティングの日程を決める | `/schedule create` → メンバーがリアクションで回答 |
 | やることを配って追いかける | `/task add` `/task list` `/task done` |
 | 桁巻きの作業を記録する | `/layer start` → `/layer end` |
+| 危なかったことを報告する | `/incident report`（`anonymous:true` で匿名） |
 | 自分がやることを確認する | `/me` |
 | 機体の進捗を見える化する | `/progress add` `/progress view` |
 | 手伝える人を探す | `/member support` |
@@ -498,7 +499,7 @@ ONにしない限り参加者には何も送りません。
 - 現在の年度を終了し、新しい年度を開始する
 - 選んだ人を **卒業（alumni）** に切り替える
 - **班長フラグを全員リセット**する（新体制で付け直すため）
-- 切り替え時点の主要18テーブルを **年度スナップショット**（ZIP）として添付する
+- 切り替え時点の主要19テーブルを **年度スナップショット**（ZIP）として添付する
 
 **卒業者のデータは削除されません。** 過去の作業記録に残る担当者名を
 引けるようにするためです。卒業した人は `/member support` などの
@@ -537,7 +538,7 @@ ONにしない限り参加者には何も送りません。
 **他のサークルとの関係**: すべてのデータはサーバー単位で完全に分離されています。
 他大学のサークルからあなたのデータが見えることはありません。
 
-**持ち出し**: `/data export` でこのサーバーの主要18テーブルを ZIP（CSV 群）として
+**持ち出し**: `/data export` でこのサーバーの主要19テーブルを ZIP（CSV 群）として
 受け取れます（管理者のみ）。サーバーIDや Todoist トークンは含まれません。
 
 **利用をやめるとき**: 運営者への連絡は不要です。Bot をサーバーから
@@ -572,6 +573,8 @@ ONにしない限り参加者には何も送りません。
 | | `/task link-section` `/task unlink-section` `/task unlink-team-sections` | L3〜 |
 | | `/task sync` | L4 |
 | 桁巻き | `/layer start` `/layer end` `/layer cancel` `/layer status` `/layer stats` `/layer keta-list` | 全員 |
+| 安全 | `/incident report` | 全員 |
+| | `/incident list` | L3〜 |
 | 資材・在庫 | `/stock list` `/stock use` `/tool list` `/tool borrow` `/tool return` | 全員 |
 | | `/stock add` `/stock set-threshold` `/stock remove` `/tool add` `/tool remove` | L2〜 |
 | | `/layer keta-add` `/layer keta-remove` | L2〜 |

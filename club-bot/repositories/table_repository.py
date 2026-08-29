@@ -466,6 +466,31 @@ TABLES: dict[str, TableSpec] = {
             _c("note", "用途"),
         ),
     ),
+    "incidents": TableSpec(
+        key="incidents",
+        label="ヒヤリハット報告",
+        table="incidents",
+        pk="incident_id",
+        pk_type="int",
+        description="/incident report で集めた安全報告",
+        order_by="incident_id DESC",
+        # 安全報告は L3（/incident list と同じ）。全員に見せる前提の表ではない
+        min_level=3,
+        columns=(
+            _c("incident_id", "ID", "number", number_type="int"),
+            _c("occurred_at", "発生日時"),
+            _c("place", "場所"),
+            _c("description", "内容"),
+            _c("injury", "けが"),
+            _c("prevention", "再発防止案"),
+            _c("anonymous_flag", "匿名", "bool"),
+            # **reporter_id は列に含めない。** 匿名の約束を、表示側の if では
+            # なく列ホワイトリスト（ADR 0016）で守る。匿名報告では
+            # reporter_name が NULL なので、この表からは誰か分からない
+            _c("reporter_name", "報告者"),
+            _c("created_at", "登録日時", "datetime"),
+        ),
+    ),
     "settings": TableSpec(
         key="settings",
         label="サーバー設定",

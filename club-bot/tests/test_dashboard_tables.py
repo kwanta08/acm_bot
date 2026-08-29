@@ -71,6 +71,8 @@ EXPECTED_TABLES = {
     # 工具・機材の貸出（G4-9）
     "tools",
     "tool_loans",
+    # ヒヤリハット・事故報告（G4-10）
+    "incidents",
 }
 
 

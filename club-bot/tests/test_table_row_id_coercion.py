@@ -102,6 +102,8 @@ def test_integer_primary_keys_are_the_majority_case():
         # 工具・機材の貸出（G4-9）
         "tools",
         "tool_loans",
+        # ヒヤリハット・事故報告（G4-10）
+        "incidents",
     }
     text_tables = {k for k, s in TABLES.items() if s.pk_type == "text"}
     assert text_tables == {"schedules", "settings"}

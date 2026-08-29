@@ -259,6 +259,14 @@ _SEED_SQL: dict[str, tuple[str, tuple[str, ...]]] = {
         ),
         (),
     ),
+    "incidents": (
+        (
+            "INSERT INTO incidents (guild_id, occurred_at, place, description,"
+            " reporter_id, created_at)"
+            " VALUES (?, '2026-01-01 10:00', '工房', '転びかけた', 'u1', '2026-01-01')"
+        ),
+        (),
+    ),
 }
 
 

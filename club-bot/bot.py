@@ -53,7 +53,8 @@ COGS = [
     "cogs.progress",  # 機体進捗管理コグ（DB 正本）
     "cogs.welcome",  # 新入生オンボーディング（既定 OFF）
     "cogs.me",  # /me 個人サマリー（既存クエリの合成のみ）
-    "cogs.inventory",  # /stock 資材・消耗品の在庫
+    "cogs.inventory",  # /stock 資材・消耗品の在庫 ／ /tool 工具の貸出
+    "cogs.safety",  # /incident ヒヤリハット・事故報告
 ]
 
 # on_guild_join / 起動時の自動セットアップで投入するギルド別デフォルト設定

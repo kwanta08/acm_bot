@@ -52,7 +52,7 @@ Bot管理者」というラベルで出ます（`utils/permissions.LEVEL_LABELS`
 ### Data（エクスポート・削除）
 | コマンド | 権限 | 説明 |
 |---|---|---|
-| `/data export` | L4 または Manage Server | このサーバーの主要18テーブルを ZIP（CSV 群）で受け取る。サーバーIDと認証情報は含まれない |
+| `/data export` | L4 または Manage Server | このサーバーの主要19テーブルを ZIP（CSV 群）で受け取る。サーバーIDと認証情報は含まれない |
 | `/data delete` | L4 または Manage Server | データ削除を申告する。確認のためサーバー名の入力が必要。最後のバックアップが添付される |
 | `/data delete-cancel` | L4 または Manage Server | 予約済みの削除を取り消す |
 
@@ -322,6 +322,22 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 新しいテーブルは使いません（既存の集計を合成しているだけ）。
 担当中の進捗ノードは `progress_nodes.assignee`（自由記述の名前）を、
 Discord の表示名と `members.display_name` の両方で照合します。
+
+---
+
+### Safety（ヒヤリハット・事故報告）
+| コマンド | 権限 | 説明 |
+|---|---|---|
+| `/incident report [anonymous]` | L1 | Modal（発生日時 / 場所 / 何が起きたか / けがの有無 / 再発防止案）を開いて報告。幹部ロールへ通知 |
+| `/incident list [limit]` | L3 | 直近の報告を一覧（ephemeral） |
+
+`anonymous:true` で報告すると、一覧・通知・エクスポートのいずれにも
+報告者名が出ません。**ただし報告者のユーザーIDは DB に保存されます**
+（虚偽・悪用への対処のため。表示・エクスポートの対象列には含めていません）。
+この扱いは `docs/PRIVACY.md` §2.5 に明記しています。
+
+通知先は在庫アラートと同じ「お知らせ →（無ければ）進捗 → タスク」の順で、
+`EXEC_ROLE_ID`（実行役ロール）が設定されていればメンションします。
 
 ---
 
