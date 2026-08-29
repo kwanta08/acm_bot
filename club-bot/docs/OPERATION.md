@@ -311,6 +311,17 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 | `/report changes [limit] [actor]` | L3 | 設定・マスタ変更の操作ログ（`audit_log`）を表示。実行者は表示名に解決 |
 | `/report attendance-rate` | L2 | 出欠率一覧 |
 
+### Me（個人サマリー）
+| コマンド | 権限 | 説明 |
+|---|---|---|
+| `/me [user]` | L1 | 自分の未完了タスク・未回答の投票・今月の積層・担当中の進捗ノードをまとめて表示（ephemeral）。`user` の指定は L2 以上 |
+
+新しいテーブルは使いません（既存の集計を合成しているだけ）。
+担当中の進捗ノードは `progress_nodes.assignee`（自由記述の名前）を、
+Discord の表示名と `members.display_name` の両方で照合します。
+
+---
+
 ### LayerTracking（桁巻き積層記録）
 | コマンド | 権限 | 説明 |
 |---|---|---|

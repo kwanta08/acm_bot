@@ -31,6 +31,7 @@
 | ミーティングの日程を決める | `/schedule create` → メンバーがリアクションで回答 |
 | やることを配って追いかける | `/task add` `/task list` `/task done` |
 | 桁巻きの作業を記録する | `/layer start` → `/layer end` |
+| 自分がやることを確認する | `/me` |
 | 機体の進捗を見える化する | `/progress add` `/progress view` |
 | 手伝える人を探す | `/member support` |
 | 今週の状況を振り返る | `/report weekly` `/report attendance-rate` |
@@ -553,7 +554,7 @@ ONにしない限り参加者には何も送りません。
 
 | 分類 | コマンド | 権限 |
 |---|---|---|
-| 確認 | `/ping` `/health` `/help` | 全員 |
+| 確認 | `/ping` `/health` `/help` `/me` | 全員 |
 | | `/setup-status` | 全員 |
 | 日程調整 | `/schedule list` `/schedule status` `/schedule list-closed` | 全員 |
 | | `/schedule create` `/schedule close` `/schedule remind` `/schedule edit-deadline` | L2〜 |

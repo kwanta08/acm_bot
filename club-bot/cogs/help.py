@@ -40,6 +40,8 @@ log = get_logger("help")
 CATEGORY_BY_COG: dict[str, str] = {
     "Core": "基本",
     "Help": "基本",
+    # /me は部員が最初に打つコマンドなので「基本」に置く（G4-4）
+    "Me": "基本",
     "Schedule": "日程調整",
     "Tasks": "タスク",
     "Members": "班・メンバー",
