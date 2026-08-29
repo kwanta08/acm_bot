@@ -30,8 +30,8 @@ from discord import app_commands
 
 from cogs.schedule import Schedule, schedule_choices
 from cogs.tasks import Tasks, task_choices
-from services.todoist_task_service import TodoistTask
 from repositories.schedule_repository import ScheduleRepository
+from services.todoist_task_service import TodoistTask
 from utils.db import Database
 
 G1 = 111

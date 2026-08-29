@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 from datetime import datetime, time, timedelta
+
 from utils.parser import TZ
 
 #: ダイジェストを送る曜日の既定（0 = 月曜）

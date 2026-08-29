@@ -190,10 +190,12 @@ def test_existing_member_columns_are_preserved():
             assert json.loads(row["secondary_teams"]) == ["elec"]
             assert row["is_leader"] == 1
             assert row["notes"] == "メモ"
-            # skills は v22 で廃止した（技能タグ機能ごと）
-            assert "skills" not in row.keys()
             assert row["joined_at"] == "2026-04-01"
             assert row["active_flag"] == 1
+            # skills は v22 で廃止した（技能タグ機能ごと）。
+            # Row への `in` は値を見るので、列の有無は PRAGMA で確かめる
+            cols = {r["name"] for r in await db.fetchall("PRAGMA table_info(members)")}
+            assert "skills" not in cols
         finally:
             await db.close()
 
