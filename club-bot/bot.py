@@ -643,46 +643,103 @@ class ClubBot(commands.Bot):
         log.warning("案内を送信できるチャンネルがありません (guild=%s)", guild.id)
         return False
 
+    async def _log_channel_for(self, guild_id: int):
+        """そのギルドの bot-log チャンネルを、**同じギルドの中から**解決する。
+
+        `self.get_channel()`（bot 全体のキャッシュ）で引くと、あるギルドの
+        `BOT_LOG_CHANNEL_ID` が別ギルドのチャンネル ID を指していたときに
+        **他テナントの運用ログがそのサーバーへ流れる**（G4-11）。
+
+        とくに `BOT_LOG_CHANNEL_ID` を環境変数で設定していると、その値は
+        `config.for_guild()` のフォールバックとして**全ギルドの GuildConfig へ
+        配られる**ため、設定していないギルドのログまで1つのサーバーへ集まる。
+
+        解決できない（そのギルドに無い・ギルドがキャッシュに無い）場合は
+        None を返して**送らない**。誤送信よりログが出ないほうがましなので、
+        「たぶんこれだろう」でフォールバックしない。
+        """
+        try:
+            gconf = await config.for_guild(guild_id)
+        except Exception:  # noqa: BLE001
+            return None
+        channel_id = gconf.bot_log_channel_id
+        if not channel_id:
+            return None
+        guild = self.get_guild(guild_id)
+        if guild is None:
+            # ギルドが見えないと「そのギルドのチャンネルか」を確かめられない
+            log.debug("bot-log の解決先ギルドが見つかりません (guild=%s)", guild_id)
+            return None
+        channel = guild.get_channel_or_thread(channel_id)
+        if channel is None:
+            log.debug(
+                "BOT_LOG_CHANNEL_ID がこのサーバーのチャンネルではありません"
+                " (guild=%s, channel=%s)",
+                guild_id,
+                channel_id,
+            )
+        return channel
+
     async def log_to_channel(self, message: str, guild_id: int | None = None) -> None:
         """
         #bot-log チャンネルへログを投稿する（改訂版 11.1.2）。
 
         guild_id 指定時はそのギルドのログチャンネルのみ。
         未指定時は参加中の全ギルドのログチャンネルへブロードキャストする。
+
+        **送信先は必ず「その guild_id に属するチャンネル」に限定する**（G4-11）。
+        env の `BOT_LOG_CHANNEL_ID` は全ギルドの GuildConfig へ配られるため、
+        ここで同一ギルド内に解決できたものだけを使う。
         """
-        channel_ids: list[int] = []
+        channels = []
         if guild_id is not None:
-            try:
-                gconf = await config.for_guild(guild_id)
-            except Exception:  # noqa: BLE001
-                return
-            if gconf.bot_log_channel_id:
-                channel_ids.append(gconf.bot_log_channel_id)
+            channel = await self._log_channel_for(guild_id)
+            if channel is not None:
+                channels.append(channel)
         else:
             for guild in list(self.guilds):
-                try:
-                    gconf = await config.for_guild(guild.id)
-                # 設定取得に失敗したギルドはスキップ（他ギルドへの送信を止めない）
-                except Exception:  # noqa: BLE001, S112
-                    continue
-                if gconf.bot_log_channel_id and gconf.bot_log_channel_id not in channel_ids:
-                    channel_ids.append(gconf.bot_log_channel_id)
-            # 起動直後など guilds キャッシュが空の場合はレガシー設定へフォールバック
-            if not channel_ids and config.bot_log_channel_id:
-                channel_ids.append(config.bot_log_channel_id)
+                # 重複排除は要らない。`_log_channel_for` は
+                # `guild.get_channel_or_thread` で引くので、**同じチャンネルが
+                # 2つのギルドから返ることはない**（チャンネルは1つのギルドに属する）。
+                # 複数ギルドが同じ ID を設定していても、解決できるのは
+                # そのチャンネルを実際に持つ1ギルドだけ
+                channel = await self._log_channel_for(guild.id)
+                if channel is not None:
+                    channels.append(channel)
+            if not channels and config.guild_id and config.bot_log_channel_id:
+                # 起動直後で guilds キャッシュが空のときのレガシー経路
+                # （単一ギルド運用。GUILD_ID を明示しているときだけ）。
+                # **fetch したチャンネルがそのギルドのものか必ず検査する**
+                channel = await self._fetch_legacy_log_channel()
+                if channel is not None:
+                    channels.append(channel)
 
-        for channel_id in channel_ids:
-            channel = self.get_channel(channel_id)
-            if channel is None:
-                try:
-                    channel = await self.fetch_channel(channel_id)
-                # 取得不能なチャンネルはスキップ（他の送信先への投稿を止めない）
-                except Exception:  # noqa: BLE001, S112
-                    continue
+        for channel in channels:
             try:
                 await channel.send(f"```\n{message[:1900]}\n```")
             except Exception as e:  # noqa: BLE001
                 log.warning("bot-log への投稿失敗: %s", e)
+
+    async def _fetch_legacy_log_channel(self):
+        """レガシー単一ギルド運用（GUILD_ID 指定）向けのフォールバック。
+
+        起動直後は `self.guilds` が空でギルドキャッシュから引けないため、
+        API から取得する。**取得したチャンネルが `GUILD_ID` のものかを検査する**
+        （検査を省くと、env の設定ミスで他サーバーへ流れる経路が復活する）。
+        """
+        try:
+            channel = await self.fetch_channel(config.bot_log_channel_id)
+        except Exception:  # noqa: BLE001
+            return None
+        channel_guild = getattr(channel, "guild", None)
+        if channel_guild is None or channel_guild.id != config.guild_id:
+            log.warning(
+                "BOT_LOG_CHANNEL_ID が GUILD_ID のサーバーのチャンネルではありません"
+                " (channel=%s)",
+                config.bot_log_channel_id,
+            )
+            return None
+        return channel
 
     async def on_app_command_error(
         self, interaction: discord.Interaction, error: app_commands.AppCommandError
