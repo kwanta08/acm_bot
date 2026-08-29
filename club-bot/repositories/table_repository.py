@@ -208,6 +208,11 @@ TABLES: dict[str, TableSpec] = {
             _c("created_by", "作成者", "user"),
             _c("channel_id", "投稿チャンネル", "channel"),
             _c("closed_flag", "締切済み", "bool", editable=True),
+            # 論理削除は編集不可。ダッシュボードの編集認可は L2 だが
+            # /schedule delete と /schedule restore は L3 なので、
+            # editable にすると L2 が L3 の操作を取り消せる
+            # （members.is_leader / teams.leader_role_id と同じ理由）
+            _c("deleted_flag", "削除済み", "bool"),
         ),
     ),
     "schedule_votes": TableSpec(
@@ -548,7 +553,7 @@ class TableRepository(BaseRepository):
                 FROM schedules s
                 LEFT JOIN schedule_options o
                   ON o.guild_id = s.guild_id AND o.schedule_id = s.schedule_id
-                WHERE s.guild_id = ?
+                WHERE s.guild_id = ? AND s.deleted_flag = 0
                 GROUP BY s.schedule_id, s.title, s.deadline
                 """,
                 (guild_id,),

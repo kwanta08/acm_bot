@@ -646,6 +646,22 @@ def test_rollover_embed_states_that_data_is_kept():
     assert len(embed) <= 6000
 
 
+def test_rollover_embed_asks_to_review_leader_roles():
+    """班長ロールは自動で消さない代わりに、見直しを促すこと（G3-1）。
+
+    settings の LEADER_ROLE_IDS は rollover が触らない（勝手に消すと
+    新体制が設定するまで全班長が L1 に降格する）。放置すると毎年
+    旧体制のロールIDが積み上がるので、結果 Embed で知らせる。
+    """
+    embed = rollover_result_embed(
+        RolloverResult(new_season="2027年度", ended_season="2026年度", leaders_reset=2)
+    )
+    desc = embed.description or ""
+    assert "班長ロール" in desc
+    assert "/setup" in desc or "/set_role" in desc
+    assert len(embed) <= 6000
+
+
 # ---------------------------------------------------------------------
 # コマンド
 # ---------------------------------------------------------------------

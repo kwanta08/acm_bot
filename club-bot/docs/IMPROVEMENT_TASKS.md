@@ -36,12 +36,12 @@
 
 ## スキーマバージョンの割り当て（衝突防止）
 
-現行は `SCHEMA_VERSION = 16`（`migrations/015_layer_session_layer_num_text.sql` まで）。
+現行は `SCHEMA_VERSION = 17`（`migrations/016_schedule_confirmed.sql` まで）。
 
 | 版 | migration | タスク |
 |---|---|---|
 | v16 | `015_layer_session_layer_num_text.sql` | 適用済み（`/layer start` の PG DataError 修正） |
-| v17 | `016_schedule_confirmed.sql` | G3-4（確定日程） |
+| v17 | `016_schedule_confirmed.sql` | **G3-3（`deleted_flag`）＋ G3-4（`confirmed_option_id`）。1版に2列をまとめてある**（適用済み） |
 | v18 | `017_progress_snapshots.sql` | G4-7（進捗履歴） |
 | v19 | `018_stock.sql` | G4-8（在庫・工具） |
 | v20 | `019_incidents.sql` | G4-10（ヒヤリハット） |
@@ -212,7 +212,7 @@
       `club-bot-dashboard.service` の restart、`ReadWritePaths` 用ディレクトリ作成まで入っている。
       **分析前に `git fetch` していなかったのが原因**（`docs/IMPROVEMENT_REPORT.md` の P0-7 も取り下げ）。
       - **残る作業**: 「restart 前に `pg_dump -Fc` を取る」の追記（`docs/DASHBOARD_SETUP.md` §11 /
-        `docs/OPERATION.md` §8.2）は未実施。申し送りから G3-6 として再起票する
+        `docs/OPERATION.md` §6）は未実施。申し送りから **G3-7** として再起票する（G3-7 で実施済み）
       - 以下は取り下げた元の記述:
       `.github/workflows/deploy.yml:24-30` は bot しか restart していないのに、
       `deploy/club-bot-dashboard.service:9-11` は「deploy.yml も同じ前提でデプロイします」と書いている。
@@ -355,30 +355,39 @@
 
 ## Phase G3: 導入と定着（破壊的変更を含む。プランモードを挟む）
 
-- [ ] **G3-1** `/setup` で班長ロールを設定できるようにし、`/set_role` に削除を追加する。
+- [x] **G3-1** `/setup` で班長ロールを設定できるようにし、`/set_role` に削除を追加する。
       `cogs/setup_wizard.py:44-47` に `LEADER_ROLE_IDS` が無く、L2 判定の唯一の根拠なのに
       ウィザードから設定できない。`cogs/settings.py:288-295` は**追記専用**で重複チェックも無く、
       1つ外すには全消しするしかない（その間 全班長が L1 に降格）。
       `services/season_service.py:71` の rollover も `members.is_leader` しかリセットせず、
       **毎年ロールIDが積み上がる**。
-      - **受入**: `ROLE_SETTINGS` に `LEADER_ROLE_IDS` を追加（`RoleSelect(max_values=5)` で複数選択、
+      - **受入**: `ROLE_SETTINGS` に `LEADER_ROLE_IDS` を追加（`RoleSelect(max_values=25)` で複数選択、
         追記ではなく上書き）。`/set_role` に `action: add|remove` を追加し重複を除去する。
+        （**当初 `max_values=5` と書いていたが 25 へ改めた。** 上書き保存なので 5 だと
+        班長ロールを6件以上運用しているギルドで L2 判定の根拠を黙って切り捨てる。完了ログの設計判断2）
         `/season rollover` の結果 Embed に「班長ロールの見直し」を促す一文を追加
       - **検証**: `tests/test_setup_wizard.py` に複数ロール保存と重複除去のケースを追加
       - **注意**: 既存の `LEADER_ROLE_IDS`（カンマ区切り）を壊さない。
         重複除去は**保存時のみ**行い、既存値の一括正規化はマイグレーションでやらない（ADR 0024）
 
-- [ ] **G3-2** 未回答判定を `members` 台帳の現役メンバーへ寄せる。
+- [x] **G3-2** 未回答判定を `members` 台帳の現役メンバーへ寄せる。
       現状 bot 側（`cogs/schedule.py:670`）はロール基準、ダッシュボード側（ADR 0025）は台帳基準で、
       **同じ「未回答」が2つの定義で動いている**。ロール未設定の予定では bot が完全に沈黙する（G2-3）。
-      - **受入**: `notify_unanswered` が「`target_role_id` があればロール ∩ 現役メンバー、
-        無ければ現役メンバー全員」を対象にする。ダッシュボードのピボット表と母集団が一致する
+      - **受入**: `notify_unanswered` が「`target_role_id` があれば**ロール保持者から
+        台帳で退部・休止と分かっている人を除いたもの**、無ければ現役メンバー全員」を対象にする。
+        ダッシュボードのピボット表と母集団は、**ロール未設定の予定で台帳の現役が全員
+        ギルドに在籍している場合に一致する**
+        （**当初「ロール ∩ 現役メンバー」「母集団が一致する」と書いていたが、どちらも改めた。**
+        積集合にすると `/member register` が進んでいないギルド — ロール保持者20名・登録済み3名 —
+        で対象が0名になり、いま届いている DM が止まる。ダッシュボードは Bot トークンを持たず
+        ロールを解決できない（ADR 0015）ため、ロール限定の予定では原理的に一致しない。
+        完了ログの設計判断1・3）
       - **検証**: `tests/test_schedule_unanswered.py`（新規）で、ロールあり／なし・
         退部者（`status='alumni'`）が除外されることを検査
       - **注意**: **ADR 0025 を更新する。** 完了ログに新 ADR の草案を書く。
         Bot トークンを Web 層に置かない方針（ADR 0015）は維持する
 
-- [ ] **G3-3** `/schedule delete` を論理削除にする。
+- [x] **G3-3** `/schedule delete` を論理削除にする。
       現状は投票メッセージを削除してから DB を CASCADE 削除しており、票データが完全消失する。
       `/team-remove` `/skill-remove` `/layer keta-remove` は既に論理削除方式なので方針統一にもなる。
       - **受入**: `schedules` に `deleted_flag` を追加（マイグレーション必要。v17 は G3-4 が使うので
@@ -386,19 +395,30 @@
       - **検証**: `tests/test_schedule_delete.py`（新規）
       - **注意**: 既存の CASCADE 削除に依存しているテストがあれば併せて直す
 
-- [ ] **G3-4** `/schedule confirm` — 確定日程の登録と当日リマインド。
+- [x] **G3-4** `/schedule confirm` — 確定日程の登録と当日リマインド。
       `finalize_schedule`（`cogs/schedule.py:704`）は集計サマリーを投稿して終わりで、
       **「結局いつに決まったのか」がどこにも残らない**。前日・当日のリマインドも無い。
-      - **受入**: スキーマ v17（`016_schedule_confirmed.sql`。G3-3 の `deleted_flag` と同じ版にまとめる）で
-        `schedules.confirmed_option_id TEXT NULL` を追加。`/schedule confirm schedule_id option_id`（L2）で
-        確定を保存し対象ロールへ告知。`/schedule list` に確定日を表示。
+      - **⚠️ `confirmed_option_id` は G3-3 で追加済み（v17）。新しい migration を作らないこと。**
+        `_migrate_versioned()` は `version >= SCHEMA_VERSION` で早期 return するため、
+        v17 済みの DB は二度と v17 の処理を通らない。後から `_migrate_v17_*` へ ALTER を足しても
+        **新規 DB にだけ列がある**状態になり、本番だけ「column does not exist」で落ちる
+        （gotcha `bot-wont-start-undefined-column`）
+      - **受入**: スキーマ v17（`016_schedule_confirmed.sql`。G3-3 で適用済み）の
+        `schedules.confirmed_option_id TEXT NULL` を使う。`/schedule confirm schedule_id option_id`（L2）で
+        確定を保存し対象ロールへ告知。`/schedule list` **と `/schedule list-closed`** に確定日を表示。
         前日20時と当日朝に「本日 18:00 ◯◯（場所）」を通知
+        （**当初「`/schedule list` に表示」とだけ書いていたが、締切済み一覧を足した。**
+        通常フローは締切 → 集計 → 確定で `closed_flag = 1` になるため、
+        開催中一覧だけでは確定日が実質どこにも出ない。完了ログの設計判断1）
       - **検証**: `tests/test_schedule_confirm.py`（新規）。リマインドは `reminders_log` の
         日付キーで二重送信を防ぐ
       - **申し送り**: `.ics` 添付（標準ライブラリのみ・外部依存ゼロ）は次イテレーションで。
         Google カレンダー連携は ADR 0013 に反するのでやらない
 
-- [ ] **G3-5** 招待直後の案内を確実に届ける。
+- [x] **G3-5** 招待直後の案内を確実に届ける。
+      （実装は `fix/g3-5`。2026-08-22 に venv を作成して検証済み:
+      ruff パス / pytest 870 passed・10 skipped（skip は `CLUB_TEST_PG_DSN` 未設定の
+      PostgreSQL ライブテストのみ））
       `bot.py:331-336` の「次のステップ: `/setup`」は `log_to_channel` 経由で、
       `bot.py:363-370` は `BOT_LOG_CHANNEL_ID` 未設定なら**無言で破棄**する。
       `bot.py:69-76` の `INVITE_PERMISSIONS` は `manage_channels` を含まないので、
@@ -411,7 +431,7 @@
       - **検証**: `tests/test_guild_foundation.py` に、bot-log 無し・権限無しの2ケースを追加
       - **注意**: ADR 0017（最小権限）は維持する。権限を増やす方向で解決しない
 
-- [ ] **G3-6** 新入生オンボーディング（`on_member_join` → 班のセルフ選択）。
+- [x] **G3-6** 新入生オンボーディング（`on_member_join` → 班のセルフ選択）。
       新歓期に30〜50人が入るが、`on_member_join` は名前キャッシュを更新するだけ
       （`cogs/name_cache.py:157`）。**bot は新入生の存在を知らず、`/member register` を
       幹部が1人ずつ手打ちしている**。名簿に載らない人には班別通知も出欠催促も届かない。
@@ -421,9 +441,11 @@
         DM 拒否時は指定チャンネルでメンション。`/setup` に ON/OFF を追加
       - **検証**: `tests/test_welcome.py`（新規）。OFF のとき何も起きないことを必ず検査
       - **注意**: **既定は OFF**（ADR 0024「既定値で何も起きない状態から始める」）。
-        UI は `cogs/members.py:287` の `/member setup` の班選択ウィザードを流用する
+        （**`/member setup` は「班選択ウィザード」ではない。** autocomplete 付きの
+        L3 スラッシュコマンドで、流用できるのは `MemberRepository.list_teams` と
+        `_sync_roles` だけ。Select View は新規に書いた。完了ログの設計判断5）
 
-- [ ] **G3-7** ドキュメントを実装に合わせ、GUIDE.md を回帰テストの対象にする。
+- [x] **G3-7** ドキュメントを実装に合わせ、GUIDE.md を回帰テストの対象にする。
       齟齬: GUIDE.md:364-365 は「毎朝 **08:00**」だが実装は **08:30**（`cogs/reminders.py:193`）。
       通知表（GUIDE.md:360-368）に `weekly_milestone_alert` / `daily_purge` /
       `cogs/progress.py:803` が無い。早見表（GUIDE.md:484-509）に `/help` `/setup-status`
@@ -549,6 +571,61 @@
       - **検証**: `tests/test_incident.py`（新規）。匿名時に報告者名が Embed に出ないことを検査
       - **注意**: `docs/PRIVACY.md` に収集項目を追記する。
         Modal は `cogs/todoist_admin.py:39` の実装を流用
+
+- [ ] **G4-11** `log_to_channel` の送信先を同一ギルドに限定する。
+      `bot.py` の `log_to_channel` は `BOT_LOG_CHANNEL_ID` を `self.get_channel`
+      （bot 全体のチャンネルキャッシュ）で解決し、`guild_id` 未指定時は
+      `config.bot_log_channel_id`（env 由来。**全ギルドの GuildConfig に配られる**）へも
+      フォールバックする。あるギルドの設定が別ギルドのチャンネル ID を指していると、
+      **他テナントの運用ログがそのサーバーへ流れる**。
+      G3-5 で追加した `send_guild_notice` は `guild.get_channel` で同一ギルド内に限定済みなので、
+      同じ守り方へ揃える。
+      - **受入**: 送信先を「その `guild_id` に属するチャンネル」に限定する
+        （`guild.get_channel` で解決、または `channel.guild.id` を検査）。
+        env フォールバックは対象ギルドに実在するチャンネルのときだけ使う
+      - **検証**: `tests/test_multi_tenant.py` に、他ギルドのチャンネル ID を設定した状態で
+        送信先が0件になることを検査するケースを追加
+      - **注意**: レガシー単一ギルド運用（`GUILD_ID` 指定）の後方互換を壊さない。
+        起源は G3-5 のプラン審査（acm-plan-reviewer）で指摘された既存の穴
+
+- [ ] **G4-12** 投票メッセージの「未回答者数」を催促の母集団へ揃える。
+      G3-2 で催促（`notify_unanswered`）の母集団は「ロール保持者 − 台帳の退部者」または
+      「台帳の現役」になったが、`services/schedule_service.py` の `build_option_embed` が出す
+      **「未回答者数」はロール基準のまま**で、しかも候補単位で数えている。
+      部員が最初に見る数字はこちらなので、実際に DM が飛ぶ相手と食い違う
+      （`target_role` 未設定なら表示は `-` のまま DM は飛ぶ）。
+      - **受入**: 投票メッセージの未回答者数が `select_unanswered_targets` と同じ母集団・
+        同じ単位（**予定単位**）で出る
+      - **注意**: `build_option_embed` / `build_summary_embed` に台帳を渡すには引数追加が必要で、
+        これは **ADR 0009 の「完了条件2」**（`guild_id` を明示引数で受ける形へ改修し、
+        `cogs/schedule.py` が `for_guild` プロキシを渡さなくなる）そのもの。
+        ADR 0009 の未実装分と**同じイテレーションで**扱う
+      - **出どころ**: G3-2 のゲート1・ゲート2（`build_option_embed` を同じ差分に混ぜると
+        ADR 0014 に反するため分離した）
+
+- [ ] **G4-13** オートコンプリートの登録検査が空振りしている。
+      `tests/test_autocomplete.py:233` と `:309` の
+      `assert param is not None and param.autocomplete is not None` は、
+      discord.py の公開 API の `autocomplete` が **`bool` を返すプロパティ**なので
+      `False is not None` → `True` となり、**補完が1つも登録されていなくても必ず通る**。
+      G2-2 で追加した「オートコンプリートが正しいコマンドに付いていること」の2テストが
+      現在なにも担保していない（実測で確認済み。`/schedule create` の `title` で
+      `public=False` → 判定 `True`）。
+      - **受入**: `Command._params["<name>"].autocomplete.__name__` を検査する形へ書き換え、
+        登録行を消すと落ちることを実測する（G3-3 の
+        `test_restore_autocomplete_is_registered_on_the_command` が正しい書き方）
+      - **注意**: private 属性 `_params` に依存するが、公開 API では
+        「どのコールバックが束ねられているか」を取れない。消えたときは
+        `AttributeError` / `KeyError` で大きな音を立てて落ちるので、テスト専用の依存として許容する
+      - **出どころ**: G3-3 のゲート2（差分監査）
+
+- [ ] **G4-14** `/schedule remind` に締切済みのガードが無い。
+      `cogs/schedule.py` の `remind` は `closed_flag` を見ないため、L2 が ID を直打ちすれば
+      **締切済み・復元済みの予定でも未回答者へ DM が飛ぶ**（オートコンプリートは開催中のみなので
+      踏みにくい）。`edit-deadline` は既に `closed_flag` を見て断っている。
+      - **受入**: `remind` が締切済みを断る。文言は `edit-deadline` と揃える
+      - **注意**: 締切済み全般の挙動変更なので G3-3 には混ぜなかった（ADR 0014）
+      - **出どころ**: G3-3 のゲート2（差分監査）
 
 ---
 
@@ -732,7 +809,7 @@ gotcha `test-asserts-permission-but-decorator-missing` と同型の嘘を防ぐ�
 | 仮ID | 内容 | 出どころ |
 |---|---|---|
 | G2-8 | 内部名表示の統一（`/progress edit` が DB カラム名をそのまま出す / `/report audit` が生の18桁ユーザーIDを出す。`discord_name_cache` があるのに使っていない） | G1-5 の未実施分 |
-| G3-6 | 「restart 前に `pg_dump -Fc` を取る」を `docs/DASHBOARD_SETUP.md` §11 と `docs/OPERATION.md` §8.2 へ追記（マイグレーションに down が無い） | G1-8 の残件 |
+| ~~G3-7~~ | 「restart 前に `pg_dump -Fc` を取る」を `docs/DASHBOARD_SETUP.md` §11 と `docs/OPERATION.md` **§6** へ追記（マイグレーションに down が無い） | G1-8 の残件。**G3-7 で実施済み**（当初 G3-6 と書いていたが、その枠はオンボーディングで埋まっていた） |
 | — | ADR 0023 の「影響範囲」に `#bot-log` への例外を1行追記 | 設計判断1 |
 | — | `bot.py:426-428` に `allowed_mentions=discord.AllowedMentions.none()` を明示 | 設計判断5 |
 | — | `tests/test_table_value_coercion.py:21` の `pytest.importorskip("fastapi")` を削除（書き換えで dashboard 依存が消えたのに残っている。無いと `_coerce` の全テストが不要に skip される＝gotcha `dashboard-tests-silently-skipped` と同型） | レビュー時に発見 |
@@ -1416,3 +1493,890 @@ edit だけ直すと2つの入口で挙動が食い違う。
 - `/task add` 系の TodoistError は元からエラー表示があり触っていない。
   定期同期（`cogs/progress.py` の periodic_sync）の失敗は #bot-log へ
   通知される既存実装がある
+
+### 2026-08-22 — G3-5: 招待直後の案内を確実に届ける（ブランチ `fix/g3-5`）
+
+ADR 0017 の最小権限招待では `manage_channels` を要求しないため、README の
+招待URLで入れたサーバーには `#bot-log` が作られない。それなのに案内は
+`log_to_channel`（bot-log 限定）で送られており、**ほとんどの新規サーバーで
+誰にも届かないまま破棄されていた**。さらに権限不足で何も作れなくても
+`AUTO_SETUP_DONE` を立てていたため、GUIDE.md の「権限を付けて再招待」という
+復旧手順が効かなかった（settings は退出後も猶予期間だけ残るため）。
+
+#### 変更
+
+- `bot.py`
+  - `build_setup_guidance(auto_setup_ok)` を追加。`/setup` `/setup-status` `/help`
+    を明記する。自動作成できていないときだけ、確実に効く順（①自分で作って
+    `/setup` で指定 ②Manage 系権限を付ける。同名があると作られない旨つき）で
+    手順を添える。**最小権限招待では未作成が既定の経路**なので「失敗」調にはしない
+  - `send_guild_notice()` / `_notice_channels()` を追加。bot-log →
+    `guild.system_channel` → 送信可能な最初のテキストチャンネル、の順で
+    **1箇所にだけ**送る。試行は `MAX_NOTICE_CHANNEL_ATTEMPTS`（5件）まで
+  - `on_guild_join` の案内を `log_to_channel` から `send_guild_notice` へ差し替え
+  - `_ensure_guild_setup` を `-> bool` にし、マーカーを
+    **`AUTO_SETUP_COMPLETED_AT`（新キー）へ移した**。全部揃ったときだけ立て、
+    立っていたら自動作成をやり直さない。**旧 `AUTO_SETUP_DONE` は読まない**
+    （旧実装が権限不足のギルドにも立てていたため。互換のため書き込みは残した）
+  - `_auto_create_roles` / `_auto_create_log_channel` を `-> bool` 化し、
+    「設定済みか」の判定を settings 行ではなく**実効設定**
+    （`config.for_guild`。環境変数フォールバックを含む）＋
+    **そのギルドに実在するか**で行う
+- `cogs/help.py` — `collect_setup_status()` に「幹部ロール」(`EXEC_ROLE_ID`) を追加。
+  案内が `/setup-status` を入口に指すのに、L3 判定の実体である `EXEC_ROLE_ID` を
+  見ていなかった（「すべて設定済み」と出たサーバーで幹部が L3 を使えない形）
+- `README.md`（招待直後に何が起きるか・`/setup` の項目）/ `docs/GUIDE.md` Step 1 /
+  `docs/MULTI_TENANT_MIGRATION.md` §5 を実装に合わせた。GUIDE の復旧手順は
+  案内文と同じ順序・同じ但し書きに揃えている
+
+#### 設計判断
+
+- **冪等性を二段構えにした。** (1) 新マーカー `AUTO_SETUP_COMPLETED_AT`
+  （揃ったときだけ立てる）があればやり直さない。(2) マーカーが無くても、
+  実効設定に ID があるものは作らない。旧 `AUTO_SETUP_DONE` を読まないので、
+  誤って立っている既存ギルドも復旧できる。マーカーを完全に捨てなかったのは、
+  管理者が `/settings_delete`・ダッシュボードの空値 PATCH で消した設定を
+  次の起動で復活させないため（ADR 0024「明示的な操作でだけ変える」）
+- **「設定済みか」は settings 行ではなく実効設定で判定する。** `docs/SETUP.md`
+  は今も `.env` に `EXEC_ROLE_ID` 等を書く手順を案内しており、解決順は
+  ギルド別 DB 設定 > 環境変数。settings 行だけを見ると、env で運用している
+  ギルドに空の `幹部` ロールを作って保存し、**実効設定を誰も持たないロールへ
+  差し替えて幹部が L3 を失う**。さらに ID がそのギルドに実在するかまで見る
+  （解決できないときは作り直さない。`set_if_absent` では古い行を直せず、
+  毎起動ロールを作り続けるため）
+- **同名ロールには ID を紐付けない。** 名前が一致するだけのロールを
+  `EXEC_ROLE_ID` にすると、そのロールを持つ人へ黙って L3 権限を配ることになる
+  （ADR 0024 の「既定で何も起きない」に反する）。作成をスキップして未設定のまま残し、
+  `/setup` で明示指定させる（`/setup-status` が未設定として拾う）
+- **同名 `#bot-log` は採用する。** チャンネルは権限を配らないため。ただし
+  `permissions_for(guild.me).send_messages` を確認してから採用する
+- **`log_to_channel` の仕様は据え置き。** 運用ログの宛先を一般チャンネルへ
+  広げると、他の運用ログまで部員の目に流れる。案内だけを別関数に分けた
+- ログの粒度: 権限が無いだけ・同名があるだけ（定常状態）は `log.info`、
+  API 失敗と ID 保存失敗は `log.warning` / `log.error`。最小権限招待では
+  未作成が正常なので、毎起動 WARNING を全ギルド分吐かせない
+
+#### 既存ギルドで次回起動時に起きる変化（DB は書き換えていない）
+
+- 誤って `AUTO_SETUP_DONE` が立っている既存ギルドでも、**新マーカーが無いので
+  自動セットアップが1度だけ再試行される**（旧値は読まない・消さない）
+- その結果、`manage_roles` / `manage_channels` を持つ既存ギルドで
+  `EXEC_ROLE_ID` 等が settings にも env にも無く、同名ロールも無ければ、
+  **`幹部` / `Bot管理者` が新規作成される**
+- `bot-log` という名前のチャンネルがある既存ギルドは `BOT_LOG_CHANNEL_ID` が
+  自動で入り、運用ログがそこへ流れ始める
+- 揃ったギルドには `AUTO_SETUP_COMPLETED_AT` が立ち、以降はやり直さない
+
+#### 検証
+
+- **`ruff check .` / `pytest tests/ -q -rs` を実行できていない。**
+  この worktree（`acm_bot_auto`）に `club-bot/venv` が無く、セッションの権限設定で
+  `python -m venv` / `pip install` が実行できなかった（システム Python 3.14 には
+  ruff も pytest も未導入）。次で環境を作ってから実行すること:
+  `python -m venv venv` →
+  `venv\Scripts\python.exe -m pip install -r requirements.txt -r dashboard/requirements.txt ruff pytest` →
+  `venv\Scripts\python.exe -m pytest tests/ -q -rs`
+- `tests/test_guild_foundation.py` に23ケース追加（受入基準の指定ファイル。
+  bot-log 無し・権限無しの2ケースを含む）。`__main__` の手動実行リストにも追加した
+- `tests/test_help.py` は「幹部ロール」追加に伴う既存2ケースを更新
+- ゲート2の test-adversary は**実測できず静的分析**。差し戻し9件のうち8件は
+  赤くなる見込みで、検出できない穴として指摘された
+  `config.invalidate_guild` / 成功時の文面 / on_ready 経路 / 候補の重複排除 /
+  `guild.me is None` を、テスト側を直して塞いだ（キャッシュを温めてから実行、
+  `on_ready` を実際に通す、など）
+- ゲート2の diff-auditor の指摘7件を反映（消した設定の復活・env 設定の上書き・
+  案内文の実現性・README の齟齬・`send` を持たないチャンネル・
+  MULTI_TENANT_MIGRATION の古い記述・未追跡ファイルをコミットに混ぜない）
+
+#### 申し送り
+
+- **検証済み（2026-08-22）。** venv を作成し ruff / pytest を実行、
+  870 passed・10 skipped（PG ライブテストの想定 skip）で緑。
+  ruff が ISC004 ×3（`build_setup_guidance` 内の暗黙文字列連結）を検出したため、
+  意図どおりの連結であることを確認のうえ括弧で明示した
+- 素の Windows 環境では `zoneinfo` に **`tzdata` パッケージが必要**だが
+  requirements.txt に無く、fresh venv では全テストが collection で落ちる
+  （`ZoneInfoNotFoundError: Asia/Tokyo`）。今回は venv へ手動インストールで対応。
+  requirements への追加（`tzdata; sys_platform == "win32"`）は別途検討
+- `log_to_channel` は `self.get_channel` と env フォールバックで**他ギルドの
+  チャンネルへ運用ログを送りうる**（今回追加した `send_guild_notice` は
+  `guild.get_channel` で同一ギルドに限定済み）。**G4-11 として起票した**
+- IMPROVEMENT_REPORT P1-19 の後半「`/setup` に『不足しているものを今すぐ作る』
+  ボタン」は未実装（受入基準に無いためスコープ外）
+- スキーマ変更・マイグレーションは無し。PostgreSQL 固有の新規 SQL も無い
+
+### 2026-08-28 — G3-1: `/setup` に班長ロール、`/set_role` に削除（ブランチ `fix/g3-1`）
+
+L2 判定の唯一の根拠である `LEADER_ROLE_IDS` が `/setup` から設定できず、`/set_role` は
+追記専用で重複チェックも無かった。1つ外すには全消しするしかなく、
+**その間は全班長が L1 に降格**していた。
+
+- ruff: `All checks passed!`
+- pytest: **895 passed, 10 skipped**（着手前は 870 passed, 10 skipped。
+  skip は `CLUB_TEST_PG_DSN` 未設定の PostgreSQL ライブテストのみで件数は据え置き）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `config.py` | `MULTI_ROLE_KEYS`（複数値ロール設定キー）を追加。`/setup` と `/set_role` が同じ定義を見るよう1箇所に置いた |
+| `cogs/setup_wizard.py` | `ROLE_SETTINGS` に班長ロールを追加。`build_setup_embed(gconf, selected_key, notice)` が `list[int]` を複数メンションで描画し、**空リストを「未設定」として数える**。`select_item` を `edit_message` 化。上限超過ギルドでは選ばせる前に断る。`select_role` は複数値をカンマ結合で上書き保存し、単数キーへの複数選択を拒否 |
+| `cogs/settings.py` | `split_role_tokens()` / `merge_role_ids()` / `stale_role_warning()`（純関数）を追加。`/set_role` に `action: add|remove`。変更が無いときは保存しない。保存後に実効設定を解決し直して警告する |
+| `cogs/season.py` | `rollover_result_embed` に班長ロールの見直しを促す一文（ロールIDは自動で消さない） |
+| `cogs/help.py` | `/setup-status` の班長ロールの hint を `/setup` 優先へ |
+| `docs/` | `GUIDE.md` / `OPERATION.md` / `SETUP.md` を実装に合わせた |
+
+新規テスト `tests/test_settings_role.py`（16件）＋ `tests/test_setup_wizard.py` に7件、
+`tests/test_seasons.py` に1件を追加した。
+
+#### 設計判断
+
+**1. `select_item` を `edit_message` にしたのが本質。**
+最初の方針は「`self.select_role.max_values` を切り替える」だけだった。だが従来の `select_item` は
+`interaction.response.send_message` で**別の ephemeral を送るだけ**で親メッセージの View を
+送り直していない。Python 側の属性を変えてもクライアントが持つコンポーネント定義は
+`max_values=1` のままなので、**複数選択が一生発生しない**。
+しかも「`view.select_role.max_values == 25` を見るテスト」は緑になる。
+gotcha `test-asserts-permission-but-decorator-missing` と同型なので、テストは
+`edit_message` に渡された View まで見る形にした。
+
+**2. `max_values` は受入基準の 5 ではなく 25（RoleSelect の上限）。**
+`/setup` は**上書き**保存なので、5 にすると班長ロールを6件以上運用しているギルドで
+L2 判定の根拠を黙って切り捨てる。25 でも超えるギルドはありうるので、
+`select_item` の時点で `disabled` にして `/set_role action:remove` へ誘導し、
+保存側にも同じガードを置いた（**選ばせてから捨てない**）。受入基準の本文も 25 に直した。
+
+**3. 保存が実効設定に反映されないことがあるので、成功と言い切らない。**
+`config.for_guild()` は DB 値が空のときグローバル（env 由来 / 起動時に読んだ値）へ
+フォールバックする（`config.py:315-317` の `if leader_ids:`）。最後の1件を外すと
+**DB は空なのに L2 は残る**。G2-7 と同型の嘘になるため、保存後に `force_reload=True` で
+解決し直し、**保存値に無いロールが有効なら**警告を出す。
+
+判定を「外した ID が残っているか」にすると穴が残る（差分監査で実測）。
+DB=`111` / env=`222` の状態で `111` を外すと、**保存していない `222` が L2 を得る**のに無言だった。
+「解決結果のうち保存値に無いもの」へ広げ、回帰テストを付けた。
+
+文面は原因で分けた。**env が設定されている場合しか「`.env` を直せ」と言わない。**
+`GUILD_ID` 指定のレガシーギルドでは起動時に読んだ値がプロセス内に残るだけなので
+（`config.load_from_db` は `if not self.leader_role_ids:` で一度入った値を減らさない）、
+その場合は「再起動で反映される」と案内する。存在しない `.env` の行を直せと言うのは、
+このタスクが潰そうとしている失敗と同型。
+
+**4. 保存は成功させ、DB は巻き戻さない。** 3 の警告時に保存自体を中止すると、
+`.env` を直して再起動しても何も戻ってこない。G2-7 の「ローカル完了は維持したまま
+同期結果を明記する」と同じ形にした。
+
+**5. 変更が無いときは `settings.set()` を呼ばない。**
+既存値の非数値トークンは保存時に除かれる（`get_int_list` が元から無視するので実効挙動は不変）が、
+**何も変えていない操作で消える**のは ADR 0024 の「明示的な操作でだけ変える」に反する。
+
+**6. `/season rollover` は `LEADER_ROLE_IDS` に触らない。**
+勝手に消すと新体制が設定するまで全班長が L1 に降格する（ADR 0024）。
+`services/season_service.py` は不変のまま、結果 Embed で見直しを促すだけにした。
+
+**7. 受入基準からの逸脱（すべて意図的）。**
+- `max_values` 25（設計判断2）
+- テストファイルは指定の `tests/test_setup_wizard.py` に加えて **`tests/test_settings_role.py` を新設**。
+  `/set_role` の実体は別 Cog（`cogs/settings.py`）で、ウィザード側のテストだけでは
+  コマンドがヘルパを通っていることを測れないため
+
+#### ゲートの判定
+
+| ゲート | 判定 | 経過 |
+|---|---|---|
+| ゲート1（acm-plan-reviewer） | REVISE ×2 → 「織り込めば APPROVE 相当」 | 1回目に7件（env フォールバックで remove が効かない／既存テストの直し方／コマンド経路のテスト／`edit_message` 化の3条件／`max_values` の付帯条件／黙って正規化しない／ドキュメント追随）、2回目に3件（警告文の原因別分岐・no-op で保存しない・権限テストの形） |
+| ゲート2（acm-diff-auditor） | FINDINGS → **CLEAN** | 6件（残留警告の判定漏れ／SETUP.md の記述／OPERATION.md の未エスケープ `\|`／テストの後始末が `finally` の外／`MULTI_ROLE_KEYS` の二重定義／`ruff format` の回帰）を修正 |
+| ゲート2（acm-test-adversary） | **EFFECTIVE** | 16項目すべてで、戻すと赤くなることを実測 |
+
+**ゲート2は同時ではなく逐次で回した。** test-adversary は実装を一時的に戻す手法なので、
+同時に走らせると diff-auditor が中途半端な `git diff` を読むため。ループ手順からの意図的な逸脱。
+
+#### test-adversary の実測（抜粋）
+
+| 戻した実装 | 落ちたテスト |
+|---|---|
+| `ROLE_SETTINGS` から班長ロールを削除 | 5 |
+| `build_setup_embed` の複数値分岐 | 3 |
+| `select_item` を `send_message` へ戻す | 2 |
+| `max_values` の切り替えだけ削除 | 1 |
+| 上限超過ガード | 1 |
+| `select_role` の複数値分岐 | 1 |
+| 単数キーへの複数選択拒否 | 1 |
+| `/set_role` を HEAD の実装へ全戻し | 9 |
+| `merge_role_ids` の重複判定 | 1 |
+| `changed` を常に True | 3 |
+| `stale_role_warning` の呼び出し | 3 |
+| **`leftover` を `merge.removed` ベースへ戻す** | **1**（差分監査で見つけた穴の回帰テスト） |
+| 警告文の原因別出し分け | 1 |
+| `split_role_tokens` の非数値検出 | 3 |
+| `rollover_result_embed` の一文 | 1 |
+| `@app_commands.check(is_admin)` を外す | 1 |
+
+**adversary が見つけた「戻しても緑のまま」の穴3件は、その場で塞いだ**（塞いだ後に
+戻して落ちることも実測済み）:
+
+| 穴 | 意味 | 対応 |
+|---|---|---|
+| `is_admin`(L4) → `@require(Level.L2)` への**差し替え**が無検出 | ロール無しメンバーはどのレベルでも拒否されるので素通りする。`/set_role` は L4/L2 判定の根拠そのものを書き換えるコマンドなので、**班長が自分を管理者へ昇格できる** | `command_required_level(Settings.set_role) == Level.L4` を追加 |
+| `MAX_MULTI_ROLE_VALUES` を 5 に戻しても無検出 | テストがシンボル参照だけで、意図（25 を選んだ理由）が固定されていなかった | 値そのものを assert |
+| `_set_multi_role` の `_after_change` 削除が無検出 | 保存後のキャッシュ破棄とグローバル再読込が消えても気づけない | 実効設定が更新されることを検査するケースを追加 |
+
+#### 次タスクへの申し送り
+
+- **`config.py` の解決規則そのものは変えていない。** 「settings に行があるなら空でも正」への変更は
+  L2 の解決規則の変更で、G3-1 の範囲（ADR 0014）を超える。現状は警告で運用を支えている。
+  **別タスクとして起票が要る**
+- レガシーギルド（`GUILD_ID` 指定）のグローバル値は `config.for_guild()` の種付け（`config.py:284`）
+  経由で**同一プロセスの他ギルドにも配られる**。G4-11（`log_to_channel` の同一ギルド限定）と
+  同じ根から来ている
+- `cogs/settings.py` には監査ログ（`AuditLogRepository`）の記録が**一切ない**。
+  L2 判定の根拠を書き換えるコマンドなのに、復元材料が ephemeral メッセージしかない。別タスク候補
+- `RoleSelect(default_values=...)`（discord.py 2.4+）を使うと「上書き」が
+  「今の集合を編集する」操作になり、上限超過の扱いも素直になる。
+  `requirements.txt` の下限は `>=2.3.0` なので今回は見送った。
+  **G3-6 で `DynamicItem`（2.4+）のために下限を上げる予定なので、その後なら採用できる**
+- **PostgreSQL 実機では検証していない**（`CLUB_TEST_PG_DSN` 未設定・Docker なし）。
+  SQL の追加・変更はゼロで、保存先は既存の `settings.setting_value TEXT NOT NULL`。
+  ただし**全消し時に空文字 `""` を書く経路は新規**で、ここだけは PG 未確認
+- 採番の食い違い: G1-2 の申し送りは「通知キーの一本化（`DEFAULT_PROGRESS_CHANNEL_ID` へ寄せる）は
+  G3-1 で扱う」と書いているが、G3-1 は班長ロールで埋まっている。**未起票**（破壊的変更なので別途起票が要る）
+- ブランチは `fix/g3-5` から分岐した（ADR 0014 の1タスク1コミットは保っているが、
+  **マージは順番どおりに行う必要がある**）。以降の G3 も連鎖する
+
+### 2026-08-28 — G3-2: 未回答判定を members 台帳へ（ブランチ `fix/g3-2`）
+
+bot 側（ロール基準）とダッシュボード側（ADR 0025 の台帳基準）で「未回答」が二重定義になっており、
+対象ロール未設定の予定では bot が完全に沈黙していた。
+
+- ruff: `All checks passed!`
+- pytest: **914 passed, 10 skipped**（着手前は 895 passed, 10 skipped。skip 件数は据え置き）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `services/schedule_service.py` | 純関数 `select_unanswered_targets()` を追加。ID は TEXT 列（名簿）と int（`Member.id`）が混ざるため関数内で `str()` 正規化する |
+| `cogs/schedule.py` | `notify_unanswered` が上を使う。`_roster_ids()` は既存クエリ2回の差で現役・退部を作る。`_member_of()` は非数値 `user_id` を警告してスキップ。`/schedule remind` は 0 名を成功と別扱いに |
+| `cogs/reminders.py` | `count == 0` でも `mark_reminder_sent` を打たない。reason の断定を外した |
+| `docs/` `dashboard/README.md` | 母集団の決まり方とズレを明記 |
+
+新規テスト `tests/test_schedule_unanswered.py`（16件）＋ `tests/test_schedule_notify.py` に3件。
+
+#### 設計判断
+
+**1. 積集合ではなく差集合。受入基準を書き換えた。**
+受入基準は「ロール ∩ 現役メンバー」だったが、そのまま実装すると
+**`/member register` が進んでいないギルドで今日届いている DM が止まる**。
+ロール保持者20名・登録済み3名は導入から数週間のギルドで普通に起きる状態で、
+∩ を採ると対象0名になる。しかも `0` は「対象は特定できた」を意味するので
+`mark_reminder_sent` が打たれ、**誰にも DM が飛ばないまま「成功・0名」**になる
+（G2-3 が塞いだ不具合の再発）。
+
+採ったのは「ロール保持者から**台帳で退部・休止と分かっている人だけ**を差し引く」形。
+名簿に無い人は「退部か未登録か区別できない」ので残す（ADR 0021 / 0024）。
+受入基準の「`status='alumni'` が除外される」は満たしている。
+
+**2. `count == 0` でも送信済みにしない（`cogs/reminders.py` を触った理由）。**
+受入基準に無い変更だが、**入れないと G3-2 が新しい永久沈黙を作る**。
+「ロールにメンバーが0人」を `0` と返すか `None` と返すかは、
+偽警報と永久沈黙のトレードオフに見えていた。だが損害の実体は戻り値ではなく、
+`0` を受けた定期リマインドが送信済みフラグを立てることだった。
+G2-3 の原理「送っていないなら送信済みにしない」を `count == 0` にも適用すると両方消える。
+
+副作用は締切前1時間の再評価が増えることだけ（`list_reminder_candidates` の窓は
+`[now, now+1h]` なので tick は最大12回で有限）。
+おまけに「全員回答済みで送信済み → その後リアクションを外した人が居ても二度と催促されない」
+という既存の穴も塞がった。
+
+**3. ダッシュボードとの一致は原理的に無理。受入基準を書き換えた。**
+ダッシュボードは Bot トークンを持たない（ADR 0015）のでロールを解決できず、
+さらに**ギルド在籍を検査していない**（`dashboard/routers/tables.py:167`）。
+ズレは1軸から2軸になったので、`dashboard/README.md` に両方を明記した。
+
+**4. ロール保持者が1人も見えないときは `None`。名簿へフォールバックしない。**
+当初は `0` を返す方針だった（誰も付けていないロールは正常な状態で、
+そこで赤いエラーを出すのは偽警報になるため）。だが差分監査の指摘で覆した。
+誰も付けていないロールとメンバーキャッシュの欠落は区別できないので、
+「全員回答済み」とは主張しない。**名簿へフォールバックすると、
+班限定の予定の催促がサークル全員へ飛ぶ**ので、そちらも避けた。
+
+これに伴い `tests/test_schedule_notify.py` の
+`test_notify_unanswered_returns_zero_when_everyone_answered` のフィクスチャを差し替えた。
+元は `members=[]` のロールで「0名」を作っており、それは「全員回答済み」ではなく
+「ロールに誰も居ない」状態で、**テスト名と中身が食い違っていた**。
+ロール保持者1名が回答済み、という本来の意味に直した（G2-3 の契約は維持）。
+
+**5. `build_option_embed` の「未回答者数」は揃えていない。**
+引数追加＝呼び出し4〜5箇所の変更は ADR 0009 の完了条件2そのもので、
+G3-2 に混ぜると ADR 0014 に反する。**G4-12 として起票した。**
+
+#### ADR 0025 の更新草案
+
+> ## 0025（改訂案）. 出欠の「未回答」の母集団
+>
+> **文脈の追加**: 2026-08-28（G3-2）まで、bot の催促はロール基準、ダッシュボードは
+> 台帳基準で、同じ「未回答」が2つの定義で動いていた。対象ロール未設定の予定では
+> bot が完全に沈黙していた（ロールが無いと対象を特定できないため）。
+>
+> **決定（改訂）**: 母集団を次のように定める。
+> - **bot（催促）**: `target_role_id` があれば**ロール保持者 − 台帳で退部・休止と
+>   分かっている人**。無ければ**台帳の現役 ∩ ギルド在籍**
+> - **ダッシュボード（ピボット表）**: 従来どおり台帳の現役（`active_flag=1` かつ
+>   `status='active'`）
+>
+> **理由**: bot を「台帳基準」に揃えなかったのは、台帳が部分的にしか埋まっていない
+> ギルドで催促が止まるため。台帳に無い人は「退部」ではなく「未登録」かもしれず、
+> **分からないものを数字にしない**（0021 / 0022）。台帳は**除外にのみ**使う。
+>
+> **影響範囲（残るズレは3軸）**:
+> - (a) ロール限定の予定では、ダッシュボードだけ母集団が広い（ロールを解決できない）
+> - (b) ダッシュボードはギルド在籍を検査しないので、台帳に残る退出者も未回答に出る
+> - (c) **投票メッセージの「未回答者数」はロール基準・候補単位のまま**（G4-12 で扱う）
+>
+> **覆す条件**: 変更なし（ロール基準へ寄せたいときは、Bot トークンを Web 層へ置くのではなく
+> `discord_name_cache` に `role_member` 相当の同期を bot 側で足す）。
+
+**ClaudeVault の ADR 本文は編集していない。** 表の運用ルール（草案を完了ログに書く）に従った。
+
+#### 既存ギルドで何が変わるか
+
+- **`target_role` 未指定の開催中の予定は、締切1時間前に名簿の現役メンバー全員へ DM が飛ぶ**
+  （これまでは完全に沈黙していた）。**既定 ON で、設定での opt-out は無い**。
+  受入基準がそう定めているが、既存ギルドの体感が黙って変わる経路なので GUIDE.md にも明記した
+- 名簿が空のギルドは従来どおり沈黙する（`None`）
+- ロール限定の予定は、**退部者・休止者が対象から外れる**ぶんだけ対象が減る
+- 未回答0名の予定は送信済みフラグが立たなくなり、締切までの1時間は5分ごとに再評価される
+
+#### ゲートの判定
+
+| ゲート | 判定 | 経過 |
+|---|---|---|
+| ゲート1（acm-plan-reviewer） | REVISE ×2 → 「1〜4を反映すれば APPROVE」 | 1回目に8件（**部分登録の崖**／解決不能と0人の区別／文言とドキュメント／型の正規化／検証が実装に効いていない／受入基準は達成できない／`build_option_embed` は別タスク／`int()` ガード）、2回目に4件（`count == 0` で送信済みにしない／受入基準の `∩` も直す／ADR 草案の文言／解決できないときのログ） |
+| ゲート2（acm-diff-auditor） | FINDINGS ×2 → **CLEAN 相当** | 1回目に5件（ロール0名で `0` を返す／`/schedule remind` の嘘の成功／reason の断定／GUIDE.md 未反映／受入基準）、2回目に3件（新ケースへの誤案内／コードフェンス内の `**`／`ruff format` の回帰） |
+| ゲート2（acm-test-adversary） | **EFFECTIVE** | 13項目すべてで戻すと赤くなることを実測 |
+
+**ゲート2は同時ではなく逐次で回した**（test-adversary が実装を一時的に戻すため、
+同時だと diff-auditor が中途半端な `git diff` を読む）。G3-1 と同じ意図的な逸脱。
+
+#### test-adversary の実測（抜粋）
+
+| 戻した実装 | 落ちたテスト |
+|---|---|
+| **差集合を積集合へ** | **2** |
+| 退部者の除外 | 3 |
+| 「ロールなし × 名簿空 → None」 | 4 |
+| `str()` 正規化 | 1 |
+| `notify_unanswered` を HEAD へ全戻し | 4 |
+| ロール保持者0名 → `None` | 1 |
+| 「1人も解決できない → None」 | 1 |
+| bot 除外 | 1 |
+| **reminders の `count == 0` で送信済みにしない** | **1** |
+| reminders の `count is None` | 2 |
+| `/schedule remind` の 0 名分岐 | 1 |
+| 回答済みの除外 | 5 |
+| 申告件数と実送信数の乖離 | 1 |
+
+**adversary が見つけた「戻しても緑のまま」の穴3件は、その場で塞いだ**（塞いだ後に
+戻して落ちることも実測済み）:
+
+| 穴 | 意味 | 対応 |
+|---|---|---|
+| ロール0名のとき**名簿へフォールバック**する改変が無検出 | コメントで明示的に禁じているのにテストが無い。次の担当者が「ロールが空なら名簿で代替」と直すと、**班限定の予定の DM がサークル全員へ飛ぶ** | 名簿に現役を入れたうえで「1通も飛ばない」ことを見るケースを追加 |
+| `/schedule remind` の**正常系**（`count > 0` で成功）が無検出 | 「嘘の成功を出さない」側だけ固めていて、成功 Embed を到達不能にする改変が通る | 送ったときに `再通知しました` と件数が出ることを検査 |
+| `_member_of` の `int()` ガードが無検出 | 名簿に数字でない `user_id` が1件あると、そのギルドの催促がまるごと止まる | リポジトリを通さず壊れた行を直接 INSERT し、他の人への送信が続くことを検査 |
+
+#### 次タスクへの申し送り
+
+- **G4-12 を起票した**（投票メッセージの未回答者数。ADR 0009 の完了条件2と同時にやる）
+- 一斉 DM は `dm_each_with_channel_fallback` が逐次 `member.send` するため、
+  名簿が数百人規模だとレート制限で分単位ブロックする。`schedule_tick` はギルドを直列に
+  回すので、同 tick の後続ギルドの処理が遅れる（ループは止まらない）。
+  **名簿の規模が大きいギルドが出てきたら、送信の分割・間引きを検討する**
+- `guild.get_member` が**一部だけ** `None` を返すと、解決できた人にだけ送って
+  `mark_reminder_sent` が立つ（全員解決できない場合だけ `None` で守られる）。
+  ロール基準時代からある性質だが、母集団が名簿へ寄ったぶん露出が増えた
+- **PostgreSQL 実機では検証していない**（`CLUB_TEST_PG_DSN` 未設定・Docker なし）。
+  SQL の追加・変更はゼロで `members.user_id` / `schedule_votes.user_id` は
+  どちらのバックエンドでも TEXT。ただし **`MemberRepository.list_members` は
+  PG ライブテストで一度も呼ばれていない**（既存の PG テストは `upsert_member` /
+  `get_member` / `set_leader` のみ）。G3-2 は DM 送信経路をこれに2回依存させた
+- `cogs/schedule.py:86-88`（`schedule_choices` のシグネチャ）は `ruff format` 未適合だが
+  **HEAD 時点から存在する既存差分**で、この差分の責任ではない
+
+### 2026-08-29 — G3-3: `/schedule delete` を論理削除に（ブランチ `fix/g3-3`・スキーマ v17）
+
+投票メッセージを削除してから DB を CASCADE 削除しており、**票データが完全に消えていた**。
+誰がいつ参加と答えたかは、Discord 側のメッセージを消した時点で他のどこにも残らない。
+
+- ruff: `All checks passed!`
+- pytest: **943 passed, 11 skipped**（着手前は 914 passed, 10 skipped）。
+  **skip が1件増えたのは PG ライブテストを1本追加したため**で、既存テストが skip に落ちたのではない。
+  内訳は `tests/test_dashboard_edit.py` 4件・`tests/test_db_postgres.py` 7件、
+  いずれも `CLUB_TEST_PG_DSN` 未設定
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `utils/db.py` / `migrations/016_schedule_confirmed.sql` | スキーマ v17。`deleted_flag INTEGER NOT NULL DEFAULT 0` と `confirmed_option_id TEXT` を**同じ版で**追加。`_table_columns` で存在確認してから ALTER |
+| `repositories/schedule_repository.py` | `soft_delete_schedule` / `restore_schedule` / `list_deleted_schedules`。全一覧に `AND deleted_flag = 0`。`get_schedule` に `include_deleted`（既定 False）。物理削除 `delete_schedule` は**置き換えて削除**した |
+| `cogs/schedule.py` | `/schedule restore`（L3）＋削除済みのみの候補（`[削除済み]` 表示）。削除できなかったメッセージの件数を報告。「見つかりません」を `_find_schedule` に集約 |
+| `repositories/table_repository.py` | `schedules` に `deleted_flag`（編集不可）。出欠回答のタブから削除済みを除外 |
+| `docs/` | `PRIVACY.md`（**公開ポリシーの変更**）/ `GUIDE.md` / `OPERATION.md` / `FEATURE_TASKS.md` |
+
+新規テスト `tests/test_schedule_delete.py`（29件）＋ `tests/test_db_postgres.py` に PG ライブ1件。
+
+#### 公開ポリシー（`docs/PRIVACY.md` §8.3）の変更前後
+
+| | 記述 |
+|---|---|
+| 変更前 | `| /schedule delete | 日程調整と、それに紐づく出欠回答 |` |
+| 変更後 | `| /schedule delete | 日程調整（無効化）。**出欠回答は残ります**（/schedule restore で戻せます） |` |
+
+あわせて「無効化した日程調整の出欠回答を**完全に消す**には、`/data delete`（8.1）で
+サーバー全体のデータを削除するか、8.2 の個人からの請求として運営者へご連絡ください。」を追記した。
+`/data delete` の purge は `TABLE_DDL` 由来で全行を消すので、8.1 の記述は従来どおり成立する。
+
+#### 設計判断
+
+**1. 削除時に `closed_flag` も立てる（ゲート1で方針を変えた）。**
+当初は「`restore` が `reminder_sent_flag = 1` を立てて催促を再開させない」案だった。却下の理由:
+- G2-3 が `cogs/reminders.py` に「**送っていないなら送信済みにしない**」という不変条件を
+  コメント付きで立てたばかりで、1通も送らずに 1 を立てるのは同じフラグへ逆向きの嘘を書く行為
+- `update_deadline` が `reminder_sent_flag` をリセットするので、抑止が
+  「誰も締切を触らない」という規律に依存する（ADR 0008 / 0016 の軸に反する）
+- `list_open_schedules` が `closed_flag = 0` で拾うため、投票メッセージが無い予定が
+  「開催中」に居座り、`close` / `remind` / `edit-deadline` の候補にも出続ける
+
+代わりに `soft_delete_schedule` を `deleted_flag = 1, closed_flag = 1` の1文にした。
+投票メッセージを消した時点で投票は現実に終わっているので**嘘ではなく**、
+自動催促・自動締切・開催中一覧が**既存の条件式だけで**止まる。
+`restore_schedule` は `deleted_flag = 0` だけを書くので、「復元は元の状態に戻す」が文字どおり成立する。
+
+**2. Discord の投票メッセージは従来どおり削除する。**
+タスクの目的は票データの保全であって画面の復元ではない。`edit` で「削除されました」に
+差し替える案は、削除したはずの投稿が残り続ける点で管理者の期待から外れる。
+ただし**削除できなかった件数を報告する**（残ったメッセージのリアクションは無反応になるため）。
+
+**3. `_migrate_versioned` の早期 return が、2列を1版にまとめる理由。**
+`version >= SCHEMA_VERSION` で return するので、G3-3 が v17 を切ったあとに G3-4 が
+同じ版へ ALTER を足しても**既存 DB では二度と実行されない**。
+規律に頼らないよう、(a) v16→v17 昇格テストで**両方の列**の存在を assert し、
+(b) G3-4 の本文に「新しい migration を作らない」を明記した。
+
+**4. `TableSpec.extra_where` は使わず、列を見せる側にした。**
+`extra_where`（`repositories/table_repository.py:90`）は「論理削除の除外」を想定した機構だが
+1箇所も使われていない。使わなかった理由: `/data export` の ZIP は `list_all_rows`
+（sheet 指定なし）なので、隠すと**保持されている行が export から消える**。
+`docs/PRIVACY.md` が export を持ち出し手段として案内しているため、
+「残っているものは出す。ただし削除済みと分かる」ほうが一貫する。
+`members.active_flag` / `teams.active_flag` も同じ扱い（行は隠さず列で示す）。
+
+ただし `list_sheets` からは削除済みを外したので**タブは消える**。結果として
+**ダッシュボード UI の CSV（シート単位）からは削除済み予定の票へ到達できない**が、
+`/data export` の ZIP には残る、という経路差がある。
+
+**5. `deleted_flag` を編集不可にした根拠は権限。**
+ダッシュボードの編集認可は L2 だが `/schedule delete` `/schedule restore` は L3。
+editable にすると **L2 が L3 の操作を取り消せる**（`members.is_leader` / `teams.leader_role_id` と同じ理由）。
+
+**6. `v_attendance` ビューは直していない（DB 面の残存）。**
+`utils/db.py` の `v_attendance` は `JOIN schedules` で `deleted_flag` を見ないため、
+削除済みが集計に残る。直さない理由: bot もダッシュボードも読んでいない
+（参照は `tests/`・`scripts/cleanup_test_pg.py`・NocoDB 系ドキュメントのみ）、
+`_VIEW_BODIES` だけ直すと**新規 DB とだけ挙動が変わる**、既存 DB へ反映するには
+v17 から `_migrate_v5_views()` を呼び直す必要があり無関係なビュー3つを作り直す副作用が出る。
+受入基準「集計から除外」に対する**既知の例外**として記録する。
+
+**7. `idx_schedules_guild` は拡張していない。**
+`(guild_id, closed_flag, deadline)` のままで `deleted_flag` には効かないが、
+日程調整は数百行規模なので走査コストが問題にならない。
+
+#### ゲートの判定
+
+| ゲート | 判定 | 経過 |
+|---|---|---|
+| ゲート1（acm-plan-reviewer） | REVISE ×2 → APPROVE 相当 | 1回目に A-1〜A-5・B-1〜B-7（**PRIVACY.md が嘘になる**／**既定除外で既存テストが素通りする**／メッセージ削除の失敗が無報告・無検証／復元後に自動処理が走る／v17 共有を規律に依存させない ほか）、2回目に A-4 の実装手段（`reminder_sent_flag` 案の却下と代替案） |
+| ゲート2（acm-diff-auditor） | FINDINGS → **CLEAN** ×2 | 1回目に4件（`FEATURE_TASKS.md` の割当表が v16 のまま／L1 に L3 のコマンドを案内／restore の文言が守れない約束／候補が全部 `[終了]`）。テスト書き直し後の再監査でも CLEAN |
+| ゲート2（acm-test-adversary） | **INEFFECTIVE → EFFECTIVE** | 詳細は下記 |
+
+**ゲート2は同時ではなく逐次で回した**（G3-1 / G3-2 と同じ意図的な逸脱）。
+
+#### test-adversary が見つけた「テストが何も担保していない」問題
+
+1巡目は **INEFFECTIVE**。`list_open_schedules` / `list_due_schedules` /
+`list_reminder_candidates` の `AND deleted_flag = 0` を外しても**1件も落ちなかった**。
+原因は `soft_delete_schedule` が必ず `closed_flag = 1` を立てるため、
+テストが削除経路でしか削除済み行を作らず、**`deleted_flag = 1 かつ closed_flag = 0` の行が
+一度も生まれない**こと。既存の assert は closed_flag の再確認にしかなっていなかった。
+`_handle_reaction` の削除済みガードも同じ理由で無検証だった。
+
+**この状態は机上の話ではない。** ダッシュボードの `schedules` 表は `list_rows` が
+guild_id しか絞らないので削除済みの行も並び、`closed_flag` は `editable=True`（L2）なので
+「締切済み」を外せる（差分監査が `update_row` で実際に到達可能なことを実測）。
+ガードが無ければ、投票メッセージを消した予定が開催中一覧へ復活し、自動締切と自動催促が動き出す。
+
+`_unclose_deleted()` でその状態を作るケースを4件足し、2巡目で **EFFECTIVE**（8項目すべて赤）。
+さらに2巡目で見つかった穴2件もその場で塞いだ:
+
+| 穴 | 対応 |
+|---|---|
+| `soft_delete_schedule` から `WHERE guild_id = ?` を外しても緑（`restore` 側は担保済みで**非対称**） | 「持ち主でないギルドから消しにいく」向きのテストを追加。同じ `schedule_id` を2ギルドに置く形では検査できない（`schedule_id` は PRIMARY KEY で schema 上作れない） |
+| `_schedule_ac_all` に削除済みを混ぜても緑（docstring は「含まない」と書いている） | `/schedule status` `/schedule delete` の候補から削除済みが消えることを検査 |
+
+#### 次タスクへの申し送り
+
+- **G3-4 は新しい migration を作らないこと**（`confirmed_option_id` は v17 で追加済み）。
+  G3-4 の本文にも明記した
+- **G4-13 / G4-14 を起票した**（オートコンプリート登録検査の空振り／`/schedule remind` の締切済みガード）
+- **PostgreSQL 実機で確認済み**（test-adversary が `postgres:16` の使い捨てコンテナで実行）。
+  DSN 付きのフルスイートは **945 passed, 0 skipped**。ただし
+  **v17 のマイグレーション経路は PG では検出できない**——新規 PG DB は `CREATE TABLE` 側から
+  両列を得るため、`_migrate_v17_*` を一度も通らない。「v17 に2列」を守っているのは
+  SQLite の `test_v17_adds_both_columns_to_an_existing_db` **だけ**。
+  v16 で止まっている既存 PG 本番 DB に対する昇格は未検証
+- 「見つかりません」の重複は **5件**（6ではない）。集約後は `_find_schedule` と
+  `restore`（`include_deleted=True` が要るため意図的に非集約）の2箇所
+- 適用前に `pg_dump -Fc` を取ること（down が無い）。手順の docs への追記は G3-7 で行う
+
+### 2026-08-29 — G3-4: `/schedule confirm` 確定日程と当日リマインド（ブランチ `fix/g3-4`）
+
+`finalize_schedule` は集計サマリーを投稿して終わりで、**「結局いつに決まったのか」が
+どこにも残らなかった**。前日・当日のリマインドも無い。
+
+- ruff: `All checks passed!`
+- pytest: **972 passed, 12 skipped**（着手前は 943 passed, 11 skipped）。
+  **skip が1件増えたのは PG ライブテストを1本追加したため。**
+  内訳は `tests/test_dashboard_edit.py` 4件・`tests/test_db_postgres.py` 8件で、
+  いずれも `CLUB_TEST_PG_DSN` 未設定。**PG ライブテストは今回実行していない（skip のまま）**
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `repositories/schedule_repository.py` | `set_confirmed_option`（**SQL の `EXISTS` で対象候補を担保**）/ `clear_confirmed_option` / `list_confirmed_between`。一覧2つを LEFT JOIN 化し確定候補の `start_at` を同じ行で返す |
+| `cogs/schedule.py` | `/schedule confirm`（L2）/ `/schedule unconfirm`（L2）。`option_id` の候補は選ばれた予定のものだけ。一覧に確定日を表示 |
+| `cogs/reminders.py` | 前日 20:00 / 当日 08:30 の新ループ。`confirmed_schedule_reminders` |
+| `services/schedule_service.py` | 集計サマリーに確定日（`description` へ追記） |
+| `docs/` | `OPERATION.md`（コマンド表・自動ジョブ表）/ `GUIDE.md`（通知表・使い方） |
+
+**マイグレーションは無し。** `confirmed_option_id` は G3-3 の v17 で追加済み。
+
+新規テスト `tests/test_schedule_confirm.py`（29件）＋ `tests/test_db_postgres.py` に PG ライブ1件。
+
+#### 設計判断
+
+**1. 受入基準の「`/schedule list` に確定日を表示」だけでは機能が死ぬ。**
+`/schedule list` は `closed_flag = 0` しか出さないが、確定作業の通常フロー
+（締切 → 集計サマリー → 確定）を通ると `finalize_schedule` が `close_schedule` を呼ぶので、
+その予定は二度と `/schedule list` に現れない。**`/schedule list-closed` にも出す**ように直し、
+受入基準の本文も更新した。
+
+**2. 確定日の表示に候補の `label` を使わない。**
+`label` は利用者が `/schedule create` に打った生文字列で、`utils/parser.SHORT_FORMATS` により
+`7/20 18:00`（年なし）や `2026-07-20`（時刻なし）も通る。これを確定日として出すと、
+一覧は「7/20」なのに当日通知は「本日 00:00」になる。**正規化済みの `start_at` に統一**した。
+
+**3. 対象外の候補を弾くのは Cog の if ではなく SQL。**
+`set_confirmed_option` を1文の UPDATE にし、`EXISTS (SELECT 1 FROM schedule_options
+WHERE guild_id = ? AND option_id = ? AND schedule_id = ?)` を条件に入れた（ADR 0008 / 0010）。
+Cog の分岐は UX のためで、担保はリポジトリ側。テストも Cog を通さず直接叩いて固定した。
+
+**4. 失敗を `reminders_log` に書かない。**
+`RemindersLogRepository.exists()` は `status` を見ないので、失敗を同じキーで書くと
+**その日の通知が二度と飛ばない**（G2-3 が潰した「送っていないのに送信済み」と同じ形）。
+失敗は `log.warning` と `bot.log_to_channel` にだけ出す。この不変条件を
+`CONFIRMED_REMINDER_TYPE` の定義箇所に明記した。
+`exists()` に `status` フィルタを足す案は、共有述語の変更で `milestone_alert` の挙動も
+変わるため採らなかった（ADR 0014。必要になったら別タスク）。
+
+**5. 締切前の確定を許可する。ただし自動で締め切らない。**
+「先に決まる」は実運用で起きる。断ると `/schedule close`（＝公開サマリー投稿）を
+強制することになる。逆に confirm が `finalize_schedule` を呼ぶのは、別コマンドの副作用で
+公開投稿が飛ぶ設計で ADR 0024 に反する。保存したうえで ephemeral に
+「まだ投票受付中です。締め切るには `/schedule close`」を添える形にした。
+
+**6. 告知の本文は Embed の `description` に渡す。**
+`utils/embeds._base` は `title[:100]` で無条件に切るため、本文を title に入れると
+**イベント名が長いギルドで日時や場所が黙って消える**（このコマンドの目的そのものが落ちる）。
+差分監査の指摘で発見。イベント名90文字の回帰テストを置いた。
+
+**7. チャンネルは `guild.get_channel_or_thread`。**
+`guild.get_channel` はスレッドを解決しない。`/schedule create` は `channel` 未指定時に
+`interaction.channel` の ID を保存するので、**スレッド内で作られた予定は `channel_id` が
+スレッド ID になる**。`get_channel` だと告知が出ず、リマインドは毎日2回
+「チャンネルが見つかりません」を運用者ログへ流し続ける。既存経路は `bot.get_channel`
+（スレッドも解決する）なので、同一ギルド限定にした今回の2箇所だけが踏む形だった。
+
+**8. 集計サマリーの確定日は `add_field` ではなく `description`。**
+候補数に上限が無い（`svc.parse_options` は分割するだけ）ので、field を1つ増やすと
+上限25に当たる閾値が下がる。`finalize_schedule` は `HTTPException` を握り潰すため、
+**超えた瞬間に集計サマリーが無言で投稿されなくなる**。
+
+**9. 未確定のサマリーに1行の案内を残した（意図的な逸脱）。**
+差分監査は「確定済みのときだけ出す」を勧めたが、(a) `description` の1行なので上限の問題は
+解消している、(b) このタスクの起票理由は「結局いつに決まったのかが残らない」ことで、
+締切サマリーは**その必要が生じるまさにその瞬間**に出る唯一の接点、
+(c) ADR 0024 が禁じているのはマイグレーションや既定値による**状態**の変化で、
+公開投稿の文面1行はそれに当たらない、として残した。再監査で許容判定。
+公開投稿なので主語を書く形（「班長以上が `/schedule confirm` で…」）にし、
+L1 の部員に実行できないコマンドを命令していない。
+
+**10. `/schedule unconfirm` を足した（受入基準に無い）。**
+取り消し手段が無いと、誤確定を止める唯一の方法が `/schedule delete`（L3・投票メッセージも
+消える）になり代償が釣り合わない。`option_id` 省略で解除する案は、Discord の UI で
+任意引数の省略が最も起きやすいため却下した。`clear_confirmed_option` が
+**呼び出し元の無いデッドコードになる**という指摘も決め手。
+
+#### ゲートの判定
+
+| ゲート | 判定 | 経過 |
+|---|---|---|
+| ゲート1（acm-plan-reviewer） | REVISE ×2 → 「反映すれば実装に入ってよい」 | 1回目に10件（**確定日が表示されない**／`exists()` が status を見ない／ループ登録テストの空振り／Cog の if ではなく SQL で守る／`guild.get_channel` へ揃える／公開投稿で命令しない／本文と時刻／PG の境界値／docs／作業ツリー確認）、2回目に3件（失敗を `reminders_log` に書かない／`list_option_labels` では確定「日」を出せない／`unconfirm` の補完と権限テスト） |
+| ゲート2（acm-diff-auditor） | FINDINGS → **CLEAN** | 6件（**title 100文字切り**／**`get_channel` がスレッドを解決しない**／告知失敗が伝わらない／field が増える／`int()` が try の外／`OPERATION.md` の自動ジョブ表） |
+| ゲート2（acm-test-adversary） | **EFFECTIVE** | 23項目すべてで戻すと赤くなることを実測 |
+
+**ゲート2は同時ではなく逐次で回した**（G3-1〜G3-3 と同じ意図的な逸脱）。
+
+#### ループ登録テストの実測（ゲート1の指定）
+
+既存の `tests/test_data_purge.py` の `test_purge_loop_is_registered` は `hasattr` を見るだけで、
+**`cog_load` から `start()` の行を消しても通る**形だった。今回は挙動で見る形にし、
+実際に行を消して落ちることを確認した:
+
+| 消した行 | 結果 |
+|---|---|
+| `cog_load` の `self.confirmed_schedule_reminders.start()` | `test_every_loop_is_started_and_cancelled_by_the_cog` が **1 件失敗** |
+| `cog_unload` の `self.confirmed_schedule_reminders.cancel()` | 同じテストが **1 件失敗** |
+
+#### test-adversary が見つけた「戻しても緑」の穴（その場で塞いだ）
+
+| 穴 | 意味 | 対応 |
+|---|---|---|
+| `schedule_list_value` から確定日の3行を消しても緑 | **受入基準の中核**（一覧に確定日を表示）が cog 側で無検証だった。リポジトリの JOIN は担保されていたが、それを Embed に出す側を見るテストが無かった | `Schedule.list_cmd` / `list_closed_cmd` を実際に呼び、field の value に確定日時が入ることを検査（戻すと落ちることを実測） |
+| PG ライブテストが「他予定の**実在する** option_id」を見ていなかった | 現実的な誤操作（他予定の候補を選ぶ）が PG 側で無検証 | 2つ目の予定と候補を作って False を確認するケースを追加（**DSN 未設定のため未実行**） |
+
+#### 次タスクへの申し送り
+
+- **`.ics` 添付は次イテレーション**（受入基準の申し送りどおり）。Google カレンダー連携は ADR 0013 に反するのでやらない
+- **PG ライブテストは skip のまま**（`CLUB_TEST_PG_DSN` 未設定）。今回追加した
+  `test_pg_live_confirmed_schedule_join` は、`+09:00` 付き ISO 文字列の範囲比較で
+  **ちょうど 00:00:00 の候補**を取りこぼさないことを見る。実行するときはここを注視すること
+- `config.tz` に**夏時間のあるゾーン**を設定すると、`start_at` のオフセットが変動して
+  文字列の辞書順＝時刻順が崩れる。既存の `deadline` 比較と同じ前提なので今回は触っていない
+- 08:30 に3つのループ（`daily_morning` / `weekly_milestone_alert` /
+  `confirmed_schedule_reminders`）が並走する。いずれもギルド単位で例外を握るので
+  相互には影響しないが、ギルド数が増えたら実行時刻の分散を検討する
+
+### 2026-08-29 — G3-6: 新入生オンボーディング（ブランチ `fix/g3-6`）
+
+新歓期に30〜50人が入るのに bot は新入生の存在を知らず、幹部が `/member register` を
+1人ずつ手打ちしていた。名簿に載らない人には班別通知も出欠催促も届かない。
+
+- ruff: `All checks passed!`
+- pytest: **1013 passed, 12 skipped**（着手前は 972 passed, 12 skipped。skip は据え置き）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `cogs/welcome.py`（新規） | `on_member_join` で「班を選ぶ」ボタンを DM。押すと班 Select → 名簿登録＋ロール付与 |
+| `config.py` | `welcome_enabled: bool`（既定 False）/ `welcome_channel_id` |
+| `repositories/settings_repository.py` | `get_bool()`（保存は `"1"/"0"`、解釈は大文字小文字を無視、不正値は既定） |
+| `cogs/setup_wizard.py` | ON/OFF トグル。`CONDITIONAL_KEYS` で OFF のギルドは未設定に数えない |
+| `cogs/help.py` | `/setup-status` も ON のときだけ案内チャンネルを検査 |
+| `bot.py` | `COGS` 追加、`add_dynamic_items` の登録（**失敗を握る**） |
+| `requirements.txt` | discord.py の下限を `>=2.4.0` へ |
+| `docs/` | `GUIDE.md` Step 4.5 / `PRIVACY.md`（**公開ポリシーの変更**）/ `OPERATION.md` |
+
+新規テスト `tests/test_welcome.py`（38件）。**マイグレーションは無し**（`settings` の行のみ）。
+
+#### 設計判断
+
+**1. 参加しただけでは `members` に登録しない。** 登録は班を選んだときだけ。
+`on_member_join` は**再参加でも発火**するので、ここで `upsert_member` すると
+訪問者や OB まで台帳に入る。台帳は G3-2 で**未回答催促の母集団**にしたばかりなので、
+誤爆が直接「誤送信」になる。`status` / `active_flag` にも触れない
+（再参加した卒業生が自動で現役に戻る経路を作らない）。
+
+**2. DM 拒否時の送り先は `WELCOME_CHANNEL_ID` だけ。未設定なら何もしない。**
+G3-5 の `send_guild_notice` は招待直後の案内用で、候補順が
+`#bot-log` → `system_channel` → 送信可能な最初のテキストチャンネル、
+権限チェックも Bot 側だけ。新入生が読めない `#bot-log` に落ちても「送信しました」と
+成功扱いになる。受入基準の語も「**指定**チャンネル」。
+Bot の送信権限と**本人の可視性**の両方を検査し、カテゴリ・フォーラムも弾く。
+
+**3. ボタンは `DynamicItem`。`custom_id` に guild_id と user_id の両方を埋める。**
+user_id を埋めないと、チャンネルへ落ちたボタンが**誰でも押せる班ロール自販機**になる
+（L2 の `/member register` を迂回する）。`DynamicItem` にしたのは、新歓期の再起動で
+新入生のボタンが死なないようにするため。これに伴い `requirements.txt` の下限を
+`>=2.4.0` へ上げた（2.3 環境では import が落ちるが、venv は 2.7.1 なので
+**テストでは絶対に検出できない**。ソース走査テストで下限を守る）。
+
+**4. ロール付与の前提は2つ。どちらが欠けても登録は通す。**
+Manage Roles は最小権限の招待（ADR 0017）に含まれず、`teams.member_role_id` は
+ロールの自動作成が成功したギルドにしか入っていない。**後者は新規ギルドの既定に近い状態**なので、
+`_sync_roles` の戻り値だけを見ると「付いた」と誤解させる。`member_role_id` の有無を
+先に判定して文面を分けた。権限を増やす方向では解決しない。
+
+**5. `/member setup` は「班選択ウィザード」ではなかった。**
+受入基準の「UI は `/member setup` の班選択ウィザードを流用する」は現物と食い違っており、
+実体は autocomplete 付きの L3 スラッシュコマンド。流用できたのは
+`MemberRepository.list_teams` と `_sync_roles` だけで、**Select View は新規に書いた**。
+受入基準の本文にもその旨を追記した。
+
+**6. `/setup` と `/setup-status` は ON のときだけ案内チャンネルを数える。**
+OFF のギルドではこの設定はどこからも参照されないので、常時カウントすると
+オンボーディングを使わないサークルに毎回「未設定 N 件」を突きつけることになる
+（ADR 0023 / 0024）。逆に ON なら**必ず**数える——未設定だと DM を拒否している
+新入生が丸ごと取りこぼされるため。ON にしたその場でも警告する
+（後で `/setup-status` を見に行かせる設計にしない）。
+
+**7. `add_dynamic_items` の登録失敗を握る。**
+`load_extension` は失敗を握るのに、直後の裸の `from cogs.welcome import ...` を
+try の外に置いていた。ここで例外が出ると `setup_hook` ごと落ちて
+**全ギルドの bot が起動しない**。1ギルドの機能欠落で済むはずが全テナント停止に化ける。
+
+#### 公開ポリシー（`docs/PRIVACY.md`）の変更
+
+- §2 冒頭に「ボタン・選択メニューの操作」を追加し、
+  「名簿に登録されるのは班を選んでいただいたときだけ」を明記
+- §2.1 に「表示名キャッシュ」の行を追加。**この差分以前から欠落していた項目**で、
+  `cogs/name_cache.py` は設定に関わらず**起動のたびに全メンバー分**を更新する
+  （当初「サーバー参加時」とだけ書いてしまい、差分監査に2度指摘された）
+- §2.4 の「スラッシュコマンドとリアクションのみで動作し」を実装に合わせた
+
+#### ゲートの判定
+
+| ゲート | 判定 | 経過 |
+|---|---|---|
+| ゲート1（acm-plan-reviewer） | REVISE ×2 → 実装許可 | 1回目に13件（**フォールバック先が受入基準の「指定チャンネル」でない**／**再参加で既存データが動く**／`_sync_roles` が例外を捕捉していない／Select の25件上限／下限引き上げを構造で守る／`get_bool` の往復／`/member setup` の事実誤認 ほか）、2回目に4件（`get_channel_or_thread` がカテゴリを返す／Bot 側権限を落とさない／バージョン判定を文字列一致で書かない／初回押下でボタンを消さない） |
+| ゲート2（acm-diff-auditor） | FINDINGS ×2 → 残1件 | 1回目に6件（**PRIVACY.md に事実でない記述**／`/setup` が無条件にカウント／**Cog 1本の import 失敗で起動不能**／ロール未紐付けで「登録しました」だけ返る／テストが効いていない2箇所／`open_team_picker` だけ在籍を見ていない）、2回目に3件（表示名キャッシュの記録タイミング／`ruff format` による無関係な整形の混入／picker の在籍ガードに回帰テストが無い） |
+| ゲート2（acm-test-adversary） | **INEFFECTIVE → 修正済み** | 下記 |
+
+#### test-adversary の実測（27項目）と、見つかった7つの穴
+
+23項目は戻すと赤くなった。**緑のままだったのは7件**で、いずれもその場で塞ぎ、
+戻すと落ちることを実測した:
+
+| 穴 | 意味 |
+|---|---|
+| `WELCOME_CHANNEL_ID` の判定を消して `text_channels[0]` へ落としても緑 | テストの `_Guild` に `text_channels` / `system_channel` が無く、**受入基準の「指定チャンネル」を守れていなかった**。ダブルに実物と同じ入口を持たせた |
+| `open_team_picker` の在籍検査を消しても緑 | picker を呼ぶ既存4テストが全員メンバーを渡す形だった |
+| `get_bool` を `raw == "1"` だけにしても緑 | docstring が主張する「大文字小文字を無視」が未検証 |
+| ON 時の警告を消しても緑 | assert が**トートロジー**だった（`未設定` の行は notice の有無に関係なく出る） |
+| `add_dynamic_items` の呼び出しだけ無効化しても緑 | ソースの文字列 grep だけだったので、コメントアウトでも通る |
+| `callback` が `custom_id` でなく押下者の ID を使っても緑 | `callback` を通すテストが1件も無かった |
+| DM のボタンに user_id を埋めなくても緑 | 参加イベント → `custom_id` への埋め込みの**配線**が無検査だった |
+
+#### 次タスクへの申し送り
+
+- `cogs/settings.py` の `channel_keys` / `/set_channel` の choices に `WELCOME_CHANNEL_ID` が無い。
+  `/settings_list` で「その他」に分類されるだけの**表示上の問題**なので、このタスクでは触っていない
+- **採番の食い違い（再掲）**: `IMPROVEMENT_TASKS.md` の申し送り表は
+  「`pg_dump -Fc` の docs 追記」を "G3-6" に割り当てているが、G3-6 の枠は
+  オンボーディングで埋まっている。**この追記は G3-7 で行う**（G3-3 の完了ログにも記録済み）
+- **PostgreSQL 実測はしていない。** ただし G3-6 は新しい SQL を1文も追加しておらず
+  （`get_bool` は既存の `get` を再利用、他も既存経路）、`config.for_guild` に SELECT が
+  1回増えるだけなので、G1-0 / G1-9 型のリスクはこの差分には無いと判断した
+- **作業手順の反省**: ゲート2の test-adversary が live worktree に変異を当てている最中に
+  コミットしてしまい、G3-4 の実装コミットに変異が混ざった（`77f38bd` で復旧）。
+  以降は「フルセット緑」だけを根拠にせず、**戻した項目それぞれを実装側の grep で確認**してから
+  コミットする。adversary 側もサンドボックス複製で実測する運用に変えた
+
+### 2026-08-29 — G3-7: ドキュメントの整合と GUIDE.md の回帰テスト化（ブランチ `fix/g3-7`）
+
+GUIDE.md の通知表は「毎朝 08:00」と書いていたが実装は 08:30。早見表には
+`/close` `/remind` のような**実在しないコマンド名**が並び、`/status` は
+`/schedule status` と `/layer status` を同じ表記で指していた。
+
+- ruff: `All checks passed!`
+- pytest: **1017 passed, 12 skipped**（着手前は 1013 passed, 12 skipped。skip は据え置き）
+
+#### 完了内容
+
+| ファイル | 内容 |
+|---|---|
+| `docs/GUIDE.md` | §5 通知表を実装の8ループと1対1に。付録の早見表を**全92コマンドの完全名**へ |
+| `tests/test_docs_commands.py` | 付録セクションの**双方向**検査（+4テスト）。`len(TABLES)` との突き合わせ |
+| `docs/OPERATION.md` | ジョブ表と本文の 08:00 → 08:30（計7箇所）、`pg_dump -Fc`、`/health` の DB 表記 |
+| `docs/{PRIVACY,DASHBOARD_SETUP}.md` `README.md` `cogs/{data,season}.py` | `/data export` の「全データ」→「主要7テーブル」、`pg_dump` 手順 |
+
+#### 設計判断
+
+**1. 早見表は全件必須。除外リストを作らない。**
+「よく使うものだけ」に絞る案は、(a) その役割は既に §3「役割別・最初に覚えること」が
+担っており第3の層ができる、(b) 付録は「全コマンドの詳細は OPERATION.md」と自称している、
+(c) 行数の増分は12 → 18行程度（既存12行が既に約70件を詰めていた）、という理由で採らなかった。
+決め手は構造で、**除外リストは逃げ道**になる——将来テストが赤くなったときの最小手が
+「ドキュメントに書く」ではなく「除外リストに1行足す」になる（ADR 0008 / 0016）。
+
+**2. 検査対象は付録セクションのみ。ファイル全体ではない。**
+全体を対象にすると、`/schedule restore` は3章の幹部向け一覧にも書かれているので
+**付録から抜けていても緑になる**。見出しで切り出し、見出しが見つからなければ
+「抽出0件」ではなく「見出しが無い」で落ちるようにした。
+
+**3. 完全名への書き換えは検査を通すための改変ではなく、欠陥修正。**
+`/close` `/remind` `/delete` `/edit-deadline` `/show` `/reset` はどれも実在せず、
+読者がそのまま打てない。「完全名の行だけ検査する」折衷案は、付録の大半を
+検査対象外にしたうえで緑を返す形になるので採らなかった。
+
+**4. `/data delete` の「全データ」は正しいので変えていない。**
+`purge_target_tables()` は `TABLE_DDL` の全テーブルから導出されるので本当に全データ。
+ここを「主要7テーブル」に書き換えると**プライバシーポリシーで削除範囲を過小に記載する**
+ことになり、G3-6 で直したのと逆向きの虚偽になる。直したのは `/data export` 側だけ。
+
+**5. 数字は直書きしない。** `len(TABLES)` と突き合わせるテストを入れた。
+docs 4ファイルに加えて `cogs/data.py` と `cogs/season.py` の docstring も対象に含める
+（数字が散っているので、片方だけ直して片方が静かに古いまま残る形を防ぐ）。
+G4-3 で `audit_log` 等が加わったときにテスト失敗として現れる。
+
+#### 空振り確認（実測）
+
+新しい検査が本当に効くことを、実際に改変して確かめた:
+
+| 一時的な改変 | 結果 |
+|---|---|
+| 付録から `/countdown` を消す | `test_every_command_is_in_the_guide_appendix` が失敗 |
+| 付録に `/nonexistent` を足す | `test_the_guide_appendix_has_no_stale_commands` が失敗 |
+| 付録から `/schedule restore` **だけ**消す | missing 方向が失敗（**3章に記載があっても緑にならない**） |
+| 同一セルに `/bogus` を足す | stale 方向が失敗 |
+| `docs/PRIVACY.md` を「全データ」へ差し戻す | `test_the_export_table_count_matches_the_whitelist` が失敗 |
+| `cogs/data.py` を「主要8テーブル」に | 同上が失敗（**.py 側も検査範囲に入っている**） |
+
+差分監査も独自に8種の変異（typo・表の全削除・同一セル中間への挿入など）を当て、
+すべて検出されることを確認している。
+
+#### ゲートの判定
+
+| ゲート | 判定 | 経過 |
+|---|---|---|
+| ゲート1（acm-plan-reviewer） | REVISE → **APPROVE** | **`/weight` は実装に存在する**（トップレベル群 `weight set` / `weight view` / `weight top`。受入基準の「全体で0ヒット」は GUIDE.md 内で0件の意味）という私の事実誤認のほか、不足コマンドが7件では足りない／検査は双方向／`/data delete` を変えるな／`push_section_tasks` の漏れ／`pg_dump` の追記先は §8.2 ではなく §6、など13件 |
+| ゲート2（acm-diff-auditor） | FINDINGS ×3 → 残2件も対応 | 1回目に4件、2回目に6件（**OPERATION.md 本文の 08:00 が4箇所残っていた**／`cogs/reminders.py` の docstring ／**新テストの guard が「全データ」への差し戻しを素通りさせていた**／`cogs/data.py` の docstring ほか）、3回目に2件 |
+
+**test-adversary は回していない。** 実装コードの変更が docstring 2行のみで、
+戻して赤くなるかを見る対象が無いため。代わりに**ドキュメント側の変異6種を自分で当てて実測**し、
+差分監査にも独自の変異検査を依頼した。
+
+#### 差分監査が見つけた「自分の修正が中途半端だった」箇所
+
+- ジョブ表だけ 08:30 に直し、**同一ファイルの本文4箇所は 08:00 のまま**残していた
+  （同じファイル内で併記された状態になり、受入基準を満たしていなかった）
+- 呼び出し側（`cogs/season.py`）の「丸ごと」は直したのに、
+  **エクスポート本体（`cogs/data.py`）の docstring が「全データ」のまま**だった
+- 新テストに `if "主要" not in text: continue` の guard を置いたため、
+  **「全データ」へ差し戻す回帰が素通り**していた（数字を8に変える改ざんは検出できるが、
+  表記ごと戻す回帰は検出できない、という非対称）
+
+#### 次タスクへの申し送り
+
+- **`/set_sheet` `/sheet_sync` の記述が矛盾している。** `docs/OPERATION.md:139` は
+  「撤去しました」、`:182` と `:704` は「利用できます」と書いており、**実装にはどちらも無い**。
+  既存の `test_documented_commands_still_exist` は**表の行しか見ない**ので、
+  本文のこの矛盾は永久に検出されない。G3-7 の受入対象外なので直していない
+- **付録の権限列は機械検査されていない。** 同じコマンドを権限の違う2行に重複掲載しても
+  `>=` 比較で緑のまま（現状は重複なし）
+- **GUIDE.md の3章・4章のコマンド例はコードブロック内**なので、今回の検査の死角。
+  現時点で齟齬が無いことは目視で確認済み（差分監査も全件突き合わせ済み）
+- `cogs/data.py` の `EXPORT_README`（ZIP に同梱され利用者が読む文面）は範囲を限定していない。
+  ファイル一覧は併記されているので実害は小さいが、将来 PRIVACY と揃えるなら候補

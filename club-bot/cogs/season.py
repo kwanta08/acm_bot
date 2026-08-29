@@ -56,6 +56,17 @@ def rollover_result_embed(result: RolloverResult, executor: str | None = None) -
         "卒業者のデータは削除していません（過去の記録の担当者名を"
         "残すため）。既定の一覧・検索からは外れます。"
     )
+    lines.append("")
+    # 班長ロール（settings の LEADER_ROLE_IDS）はこの処理では触らない。
+    # 勝手に消すと、新体制が設定するまで全班長が L1 に降格するため
+    # （ADR 0024: 状態が変わるのは明示的に選ばれたときだけ）。
+    # 代わりに、毎年積み上がることを利用者へ知らせる。
+    lines.append(
+        "**班長ロールの見直しをしてください。** 班長の権限（L2）の根拠は"
+        "班長ロールで、ここでは変更していません。"
+        "`/setup` の「班長ロール」で選び直すか、`/set_role action:remove` で"
+        "旧体制のロールを外してください。"
+    )
     return success_embed("年度を切り替えました", "\n".join(lines), executor=executor)
 
 
@@ -275,7 +286,7 @@ class Season(commands.Cog):
     async def _snapshot_file(self, guild_id: int, embed: discord.Embed) -> discord.File | None:
         """年度スナップショット（/data export と同じ ZIP）を作る。
 
-        引き継ぎのために、切り替えた時点のデータを丸ごと渡す。
+        引き継ぎのために、切り替えた時点の主要7テーブル（/data export と同じ範囲）を渡す。
         エクスポート処理は再実装せず cogs/data.py のものを共有する。
         """
         try:

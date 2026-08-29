@@ -237,16 +237,40 @@ async def collect_setup_status(db, gconf: GuildConfig) -> list[SetupItem]:
             "ログチャンネル", gconf.bot_log_channel_id is not None, "`/setup` で設定してください"
         ),
         SetupItem("管理者ロール", gconf.admin_role_id is not None, "`/setup` で設定してください"),
+        # 幹部（L3）の判定は EXEC_ROLE_ID だけを見ている（utils/permissions.py）。
+        # 招待直後の案内が /setup-status を入口に指すので、ここが抜けていると
+        # 「すべて設定済み」と出たサーバーで幹部が L3 コマンドを使えない。
+        SetupItem(
+            "幹部ロール",
+            gconf.exec_role_id is not None,
+            "`/setup` の「実行役ロール」で設定してください",
+        ),
         # 班長（L2）の判定は LEADER_ROLE_IDS だけを見ている。
         # members.is_leader は Web ダッシュボードの認可にしか使われないため、
         # ここが空だと班長は Discord 上で何もできない。
         SetupItem(
             "班長ロール",
             bool(gconf.leader_role_ids),
-            "`/set_role role_type:リーダー` で設定してください",
+            "`/setup` の「班長ロール」で設定してください"
+            "（1つだけ外すときは `/set_role action:remove`）",
         ),
         SetupItem("班", len(teams) > 0, "`/team-add` で登録してください"),
         SetupItem("桁", len(ketas) > 0, "`/layer keta-add` で登録してください"),
+        # 新入生オンボーディングが ON のギルドでだけ見る。
+        # OFF のギルドでは案内チャンネルはどこからも参照されないので、
+        # 常に数えると「使わない機能の未設定」を毎回突きつけることになる
+        *(
+            [
+                SetupItem(
+                    "新入生の案内チャンネル",
+                    gconf.welcome_channel_id is not None,
+                    "`/setup` で設定してください"
+                    "（未設定だと DM を拒否している人に案内が届きません）",
+                )
+            ]
+            if gconf.welcome_enabled
+            else []
+        ),
         # 大会日は /countdown と週次のマイルストーン警告の起点。
         # 未設定でも他機能は動くので、任意項目として最後に置く。
         SetupItem(

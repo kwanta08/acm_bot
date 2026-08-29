@@ -51,14 +51,24 @@
 
 運営者から受け取った招待URLを開き、自分のサークルのサーバーを選びます。
 
-招待した瞬間に、次が自動で作られます。
+招待すると、Bot が**導入手順の案内を1つのチャンネルに投稿します**
+（`#bot-log` があればそこ、無ければサーバーの「システムメッセージチャンネル」、
+それも無ければ Bot が書き込める最初のチャンネル）。案内には
+`/setup` `/setup-status` `/help` の3つが書かれています。
+
+Bot に `ロールの管理` と `チャンネルの管理` が付いている場合は、あわせて次も作られます。
 
 - `幹部` ロールと `Bot管理者` ロール
 - `#bot-log` チャンネル（Bot の動作ログが流れます）
 
-> **ロールとチャンネルが作られなかった場合**は、Bot に
-> `ロールの管理` と `チャンネルの管理` を付けてから再度招待してください。
-> 無くても Bot 自体は動きます（自分で作って Step 2 で指定すれば大丈夫です）。
+> **標準の招待URLはこの2つの権限を要求しません**（必要最小限の権限しか
+> 求めない方針のため）。ロールとチャンネルが作られなかった場合は、
+> 次のどちらかで設定してください。
+> - **自分で作成し、Step 2 の `/setup` で指定する**（すぐ反映されます）
+> - Bot に `ロールの管理` と `チャンネルの管理` を付ける
+>   （同じ名前のロール・チャンネルが無ければ、Bot の次回起動時に作成されます）
+>
+> どちらでも Bot 自体は動きます。
 
 > **コマンドが出てこないとき**は少し待ってください。Discord への反映に
 > 最大1時間ほどかかることがあります。急ぐときは Ctrl+R で Discord を再読み込みします。
@@ -103,15 +113,44 @@
 ```
 
 **班長には班長ロールを設定してください。** Bot が班長として扱うのは、
-`/set_role role_type:リーダー` で登録したロールを持つ人です。
+ここで登録したロールを持つ人です（班長向けのコマンドがすべてこれを見ています）。
+
+いちばん簡単なのは `/setup` です。「設定したい項目」で **班長ロール** を選び、
+下のロールセレクトで班長ロールを選びます（複数選択できます）。
 
 ```
-/set_role role_type:リーダー role_id:<班長ロールのID>
+/setup    ← 「班長ロール」を選んでロールを選択（選び直すと置き換わります）
+```
+
+1つだけ足す・外すときは `/set_role` を使います。
+
+```
+/set_role role_type:リーダー role_id:<班長ロールのID>                 ← 追加
+/set_role role_type:リーダー role_id:<班長ロールのID> action:削除     ← 1つだけ外す
 ```
 
 > ロールIDは、Discord の設定で開発者モードを ON にしてから
 > ロールを右クリック →「ロールIDをコピー」で取得できます。
-> 複数の班長ロールがある場合はカンマ区切りで指定します。
+> 複数まとめて追加する場合はカンマ区切りで指定します。
+> `.env` に `LEADER_ROLE_IDS` を書いて運用している場合は `.env` が優先されます
+> （その場合はコマンドの結果にその旨が表示されます）。
+
+### Step 4.5. 新入生オンボーディング（任意・新歓期向け）
+
+新歓で一度に何十人も入るサーバー向けの機能です。**既定は OFF** で、
+ONにしない限り参加者には何も送りません。
+
+`/setup` の「新入生オンボーディング ON/OFF」ボタンで切り替えます。ONにすると、
+参加した人へ DM で「班を選ぶ」ボタンが届き、押して班を選ぶと名簿に登録され、
+班のロールが付きます（幹部が `/member register` を1人ずつ打つ必要がなくなります）。
+
+- **DM を受け取らない設定の人**のために、`/setup` の「新入生の案内チャンネル」を
+  設定してください。未設定だとその人には案内が届きません
+  （読めないチャンネルへ勝手に投稿することはしません）
+- **班ロールの自動付与には2つの前提があります**: Bot に「ロールの管理」権限があること、
+  そして班にロールが紐付いていること（`/team-role`）。どちらが欠けていても
+  名簿への登録は行われ、ロールが付かなかったことが本人に伝わります
+- 参加しただけでは名簿に登録されません（見学者や再参加の方が混ざらないようにするため）
 
 ### Step 5. 動くか確かめる（1分）
 
@@ -153,8 +192,13 @@
 ```
 /member setup               所属班・班長をまとめて設定
 /report audit               直近の操作履歴
-/schedule delete            日程調整の削除
+/schedule delete            日程調整の削除（票データは残ります）
+/schedule restore           削除した日程調整を戻す
 ```
+
+`/schedule delete` は投票メッセージを消して締切扱いにしますが、**誰が何と答えたかは残します**。
+消してから「やっぱり集計を見たい」となったら `/schedule restore` で戻せます
+（投票メッセージは戻らないので、取り直すときは `/schedule create` で作り直してください）。
 
 ### 管理者
 
@@ -183,6 +227,20 @@
 ```
 
 候補は **`;`（セミコロン）区切り**で並べます。
+
+**決まった日程を登録する**（班長以上）
+
+締切後の集計だけでは「結局いつに決まったのか」が残りません。`/schedule confirm` で
+確定した候補を登録すると、対象ロールへ告知し、`/schedule list` `/schedule list-closed` に
+確定日が表示され、**前日 20:00 と当日 08:30 にリマインド**が届きます。
+
+```
+/schedule confirm    schedule_id:（候補から選ぶ） option_id:（候補から選ぶ）
+/schedule unconfirm  schedule_id:（候補から選ぶ）   ← 取り消し（取り消しも告知されます）
+```
+
+`target_role` を **省略すると、名簿の現役メンバー全員**が締切前の催促の対象になります。
+班だけに聞くときは必ず指定してください。
 
 **答える**（全員）
 
@@ -359,13 +417,18 @@
 
 | いつ | 何が |
 |---|---|
-| 締切1時間前 | 日程調整の未回答者へ DM（DM が届かない人にはチャンネルでメンション） |
+| 締切1時間前 | 日程調整の未回答者へ DM（DM が届かない人にはチャンネルでメンション）。対象は `target_role` を指定していればそのロール、していなければ**名簿の現役メンバー** |
 | 5分ごと | 締切を過ぎた日程調整を自動で締め切り、結果を投稿 |
-| 毎朝 08:00 | 今日〜7日以内が期限の未完了タスク |
-| 毎朝 08:00 | 「今日やること」ラベルの付いたタスク |
+| 前日 20:00 | `/schedule confirm` で確定した日程の前日通知（「明日 …」） |
+| 当日 08:30 | 同じく当日通知（「本日 2026/10/01 18:00 **合宿**（部室）」） |
+| 毎朝 08:30 | 今日〜7日以内が期限の未完了タスク |
+| 毎朝 08:30 | 「今日やること」ラベルの付いたタスク |
+| 毎朝 08:30 | Todoist のセクション別タスク（期限7日以内・超過）を班チャンネル（未設定ならタスク通知チャンネル）へ（連携している場合） |
 | 毎朝 08:30 | Todoist 連携プロジェクトの期限タスク（連携している場合） |
+| 毎週月曜 08:30 | **遅れている**マイルストーンのお知らせ（遅れが無い週は送りません） |
 | 20分ごと | 機体進捗の同期・再集計（Todoist と桁巻きの反映） |
 | 毎日 21:00 | 期限切れの未完了タスク |
+| 毎日 04:00 | `/data delete` を申告したサーバーのデータ削除を実行し、結果を `#bot-log` へ（退出済みサーバーは通知先が無いため送られません） |
 
 送信先は `/setup` や `/set_channel` で設定したチャンネルです。
 
@@ -394,7 +457,7 @@
 | コマンドが候補に出てこない | 招待直後は反映に最大1時間かかります。Ctrl+R で再読み込みも試してください |
 | `/setup` が「権限がありません」 | サーバー管理者権限か `Bot管理者` ロールが必要です |
 | 班の候補が出てこない | 先に `/team-add` か `/setup` の「班を一括作成」で班を登録してください |
-| 班長なのに班長向けコマンドが使えない | `/set_role role_type:リーダー` で班長ロールを登録したか確認してください |
+| 班長なのに班長向けコマンドが使えない | `/setup` の「班長ロール」で班長ロールを登録したか確認してください |
 | 投票のリアクションが反映されない | Bot に「リアクションを追加」「メッセージ履歴を読む」権限があるか確認してください |
 | 催促の DM が届かない | 受け取る側の DM 設定です。届かない場合はチャンネルでのメンションに自動で切り替わります |
 | `/layer end` で「進行中のセッションがありません」 | 先に `/layer start` を実行してください。誰かの記録を代わりに終わらせることはできません |
@@ -425,7 +488,7 @@
 - 現在の年度を終了し、新しい年度を開始する
 - 選んだ人を **卒業（alumni）** に切り替える
 - **班長フラグを全員リセット**する（新体制で付け直すため）
-- 切り替え時点の全データを **年度スナップショット**（ZIP）として添付する
+- 切り替え時点の主要7テーブルを **年度スナップショット**（ZIP）として添付する
 
 **卒業者のデータは削除されません。** 過去の作業記録に残る担当者名を
 引けるようにするためです。卒業した人は `/member support` などの
@@ -464,7 +527,7 @@
 **他のサークルとの関係**: すべてのデータはサーバー単位で完全に分離されています。
 他大学のサークルからあなたのデータが見えることはありません。
 
-**持ち出し**: `/data export` でこのサーバーの全データを ZIP（CSV 群）として
+**持ち出し**: `/data export` でこのサーバーの主要7テーブルを ZIP（CSV 群）として
 受け取れます（管理者のみ）。サーバーIDや Todoist トークンは含まれません。
 
 **利用をやめるとき**: 運営者への連絡は不要です。Bot をサーバーから
@@ -481,30 +544,44 @@
 
 ## 付録: コマンド早見表
 
+**実装されているコマンドをすべて載せています**（`tests/test_docs_commands.py` が
+この表と実装の一致を検査します）。「まず何を覚えるか」は 3 章の役割別の一覧を見てください。
+
 | 分類 | コマンド | 権限 |
 |---|---|---|
-| 確認 | `/ping` `/health` | 全員 |
-| 日程調整 | `/schedule create` `/close` `/remind` `/delete` `/edit-deadline` | L2〜 |
-| | `/schedule list` `/status` `/list-closed` | 全員 |
-| | `/schedule emoji set` `/show` `/reset` | L4 |
-| タスク | `/task add` `/list` `/done` `/priority` `/overdue` `/team` | 全員 |
-| | `/task delete` `/assign` `/sections` `/push` | L2〜 |
-| | `/task link-section` `/unlink-section` | L3〜 |
-| | `/task sync` | L4 |
+| 確認 | `/ping` `/health` `/help` | 全員 |
+| | `/setup-status` | 全員 |
+| 日程調整 | `/schedule list` `/schedule status` `/schedule list-closed` | 全員 |
+| | `/schedule create` `/schedule close` `/schedule remind` `/schedule edit-deadline` | L2〜 |
+| | `/schedule confirm` `/schedule unconfirm` | L2〜 |
+| | `/schedule delete` `/schedule restore` | L3〜 |
+| | `/schedule emoji set` `/schedule emoji show` `/schedule emoji reset` | L4 |
+| タスク | `/task add` `/task list` `/task done` `/task priority` `/task overdue` `/task team` | 全員 |
 | | `/today task` `/today id` | 全員 |
-| 桁巻き | `/layer start` `/end` `/status` `/keta-list` | 全員 |
-| | `/layer keta-add` `/keta-remove` | L2〜 |
+| | `/task delete` `/task assign` `/task sections` `/task push` | L2〜 |
+| | `/task link-section` `/task unlink-section` `/task unlink-team-sections` | L3〜 |
+| | `/task sync` | L4 |
+| 桁巻き | `/layer start` `/layer end` `/layer status` `/layer keta-list` | 全員 |
+| | `/layer keta-add` `/layer keta-remove` | L2〜 |
 | 機体進捗 | `/progress view` | 全員 |
-| | `/progress add` `/edit` `/remove` `/spar-link` `/setup` | L2〜 |
+| | `/progress add` `/progress edit` `/progress remove` `/progress spar-link` `/progress setup` | L2〜 |
 | | `/progress sync` | L4 |
-| メンバー | `/member profile` `/skill add` `/skill remove` | 全員 |
-| | `/member register` `/assign-team` `/assign-sub-team` `/support` | L2〜 |
-| | `/member setup` `/set-leader` `/set-channel` | L3〜 |
+| 重量 | `/weight view` `/weight top` | 全員 |
+| | `/weight set` | L2〜 |
+| 大会・節目 | `/countdown` `/milestone list` | 全員 |
+| | `/milestone add` `/milestone remove` | L2〜 |
+| メンバー | `/member profile` `/member skill add` `/member skill remove` | 全員 |
+| | `/member register` `/member assign-team` `/member assign-sub-team` `/member support` | L2〜 |
+| | `/member setup` `/member set-leader` `/member set-channel` | L3〜 |
 | 班・技能 | `/team-add` `/team-remove` `/team-list` `/team-role` | L4 |
 | | `/skill-add` `/skill-remove` `/skill-list` | L4 |
-| レポート | `/report weekly` `/attendance-rate` `/export-tasks` | L2〜 |
+| レポート | `/report weekly` `/report attendance-rate` `/report export-tasks` | L2〜 |
 | | `/report audit` | L3〜 |
+| 年度替わり | `/season list` | 全員 |
+| | `/season new` `/season rollover` | L4 |
+| データ | `/data export` `/data delete` `/data delete-cancel` | L4 |
 | Todoist | `/todoist-setup` `/todoist-status` `/todoist-remove` | L4 |
-| 設定 | `/setup` `/settings_list` `/set_channel` `/set_role` `/set_common` | L4 |
+| 設定 | `/setup` `/settings_list` `/settings_get` `/settings_set` `/settings_delete` | L4 |
+| | `/set_channel` `/set_role` `/set_common` | L4 |
 
-全コマンドの詳細は [`OPERATION.md`](OPERATION.md) の 2 章にあります。
+各コマンドの引数と詳しい説明は [`OPERATION.md`](OPERATION.md) の 2 章にあります。

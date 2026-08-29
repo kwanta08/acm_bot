@@ -108,6 +108,12 @@ def _get_team_role_map(name: str) -> dict[str, int]:
 # ギルド別設定 DATA_RETENTION_DAYS で上書きできる。
 DEFAULT_DATA_RETENTION_DAYS = 30
 
+# 複数のロールをカンマ区切りで保存する設定キー（GuildConfig 側は list[int]）。
+# 追加するときは GuildConfig の属性も list[int] にすること。
+# /setup（cogs/setup_wizard.py）と /set_role（cogs/settings.py）が
+# 同じ一覧を見るように、定義はここ1箇所に置く。
+MULTI_ROLE_KEYS: frozenset[str] = frozenset({"LEADER_ROLE_IDS"})
+
 
 @dataclass
 class GuildConfig:
@@ -127,6 +133,9 @@ class GuildConfig:
     default_progress_channel_id: int | None = None
     default_task_channel_id: int | None = None
     today_label_channel_id: int | None = None
+    # 新入生オンボーディングの案内先（DM を拒否している人向け）。
+    # 未設定なら何も送らない（送信できる最初のチャンネルへ落とさない）
+    welcome_channel_id: int | None = None
 
     # ロール ID
     exec_role_id: int | None = None
@@ -145,6 +154,10 @@ class GuildConfig:
     # 大会の日付（YYYY-MM-DD）。**既定値は持たない**
     # （大会も日程もサークルごとに違うため、未設定なら /countdown は案内で終わる）
     competition_date: str | None = None
+
+    # 新入生オンボーディング（on_member_join で班選択を送る）。
+    # **既定は OFF。** ON にしたギルドでだけ動く（ADR 0024）
+    welcome_enabled: bool = False
 
     # 日程調整のリアクション絵文字（カスタム絵文字 ID。未設定は既定 ✅❓❌）
     schedule_emoji_ok_id: int | None = None
@@ -301,6 +314,7 @@ class Config:
                 ("DEFAULT_PROGRESS_CHANNEL_ID", "default_progress_channel_id"),
                 ("DEFAULT_TASK_CHANNEL_ID", "default_task_channel_id"),
                 ("TODAY_LABEL_CHANNEL_ID", "today_label_channel_id"),
+                ("WELCOME_CHANNEL_ID", "welcome_channel_id"),
                 ("EXEC_ROLE_ID", "exec_role_id"),
                 ("ADMIN_ROLE_ID", "admin_role_id"),
                 ("SCHEDULE_EMOJI_OK_ID", "schedule_emoji_ok_id"),
@@ -315,6 +329,9 @@ class Config:
             leader_ids = await repo.get_int_list(guild_id, "LEADER_ROLE_IDS")
             if leader_ids:
                 gc.leader_role_ids = leader_ids
+
+            # 真偽値の設定。不正値は既定（OFF）扱いで例外を投げない
+            gc.welcome_enabled = await repo.get_bool(guild_id, "WELCOME_ENABLED")
 
             club_name = await repo.get(guild_id, "CLUB_NAME")
             if club_name:

@@ -6,8 +6,11 @@ Schedule モジュール（仕様 11.2）。
 Bot 再起動後も on_raw_reaction_add/remove で処理可能。
 
 マルチテナント版: 全データを interaction.guild.id（または payload.guild_id）
-でスコープする。services/schedule_service.py には変更を加えないため、
-Embed 生成には guild 固定プロキシ repo.for_guild(guild_id) を渡す。
+でスコープする。Embed 生成には guild 固定プロキシ repo.for_guild(guild_id)
+を渡す（services/schedule_service.py の Embed 生成側は guild_id を
+受け取らないまま。ADR 0009 の完了条件2は未実施）。未回答者の母集団を
+決める select_unanswered_targets は、ギルドも DB も触らない純関数として
+同じモジュールに置いてある。
 """
 
 from __future__ import annotations
@@ -17,6 +20,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import config
+from repositories.member_repository import MemberRepository
 from repositories.schedule_repository import ScheduleRepository
 from repositories.settings_repository import SettingsRepository
 from services import schedule_service as svc
@@ -40,7 +44,7 @@ from utils.parser import (
     parse_deadline,
     to_iso,
 )
-from utils.permissions import Level, ensure_guild, is_admin, require
+from utils.permissions import Level, ensure_guild, has_level, is_admin, require
 from utils.views import ConfirmView
 
 log = get_logger("schedule")
@@ -80,12 +84,14 @@ def filter_emoji_choices(emojis, current: str) -> list[app_commands.Choice[str]]
 
 
 def schedule_choices(
-    rows: list[dict], current: str, limit: int = 25
+    rows: list[dict], current: str, limit: int = 25, prefix: str | None = None
 ) -> list[tuple[str, str]]:
     """オートコンプリート用の (表示名, schedule_id) 一覧を返す。
 
     表示名は「イベント名（〜締切）」。ID を手で写させない（G2-2）。
     締切済みの行には [終了] を付け、開催中と見分けられるようにする。
+    prefix を渡すとそれを優先する（論理削除は必ず closed_flag が立つので、
+    /schedule restore の候補が全部 [終了] になって手がかりが消えるため）。
     current による絞り込みはイベント名・ID の部分一致。
     """
     needle = (current or "").strip().lower()
@@ -96,14 +102,38 @@ def schedule_choices(
             deadline = fmt_jp(from_iso(str(row["deadline"])))
         except (ValueError, KeyError):
             deadline = "?"
-        prefix = "[終了] " if row.get("closed_flag") else ""
-        label = f"{prefix}{title}（〜{deadline}）"
+        mark = prefix if prefix is not None else ("[終了] " if row.get("closed_flag") else "")
+        label = f"{mark}{title}（〜{deadline}）"
         if needle and needle not in label.lower() and needle not in row["schedule_id"].lower():
             continue
         out.append((label[:100], row["schedule_id"]))
         if len(out) >= limit:
             break
     return out
+
+
+def schedule_list_value(row: dict) -> str:
+    """一覧 Embed の1件分の本文（締切＋確定日）。
+
+    確定日は `add_field` を増やさず**既存の value へ追記**する
+    （field を増やすと MAX_EMBED_FIELDS の打ち切り閾値が実質半分になる）。
+    日時は候補の label（利用者の生入力。年なし・時刻なしもありうる）ではなく
+    正規化済みの start_at を使い、締切と同じ表記に揃える。
+    """
+    try:
+        lines = [f"締切: {fmt_jp(from_iso(row['deadline']))}"]
+    except (TypeError, ValueError):
+        lines = ["締切: ?"]
+    start_at = row.get("confirmed_start_at")
+    if start_at:
+        try:
+            lines.append(f"**確定: {fmt_jp(from_iso(str(start_at)))}**")
+        except (TypeError, ValueError):
+            # 1件の壊れた値で一覧全体を落とさない
+            log.warning(
+                "確定日時を解釈できません (schedule=%s): %r", row.get("schedule_id"), start_at
+            )
+    return "\n".join(lines)
 
 
 def resolve_emoji_input(guild: discord.Guild, raw: str) -> discord.Emoji | None:
@@ -137,7 +167,7 @@ class Schedule(commands.Cog):
         deadline="締切日時（例: 2026-07-02 または 2026-07-02 23:59）",
         description="詳細（任意）",
         place="場所（任意）",
-        target_role="対象ロール（任意）",
+        target_role="対象ロール（任意。未指定なら名簿の現役メンバーが催促の対象になります）",
         channel="投稿先チャンネル（任意）",
     )
     @require(Level.L2)
@@ -249,6 +279,43 @@ class Schedule(commands.Cog):
             ephemeral=True,
         )
 
+    async def _find_schedule(
+        self, interaction: discord.Interaction, guild_id: int, schedule_id: str
+    ) -> dict | None:
+        """予定を引き、見つからなければ理由つきで返信して None を返す。
+
+        削除済みはオートコンプリートに出ないので、ID を直に打った人だけが
+        ここへ来る。「見つかりません」で終わらせず、戻し方を案内する。
+        """
+        schedule = await self.repo.get_schedule(guild_id, schedule_id)
+        if schedule:
+            return schedule
+        deleted = await self.repo.get_schedule(guild_id, schedule_id, include_deleted=True)
+        if deleted:
+            # /schedule restore は L3。ここへ来るのは L1〜L3 の5コマンドなので、
+            # 実行できない人に「これを打て」と案内しない
+            gconf = await config.for_guild(guild_id)
+            can_restore = has_level(interaction.user, gconf, Level.L3)
+            situation = (
+                f"**{deleted['title']}**（ID: `{schedule_id}`）は削除済みです。"
+                "票データは残っています。"
+            )
+            if not can_restore:
+                situation += "戻すには幹部に `/schedule restore` を依頼してください。"
+            await interaction.followup.send(
+                embed=empty_state_embed(
+                    "この日程調整は削除されています",
+                    situation,
+                    "/schedule restore" if can_restore else "/schedule list-closed",
+                ),
+                ephemeral=True,
+            )
+            return None
+        await interaction.followup.send(
+            embed=error_embed("指定 ID の投票が見つかりません。"), ephemeral=True
+        )
+        return None
+
     # ---------- schedule_id のオートコンプリート ----------
     async def _schedule_ac_open(
         self, interaction: discord.Interaction, current: str
@@ -268,10 +335,52 @@ class Schedule(commands.Cog):
             for label, value in schedule_choices(rows, current)
         ]
 
+    async def _option_ac(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """確定する候補の一覧（先に選ばれた schedule_id に属するものだけ）。"""
+        if interaction.guild is None:
+            return []
+        schedule_id = getattr(interaction.namespace, "schedule_id", None)
+        if not schedule_id:
+            return []
+        try:
+            options = await self.repo.list_options(interaction.guild.id, str(schedule_id))
+        except Exception:  # noqa: BLE001  (補完は失敗しても致命的でない)
+            return []
+        needle = (current or "").strip().lower()
+        out: list[app_commands.Choice[str]] = []
+        for opt in options:
+            try:
+                label = fmt_jp(from_iso(str(opt["start_at"])))
+            except (TypeError, ValueError, KeyError):
+                label = str(opt.get("label") or opt["option_id"])
+            if needle and needle not in label.lower():
+                continue
+            out.append(app_commands.Choice(name=label[:100], value=str(opt["option_id"])))
+            if len(out) >= 25:
+                break
+        return out
+
+    async def _schedule_ac_deleted(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """削除済みの投票のみ（restore 用）。"""
+        if interaction.guild is None:
+            return []
+        try:
+            rows = await self.repo.list_deleted_schedules(interaction.guild.id)
+        except Exception:  # noqa: BLE001
+            return []
+        return [
+            app_commands.Choice(name=label, value=value)
+            for label, value in schedule_choices(rows, current, prefix="[削除済み] ")
+        ]
+
     async def _schedule_ac_all(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        """締切済みも含む全投票（status / delete 用）。"""
+        """締切済みも含む全投票（status / delete 用）。削除済みは含まない。"""
         if interaction.guild is None:
             return []
         try:
@@ -417,7 +526,7 @@ class Schedule(commands.Cog):
         for s in schedules[:MAX_EMBED_FIELDS]:
             embed.add_field(
                 name=f"{s['title']}（`{s['schedule_id']}`）",
-                value=f"締切: {fmt_jp(from_iso(s['deadline']))}",
+                value=schedule_list_value(s),
                 inline=False,
             )
         add_truncation_note(embed, len(schedules), MAX_EMBED_FIELDS, "締切が近い順に表示しています")
@@ -432,11 +541,8 @@ class Schedule(commands.Cog):
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
             return
-        schedule = await self.repo.get_schedule(guild_id, schedule_id)
-        if not schedule:
-            await interaction.followup.send(
-                embed=error_embed("指定 ID の投票が見つかりません。"), ephemeral=True
-            )
+        schedule = await self._find_schedule(interaction, guild_id, schedule_id)
+        if schedule is None:
             return
         scoped_repo = self.repo.for_guild(guild_id)
         options = await self.repo.list_options(guild_id, schedule_id)
@@ -464,7 +570,7 @@ class Schedule(commands.Cog):
         for s in schedules[:MAX_EMBED_FIELDS]:
             embed.add_field(
                 name=f"{s['title']}（`{s['schedule_id']}`）",
-                value=f"締切: {fmt_jp(from_iso(s['deadline']))}",
+                value=schedule_list_value(s),
                 inline=False,
             )
         add_truncation_note(embed, len(schedules), MAX_EMBED_FIELDS, "新しい順に表示しています")
@@ -479,11 +585,8 @@ class Schedule(commands.Cog):
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
             return
-        schedule = await self.repo.get_schedule(guild_id, schedule_id)
-        if not schedule:
-            await interaction.followup.send(
-                embed=error_embed("指定 ID の投票が見つかりません。"), ephemeral=True
-            )
+        schedule = await self._find_schedule(interaction, guild_id, schedule_id)
+        if schedule is None:
             return
         await self.finalize_schedule(schedule)
         await interaction.followup.send(
@@ -502,20 +605,30 @@ class Schedule(commands.Cog):
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
             return
-        schedule = await self.repo.get_schedule(guild_id, schedule_id)
-        if not schedule:
-            await interaction.followup.send(
-                embed=error_embed("指定 ID の投票が見つかりません。"), ephemeral=True
-            )
+        schedule = await self._find_schedule(interaction, guild_id, schedule_id)
+        if schedule is None:
             return
         count = await self.notify_unanswered(schedule)
         if count is None:
             # 従来はここで「対象: 0 名」の緑 Embed が出ていた（嘘の成功）
             await interaction.followup.send(
                 embed=error_embed(
-                    "対象ロールが設定されていないため、未回答者を特定できません。\n"
-                    "`/schedule create` の `target_role` で対象ロールを指定した投票のみ"
-                    "再通知できます。"
+                    "未回答者を特定できません。\n"
+                    "`/schedule create` の `target_role` で対象ロールを指定するか、"
+                    "`/member register` で名簿を登録してください。\n"
+                    "対象ロールに誰も付いていない場合もこのエラーになります。"
+                    "ロールの付与状況も確認してください。"
+                ),
+                ephemeral=True,
+            )
+            return
+        if count == 0:
+            # 1通も送っていないので「再通知しました」とは言わない
+            # （G2-3 が潰した嘘の成功と同じ形になる）
+            await interaction.followup.send(
+                embed=info_embed(
+                    "未回答者は居ませんでした",
+                    "対象者は全員回答済みです。DM は送っていません。",
                 ),
                 ephemeral=True,
             )
@@ -531,7 +644,8 @@ class Schedule(commands.Cog):
 
     # ---------- delete ----------
     @group.command(
-        name="delete", description="日程調整を削除します（Discordメッセージ・シートも削除）。"
+        name="delete",
+        description="日程調整を削除します（投票メッセージも削除。票データは残ります）。",
     )
     @app_commands.describe(schedule_id="投票 ID")
     @require(Level.L3)
@@ -540,41 +654,64 @@ class Schedule(commands.Cog):
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
             return
-        schedule = await self.repo.get_schedule(guild_id, schedule_id)
-        if not schedule:
-            await interaction.followup.send(
-                embed=error_embed("指定 ID の投票が見つかりません。"), ephemeral=True
-            )
+        schedule = await self._find_schedule(interaction, guild_id, schedule_id)
+        if schedule is None:
             return
 
-        # 消えるものを**消す前に**見せる。票は CASCADE で一緒に消え、
-        # Discord 上の投票メッセージも戻せない
+        # 何が起きるかを**やる前に**見せる。票は残るが、Discord 上の
+        # 投票メッセージは戻せない
         options = await self.repo.list_options(guild_id, schedule_id)
         voters = await self.repo.list_voters_for_schedule(guild_id, schedule_id)
         body = (
             f"**{schedule['title']}**（ID: `{schedule_id}`）を削除します。\n"
             f"候補: **{len(options)}** 件 / 回答した人: **{len(voters)}** 名\n\n"
-            "投票メッセージを削除し、票データも一緒に消えます。**元に戻せません。**"
+            "投票メッセージを削除し、**この投票は締め切られます**。\n"
+            "票データは残るので `/schedule restore` で戻せます"
+            "（**投票メッセージは戻りません**）。"
         )
 
         async def _do_delete(confirm_interaction: discord.Interaction) -> None:
             # Discord上の候補メッセージを削除
             channel = self.bot.get_channel(int(schedule["channel_id"]))
             deleted_msgs = 0
+            failed_msgs = 0
             for opt in options:
-                if not opt.get("message_id") or not channel:
+                if not opt.get("message_id"):
+                    continue
+                if not channel:
+                    failed_msgs += 1
                     continue
                 try:
                     msg = await channel.fetch_message(int(opt["message_id"]))
                     await msg.delete()
                     deleted_msgs += 1
-                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                except discord.NotFound:
+                    # 既に消えている。残らないので失敗として数えない
                     pass
+                except (discord.Forbidden, discord.HTTPException) as e:
+                    log.warning(
+                        "投票メッセージの削除に失敗 (guild=%s, schedule=%s): %s",
+                        guild_id,
+                        schedule_id,
+                        e,
+                    )
+                    failed_msgs += 1
 
-            # DBから削除（外部キーCASCADEでoptions/votesも削除される）
-            await self.repo.delete_schedule(guild_id, schedule_id)
+            # DB は論理削除（票データは残す）
+            await self.repo.soft_delete_schedule(guild_id, schedule_id)
 
-            detail = f"ID: `{schedule_id}`\nDiscordメッセージ削除: {deleted_msgs} 件"
+            detail = (
+                f"ID: `{schedule_id}`\n投票メッセージ削除: {deleted_msgs} 件\n"
+                f"票データ（{len(voters)} 名分）は残しました。"
+                "`/schedule restore` で戻せます。"
+            )
+            if failed_msgs:
+                # 残ったメッセージのリアクションは無反応になる。黙らない
+                detail += (
+                    f"\n\n⚠️ **{failed_msgs} 件のメッセージを削除できませんでした**"
+                    "（権限不足・チャンネル不明など）。チャンネルに残ったままなので、"
+                    "手で削除してください。押しても反応しません。"
+                )
             await confirm_interaction.followup.send(
                 embed=success_embed(
                     "削除しました", detail, executor=confirm_interaction.user.display_name
@@ -592,6 +729,198 @@ class Schedule(commands.Cog):
             embed=view.preview_embed, view=view, ephemeral=True
         )
 
+    # ---------- confirm ----------
+    @group.command(name="confirm", description="投票の結果として確定した日程を登録します。")
+    @app_commands.describe(schedule_id="投票 ID", option_id="確定した候補")
+    @require(Level.L2)
+    async def confirm(self, interaction: discord.Interaction, schedule_id: str, option_id: str):
+        await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        schedule = await self._find_schedule(interaction, guild_id, schedule_id)
+        if schedule is None:
+            return
+
+        # 対象外の候補は SQL 側で弾かれる（set_confirmed_option の EXISTS）
+        if not await self.repo.set_confirmed_option(guild_id, schedule_id, option_id):
+            await interaction.followup.send(
+                embed=error_embed(
+                    "その候補はこの投票のものではありません。\n"
+                    "候補は `option_id` のリストから選んでください。"
+                ),
+                ephemeral=True,
+            )
+            return
+
+        updated = await self.repo.get_schedule(guild_id, schedule_id)
+        option = next(
+            (
+                o
+                for o in await self.repo.list_options(guild_id, schedule_id)
+                if str(o["option_id"]) == option_id
+            ),
+            None,
+        )
+        when = self._fmt_option(option)
+        announced = await self._announce_confirmation(
+            guild_id,
+            updated or schedule,
+            f"【日程が決まりました】{schedule['title']}",
+            f"日時: **{when}**" + (f"\n場所: {schedule['place']}" if schedule.get("place") else ""),
+        )
+
+        detail = f"**{schedule['title']}**（ID: `{schedule_id}`）\n確定: {when}"
+        if not announced:
+            detail += (
+                "\n\n⚠️ **告知は送れませんでした。** 投稿チャンネルが見つからないか、"
+                "Bot に送信権限がありません。"
+            )
+        if not schedule.get("closed_flag"):
+            # 先に決まることはある。勝手に締め切らない（明示操作でだけ変える）
+            detail += (
+                "\n\nこの予定はまだ投票受付中です。"
+                "締め切るには `/schedule close` を実行してください。"
+            )
+        await interaction.followup.send(
+            embed=success_embed(
+                "確定日程を登録しました", detail, executor=interaction.user.display_name
+            ),
+            ephemeral=True,
+        )
+
+    @group.command(name="unconfirm", description="登録した確定日程を取り消します。")
+    @app_commands.describe(schedule_id="投票 ID")
+    @require(Level.L2)
+    async def unconfirm(self, interaction: discord.Interaction, schedule_id: str):
+        await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        schedule = await self._find_schedule(interaction, guild_id, schedule_id)
+        if schedule is None:
+            return
+        if not await self.repo.clear_confirmed_option(guild_id, schedule_id):
+            await interaction.followup.send(
+                embed=info_embed(
+                    "確定していません",
+                    f"**{schedule['title']}**（ID: `{schedule_id}`）に確定日程は登録されていません。",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        # 既に日付を告知しているので、黙って消すと部員側に誤情報が残る
+        announced = await self._announce_confirmation(
+            guild_id,
+            schedule,
+            f"【日程の確定を取り消しました】{schedule['title']}",
+            "日程は未定に戻りました。決まり次第あらためてお知らせします。",
+        )
+        detail = f"**{schedule['title']}**（ID: `{schedule_id}`）"
+        if not announced:
+            detail += (
+                "\n\n⚠️ **取り消しの告知は送れませんでした。** 部員には確定日程が"
+                "告知されたままなので、チャンネルで直接お知らせしてください。"
+            )
+        await interaction.followup.send(
+            embed=success_embed(
+                "確定日程を取り消しました", detail, executor=interaction.user.display_name
+            ),
+            ephemeral=True,
+        )
+
+    @staticmethod
+    def _fmt_option(option: dict | None) -> str:
+        """候補の表示（正規化済みの start_at を優先）。"""
+        if not option:
+            return "?"
+        try:
+            return fmt_jp(from_iso(str(option["start_at"])))
+        except (TypeError, ValueError, KeyError):
+            return str(option.get("label") or "?")
+
+    async def _announce_confirmation(
+        self, guild_id: int, schedule: dict, heading: str, body: str
+    ) -> bool:
+        """投稿チャンネルへ告知する（同一ギルド内に限定して解決する）。
+
+        **本文は description に渡す。** Embed の title は 100 文字で切られる
+        （`utils/embeds._base`）ため、title に本文を入れるとイベント名が長い
+        ギルドで日時や場所が黙って消える。
+
+        戻り値は送れたかどうか。呼び出し側は失敗を実行者に伝える
+        （成功と表示したまま部員に何も届かない状態を作らない）。
+        """
+        guild = self.bot.get_guild(guild_id)
+        if guild is None:
+            return False
+        try:
+            # スレッド内で /schedule create した予定は channel_id が
+            # スレッド ID になる。get_channel はスレッドを解決しない
+            channel = guild.get_channel_or_thread(int(schedule["channel_id"]))
+        except (TypeError, ValueError):
+            channel = None
+        if channel is None or not hasattr(channel, "send"):
+            log.info("確定の告知先が見つかりません (guild=%s)", guild_id)
+            return False
+        content = None
+        if schedule.get("target_role_id"):
+            try:
+                role = guild.get_role(int(schedule["target_role_id"]))
+            except (TypeError, ValueError):
+                role = None
+            if role:
+                content = role.mention
+        try:
+            await channel.send(content=content, embed=schedule_embed(heading, body))
+        except (discord.Forbidden, discord.HTTPException) as e:
+            log.warning("確定の告知に失敗 (guild=%s): %s", guild_id, e)
+            return False
+        return True
+
+    # ---------- restore ----------
+    @group.command(
+        name="restore", description="削除した日程調整を戻します（票データも一緒に戻ります）。"
+    )
+    @app_commands.describe(schedule_id="削除した投票 ID")
+    @require(Level.L3)
+    async def restore(self, interaction: discord.Interaction, schedule_id: str):
+        await interaction.response.defer(ephemeral=True)
+        guild_id = await ensure_guild(interaction)
+        if guild_id is None:
+            return
+        schedule = await self.repo.get_schedule(guild_id, schedule_id, include_deleted=True)
+        if not schedule:
+            await interaction.followup.send(
+                embed=error_embed("指定 ID の投票が見つかりません。"), ephemeral=True
+            )
+            return
+        if not await self.repo.restore_schedule(guild_id, schedule_id):
+            await interaction.followup.send(
+                embed=info_embed(
+                    "削除されていません",
+                    f"**{schedule['title']}**（ID: `{schedule_id}`）は削除されていません。",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        voters = await self.repo.list_voters_for_schedule(guild_id, schedule_id)
+        await interaction.followup.send(
+            embed=success_embed(
+                "日程調整を戻しました",
+                f"**{schedule['title']}**（ID: `{schedule_id}`）\n"
+                f"回答した人: **{len(voters)}** 名\n\n"
+                "**締切済みとして戻ります。投票は再開しません**"
+                "（投票メッセージは戻らないため、**自動の**催促も送りません）。\n"
+                "結果は `/schedule status` で読めます。"
+                "再投票が必要なら `/schedule create` で作り直してください。",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
+
     @group.command(name="edit-deadline", description="開催中の日程調整の締切を変更します。")
     @app_commands.describe(
         schedule_id="投票 ID", deadline="新しい締切（例: 2026-07-20 または 2026-07-20 23:59）"
@@ -604,11 +933,8 @@ class Schedule(commands.Cog):
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
             return
-        schedule = await self.repo.get_schedule(guild_id, schedule_id)
-        if not schedule:
-            await interaction.followup.send(
-                embed=error_embed("指定 ID の投票が見つかりません。"), ephemeral=True
-            )
+        schedule = await self._find_schedule(interaction, guild_id, schedule_id)
+        if schedule is None:
             return
         if schedule["closed_flag"]:
             await interaction.followup.send(
@@ -780,24 +1106,94 @@ class Schedule(commands.Cog):
     # ====================================================================
     # 締切・通知ヘルパー（Reminders から呼ばれる）
     # ====================================================================
+    async def _roster_ids(self, guild_id: int) -> tuple[set[str], set[str]]:
+        """名簿の (現役, 退部・休止と分かっている人) の ID 集合を返す。
+
+        既存クエリ2回の差で作る（新しいクエリを足さない）。現役の条件は
+        ダッシュボード側（ADR 0025）と同じ active_flag=1 かつ status='active'。
+        """
+        repo = MemberRepository(self.bot.db)
+        active = {str(m["user_id"]) for m in await repo.list_members(guild_id)}
+        everyone = {
+            str(m["user_id"])
+            for m in await repo.list_members(guild_id, active_only=False, include_alumni=True)
+        }
+        return active, everyone - active
+
+    @staticmethod
+    def _member_of(guild: discord.Guild, user_id: str):
+        """名簿の user_id（TEXT 列）を Member へ解決する。数字でなければ None。"""
+        try:
+            return guild.get_member(int(user_id))
+        except (TypeError, ValueError):
+            log.warning("数字でない user_id を名簿で見つけました (guild=%s): %r", guild.id, user_id)
+            return None
+
     async def notify_unanswered(self, schedule: dict) -> int | None:
         """未回答者へ DM 通知。DM 不可ならチャンネルでメンション（仕様 11.2.5）。
 
-        **None は「対象を特定できない」**（対象ロール未設定・ロール削除済み・
-        ギルド不可視）。0 は「対象は特定でき、未回答が0名」。従来はどちらも
-        0 を返していたため、呼び出し側が緑の成功 Embed で「対象: 0 名」と
-        表示し、定期リマインドは送っていないのに送信済みフラグを立てていた。
+        **None は「対象を特定できない」**（ギルド不可視・対象ロール削除済み・
+        対象ロールの保持者が1人も見えない・対象ロールが無く名簿も空・
+        候補は居るが1人も解決できない）。
+        0 は「対象は特定でき、未回答が0名」。従来はどちらも 0 を返していたため、
+        呼び出し側が緑の成功 Embed で「対象: 0 名」と表示していた。
+
+        母集団は select_unanswered_targets が決める（G3-2 / ADR 0025 の更新）。
+        対象ロールがあるときはロール基準から名簿で退部と分かっている人を除き、
+        無いときは名簿の現役を対象にする。
         """
         guild_id = schedule["guild_id"]
         guild = self.bot.get_guild(guild_id)
-        if not guild or not schedule.get("target_role_id"):
-            return None
-        role = guild.get_role(int(schedule["target_role_id"]))
-        if not role:
+        if not guild:
             return None
 
+        role_member_ids: set[str] | None = None
+        if schedule.get("target_role_id"):
+            role = guild.get_role(int(schedule["target_role_id"]))
+            if not role:
+                return None
+            role_member_ids = {str(m.id) for m in role.members if not m.bot}
+            if not role_member_ids:
+                # ロールは生きているのに保持者が見えない。誰も付けていない
+                # ロール（正常）とメンバーキャッシュの欠落を区別できないので、
+                # 0 =「全員回答済み」とは主張しない。**名簿へフォールバック
+                # しない**（班限定の予定で名簿全員へ飛ぶほうが被害が大きい）
+                log.info(
+                    "対象ロールにメンバーが居ません (guild=%s, schedule=%s, role=%s)",
+                    guild_id,
+                    schedule["schedule_id"],
+                    schedule["target_role_id"],
+                )
+                return None
+
+        roster_active, roster_retired = await self._roster_ids(guild_id)
         answered = await self.repo.list_voters_for_schedule(guild_id, schedule["schedule_id"])
-        targets = [m for m in role.members if not m.bot and str(m.id) not in answered]
+        target_ids = svc.select_unanswered_targets(
+            role_member_ids=role_member_ids,
+            roster_active_ids=roster_active,
+            roster_retired_ids=roster_retired,
+            answered_ids=answered,
+        )
+        if target_ids is None:
+            return None
+
+        targets = []
+        for user_id in sorted(target_ids):
+            member = self._member_of(guild, user_id)
+            if member is not None and not member.bot:
+                targets.append(member)
+        if target_ids and not targets:
+            # 候補は居るのに1人も解決できなかった。0 を返すと
+            # 「全員回答済み」という嘘になり、送信済みにもされてしまう
+            log.warning(
+                "未回答者を1人も解決できませんでした"
+                " (guild=%s, schedule=%s, 候補=%d名, 名簿の現役=%d名)",
+                guild_id,
+                schedule["schedule_id"],
+                len(target_ids),
+                len(roster_active),
+            )
+            return None
 
         deadline = fmt_jp(from_iso(schedule["deadline"]))
         text = (
@@ -834,6 +1230,10 @@ Schedule.remind.autocomplete("schedule_id")(Schedule._schedule_ac_open)
 Schedule.edit_deadline.autocomplete("schedule_id")(Schedule._schedule_ac_open)
 Schedule.status.autocomplete("schedule_id")(Schedule._schedule_ac_all)
 Schedule.delete.autocomplete("schedule_id")(Schedule._schedule_ac_all)
+Schedule.restore.autocomplete("schedule_id")(Schedule._schedule_ac_deleted)
+Schedule.confirm.autocomplete("schedule_id")(Schedule._schedule_ac_all)
+Schedule.confirm.autocomplete("option_id")(Schedule._option_ac)
+Schedule.unconfirm.autocomplete("schedule_id")(Schedule._schedule_ac_all)
 
 
 async def setup(bot: commands.Bot):

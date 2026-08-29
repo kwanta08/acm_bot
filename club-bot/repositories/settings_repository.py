@@ -34,6 +34,23 @@ class SettingsRepository(BaseRepository):
         except ValueError:
             return default
 
+    async def get_bool(self, guild_id: int, key: str, default: bool = False) -> bool:
+        """真偽値の設定を読む。
+
+        保存は "1" / "0" に固定する（set() は str(value) を書くので、
+        Python の True をそのまま渡すと "True" が入る）。読む側は
+        大文字小文字を無視し、**解釈できない値は default 扱いにして
+        例外を投げない**（for_guild() で例外が出るとそのギルドの全コマンドが
+        死ぬ。gotcha `one-guild-loses-all-features`）。
+        """
+        raw = (await self.get(guild_id, key)) or ""
+        value = raw.strip().lower()
+        if value in ("1", "true", "yes", "on"):
+            return True
+        if value in ("0", "false", "no", "off"):
+            return False
+        return default
+
     async def get_int_list(self, guild_id: int, key: str) -> list[int]:
         """設定値をカンマ区切りの整数リストで取得する"""
         value = await self.get(guild_id, key, "")

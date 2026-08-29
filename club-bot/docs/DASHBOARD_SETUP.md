@@ -431,6 +431,9 @@ venv/bin/uvicorn dashboard.main:app --reload --port 8000
 # コードを更新したあと
 cd ~/club-bot/club-bot
 ~/club-bot/club-bot/venv/bin/pip install -r dashboard/requirements.txt   # 依存が増えたとき
+# restart の前に必ずバックアップを取る（起動時に bot・ダッシュボードとも
+# スキーマ マイグレーションが自動適用され、down は用意していない）
+pg_dump -Fc "$DATABASE_URL" -f "backup-$(date +%Y%m%d-%H%M).dump"
 sudo systemctl restart club-bot-dashboard
 
 # 一時停止 / 再開

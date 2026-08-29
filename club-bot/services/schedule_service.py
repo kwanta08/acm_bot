@@ -40,6 +40,47 @@ def parse_options(options_str: str) -> list[str]:
     return [p.strip() for p in options_str.split(";") if p.strip()]
 
 
+def select_unanswered_targets(
+    *,
+    role_member_ids: set[str] | None,
+    roster_active_ids: set[str],
+    roster_retired_ids: set[str],
+    answered_ids: set[str],
+) -> set[str] | None:
+    """催促の対象になるユーザー ID を返す（純関数）。
+
+    - ``role_member_ids`` は **「対象ロール指定なし」を None** で表す。
+      ロールを解決できなかった場合（ギルド不可視・ロール削除済み）と、
+      **ロールは解決できたが保持者が0名の場合**は、呼び出し側がこの関数を
+      呼ぶ前に「特定できない」を返すこと。空集合を渡すとこの関数は
+      空集合（＝未回答0名）を返すので、偽の 0 になる
+    - 戻り値 ``None`` は「対象を特定できない」。空集合は「対象は特定でき、
+      未回答が0名」。**0 と None を混ぜない**（0 は「全員回答済み」という
+      主張になる。ADR 0021 / 0022）
+
+    対象ロールがあるときは、ロール保持者から **名簿で退部・休止と分かって
+    いる人だけ** を差し引く。名簿に無い人は「退部か未登録か区別できない」
+    ので残す。積集合にすると、``/member register`` がまだ進んでいない
+    ギルドで今日届いている催促が止まる（ADR 0024）。
+
+    ID は TEXT 列（名簿）と int（discord.Member.id）が混ざるため、
+    ここで文字列へ正規化する。
+    """
+
+    def _norm(ids) -> set[str]:
+        return {str(i) for i in ids}
+
+    answered = _norm(answered_ids)
+    if role_member_ids is None:
+        candidates = _norm(roster_active_ids)
+        if not candidates:
+            # 対象ロールも名簿も無い。誰が回答すべきかを知る手段がない
+            return None
+    else:
+        candidates = _norm(role_member_ids) - _norm(roster_retired_ids)
+    return candidates - answered
+
+
 def get_schedule_emojis(gconf, guild: discord.Guild | None = None) -> dict[str, Any]:
     """スケジュール用絵文字を返す（ステータス → 絵文字）。
 
@@ -199,6 +240,31 @@ async def build_summary_embed(
             best_ok = len(ok_users)
             best_label = opt["label"]
 
+    # 「結局いつに決まったのか」を残す（G3-4）。
+    #
+    # **field ではなく description に足す。** 候補数に上限が無いので、
+    # field を1つ増やすと上限25に当たる閾値が下がり、候補の多い予定で
+    # 集計サマリーごと投稿されなくなる（finalize_schedule は
+    # HTTPException を握り潰すため無言で消える）。
+    #
+    # このサマリーは公開チャンネルへ出るので、L1 の部員に実行できない
+    # コマンドを命令しない（主語を書く）。
+    lines: list[str] = []
     if best_label:
-        embed.description = f"最多参加候補: **{best_label}**（{best_ok}名）"
+        lines.append(f"最多参加候補: **{best_label}**（{best_ok}名）")
+
+    confirmed_id = schedule.get("confirmed_option_id")
+    if confirmed_id:
+        confirmed = next((o for o in options if str(o["option_id"]) == str(confirmed_id)), None)
+        if confirmed is not None:
+            try:
+                when = fmt_jp(from_iso(str(confirmed["start_at"])))
+            except (TypeError, ValueError, KeyError):
+                when = str(confirmed.get("label") or "?")
+            lines.append(f"確定した日程: **{when}**")
+    elif options:
+        lines.append("班長以上が `/schedule confirm` で確定した日程を登録します。")
+
+    if lines:
+        embed.description = "\n".join(lines)
     return embed
