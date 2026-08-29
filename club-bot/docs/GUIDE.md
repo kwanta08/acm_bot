@@ -421,11 +421,14 @@ ONにしない限り参加者には何も送りません。
 | 5分ごと | 締切を過ぎた日程調整を自動で締め切り、結果を投稿 |
 | 前日 20:00 | `/schedule confirm` で確定した日程の前日通知（「明日 …」） |
 | 当日 08:30 | 同じく当日通知（「本日 2026/10/01 18:00 **合宿**（部室）」） |
-| 毎朝 08:00 | 今日〜7日以内が期限の未完了タスク |
-| 毎朝 08:00 | 「今日やること」ラベルの付いたタスク |
+| 毎朝 08:30 | 今日〜7日以内が期限の未完了タスク |
+| 毎朝 08:30 | 「今日やること」ラベルの付いたタスク |
+| 毎朝 08:30 | Todoist のセクション別タスク（期限7日以内・超過）を班チャンネル（未設定ならタスク通知チャンネル）へ（連携している場合） |
 | 毎朝 08:30 | Todoist 連携プロジェクトの期限タスク（連携している場合） |
+| 毎週月曜 08:30 | **遅れている**マイルストーンのお知らせ（遅れが無い週は送りません） |
 | 20分ごと | 機体進捗の同期・再集計（Todoist と桁巻きの反映） |
 | 毎日 21:00 | 期限切れの未完了タスク |
+| 毎日 04:00 | `/data delete` を申告したサーバーのデータ削除を実行し、結果を `#bot-log` へ（退出済みサーバーは通知先が無いため送られません） |
 
 送信先は `/setup` や `/set_channel` で設定したチャンネルです。
 
@@ -485,7 +488,7 @@ ONにしない限り参加者には何も送りません。
 - 現在の年度を終了し、新しい年度を開始する
 - 選んだ人を **卒業（alumni）** に切り替える
 - **班長フラグを全員リセット**する（新体制で付け直すため）
-- 切り替え時点の全データを **年度スナップショット**（ZIP）として添付する
+- 切り替え時点の主要7テーブルを **年度スナップショット**（ZIP）として添付する
 
 **卒業者のデータは削除されません。** 過去の作業記録に残る担当者名を
 引けるようにするためです。卒業した人は `/member support` などの
@@ -524,7 +527,7 @@ ONにしない限り参加者には何も送りません。
 **他のサークルとの関係**: すべてのデータはサーバー単位で完全に分離されています。
 他大学のサークルからあなたのデータが見えることはありません。
 
-**持ち出し**: `/data export` でこのサーバーの全データを ZIP（CSV 群）として
+**持ち出し**: `/data export` でこのサーバーの主要7テーブルを ZIP（CSV 群）として
 受け取れます（管理者のみ）。サーバーIDや Todoist トークンは含まれません。
 
 **利用をやめるとき**: 運営者への連絡は不要です。Bot をサーバーから
@@ -541,30 +544,44 @@ ONにしない限り参加者には何も送りません。
 
 ## 付録: コマンド早見表
 
+**実装されているコマンドをすべて載せています**（`tests/test_docs_commands.py` が
+この表と実装の一致を検査します）。「まず何を覚えるか」は 3 章の役割別の一覧を見てください。
+
 | 分類 | コマンド | 権限 |
 |---|---|---|
-| 確認 | `/ping` `/health` | 全員 |
-| 日程調整 | `/schedule create` `/close` `/remind` `/delete` `/edit-deadline` | L2〜 |
-| | `/schedule list` `/status` `/list-closed` | 全員 |
-| | `/schedule emoji set` `/show` `/reset` | L4 |
-| タスク | `/task add` `/list` `/done` `/priority` `/overdue` `/team` | 全員 |
-| | `/task delete` `/assign` `/sections` `/push` | L2〜 |
-| | `/task link-section` `/unlink-section` | L3〜 |
-| | `/task sync` | L4 |
+| 確認 | `/ping` `/health` `/help` | 全員 |
+| | `/setup-status` | 全員 |
+| 日程調整 | `/schedule list` `/schedule status` `/schedule list-closed` | 全員 |
+| | `/schedule create` `/schedule close` `/schedule remind` `/schedule edit-deadline` | L2〜 |
+| | `/schedule confirm` `/schedule unconfirm` | L2〜 |
+| | `/schedule delete` `/schedule restore` | L3〜 |
+| | `/schedule emoji set` `/schedule emoji show` `/schedule emoji reset` | L4 |
+| タスク | `/task add` `/task list` `/task done` `/task priority` `/task overdue` `/task team` | 全員 |
 | | `/today task` `/today id` | 全員 |
-| 桁巻き | `/layer start` `/end` `/status` `/keta-list` | 全員 |
-| | `/layer keta-add` `/keta-remove` | L2〜 |
+| | `/task delete` `/task assign` `/task sections` `/task push` | L2〜 |
+| | `/task link-section` `/task unlink-section` `/task unlink-team-sections` | L3〜 |
+| | `/task sync` | L4 |
+| 桁巻き | `/layer start` `/layer end` `/layer status` `/layer keta-list` | 全員 |
+| | `/layer keta-add` `/layer keta-remove` | L2〜 |
 | 機体進捗 | `/progress view` | 全員 |
-| | `/progress add` `/edit` `/remove` `/spar-link` `/setup` | L2〜 |
+| | `/progress add` `/progress edit` `/progress remove` `/progress spar-link` `/progress setup` | L2〜 |
 | | `/progress sync` | L4 |
-| メンバー | `/member profile` `/skill add` `/skill remove` | 全員 |
-| | `/member register` `/assign-team` `/assign-sub-team` `/support` | L2〜 |
-| | `/member setup` `/set-leader` `/set-channel` | L3〜 |
+| 重量 | `/weight view` `/weight top` | 全員 |
+| | `/weight set` | L2〜 |
+| 大会・節目 | `/countdown` `/milestone list` | 全員 |
+| | `/milestone add` `/milestone remove` | L2〜 |
+| メンバー | `/member profile` `/member skill add` `/member skill remove` | 全員 |
+| | `/member register` `/member assign-team` `/member assign-sub-team` `/member support` | L2〜 |
+| | `/member setup` `/member set-leader` `/member set-channel` | L3〜 |
 | 班・技能 | `/team-add` `/team-remove` `/team-list` `/team-role` | L4 |
 | | `/skill-add` `/skill-remove` `/skill-list` | L4 |
-| レポート | `/report weekly` `/attendance-rate` `/export-tasks` | L2〜 |
+| レポート | `/report weekly` `/report attendance-rate` `/report export-tasks` | L2〜 |
 | | `/report audit` | L3〜 |
+| 年度替わり | `/season list` | 全員 |
+| | `/season new` `/season rollover` | L4 |
+| データ | `/data export` `/data delete` `/data delete-cancel` | L4 |
 | Todoist | `/todoist-setup` `/todoist-status` `/todoist-remove` | L4 |
-| 設定 | `/setup` `/settings_list` `/set_channel` `/set_role` `/set_common` | L4 |
+| 設定 | `/setup` `/settings_list` `/settings_get` `/settings_set` `/settings_delete` | L4 |
+| | `/set_channel` `/set_role` `/set_common` | L4 |
 
-全コマンドの詳細は [`OPERATION.md`](OPERATION.md) の 2 章にあります。
+各コマンドの引数と詳しい説明は [`OPERATION.md`](OPERATION.md) の 2 章にあります。
