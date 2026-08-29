@@ -126,35 +126,13 @@ def _c(
 # 参照を許可するテーブル（設計方針 2.2 の対象テーブル）
 # ---------------------------------------------------------------------
 TABLES: dict[str, TableSpec] = {
-    "tasks": TableSpec(
-        key="tasks",
-        label="タスク",
-        table="tasks",
-        pk="local_task_id",
-        pk_type="int",
-        description="Todoist 連携タスクとローカルタスク",
-        order_by="(due_date IS NULL), due_date, priority DESC",
-        columns=(
-            _c("local_task_id", "ID", "number", number_type="int"),
-            _c("title", "タイトル", "text", editable=True),
-            _c("assignee_id", "担当者", "user", editable=True),
-            _c("team_key", "班", "text", editable=True),
-            _c("due_date", "期限", "text", editable=True),
-            _c("priority", "優先度", "number", editable=True, number_type="int"),
-            _c("status", "状態", "text", editable=True),
-            _c("todoist_task_id", "TodoistタスクID"),
-            _c("created_by", "作成者", "user"),
-            _c("created_at", "作成日時", "datetime"),
-            _c("completed_at", "完了日時", "datetime"),
-        ),
-    ),
     "members": TableSpec(
         key="members",
         label="メンバー",
         table="members",
         pk="member_id",
         pk_type="int",
-        description="班所属・技能タグ",
+        description="班所属",
         order_by="display_name",
         columns=(
             _c("member_id", "ID", "number", number_type="int"),
@@ -167,7 +145,6 @@ TABLES: dict[str, TableSpec] = {
             # 編集可にすると L2 が任意の相手を L2 へ昇格させられる。
             # 変更は Discord の /member set-leader（L3 以上）から行う。
             _c("is_leader", "班長", "bool"),
-            _c("skills", "技能タグ", "text", editable=True),
             _c("notes", "メモ", "text", editable=True),
             _c("joined_at", "登録日時", "datetime"),
             _c("active_flag", "有効", "bool", editable=True),
@@ -359,22 +336,6 @@ TABLES: dict[str, TableSpec] = {
             _c("created_at", "登録日時", "datetime"),
         ),
     ),
-    "skill_tags": TableSpec(
-        key="skill_tags",
-        label="技能タグ",
-        table="skill_tags",
-        pk="skill_tag_id",
-        pk_type="int",
-        description="/skill-add で登録した技能タグ",
-        order_by="active_flag DESC, skill_name",
-        columns=(
-            _c("skill_tag_id", "ID", "number", number_type="int"),
-            _c("skill_name", "技能名"),
-            _c("active_flag", "有効", "bool"),
-            _c("created_by", "登録者", "user"),
-            _c("created_at", "登録日時", "datetime"),
-        ),
-    ),
     "progress_snapshots": TableSpec(
         key="progress_snapshots",
         label="進捗の履歴",
@@ -429,66 +390,6 @@ TABLES: dict[str, TableSpec] = {
             _c("reason", "用途"),
             _c("user_id", "記録者", "user"),
             _c("created_at", "日時", "datetime"),
-        ),
-    ),
-    "tools": TableSpec(
-        key="tools",
-        label="工具",
-        table="tools",
-        pk="tool_id",
-        pk_type="int",
-        description="/tool で貸出管理する工具・機材",
-        order_by="active_flag DESC, tool_name",
-        columns=(
-            _c("tool_id", "ID", "number", number_type="int"),
-            _c("tool_name", "工具名"),
-            _c("note", "メモ"),
-            _c("active_flag", "有効", "bool"),
-            _c("created_by", "登録者", "user"),
-            _c("created_at", "登録日時", "datetime"),
-        ),
-    ),
-    "tool_loans": TableSpec(
-        key="tool_loans",
-        label="工具の貸出",
-        table="tool_loans",
-        pk="loan_id",
-        pk_type="int",
-        description="/tool borrow・/tool return の履歴（returned_at が空なら貸出中）",
-        order_by="loan_id DESC",
-        columns=(
-            _c("loan_id", "ID", "number", number_type="int"),
-            _c("tool_id", "工具ID", "number", number_type="int"),
-            _c("user_id", "借用者", "user"),
-            _c("borrowed_at", "貸出日時", "datetime"),
-            _c("due_date", "返却予定日"),
-            _c("returned_at", "返却日時", "datetime"),
-            _c("note", "用途"),
-        ),
-    ),
-    "incidents": TableSpec(
-        key="incidents",
-        label="ヒヤリハット報告",
-        table="incidents",
-        pk="incident_id",
-        pk_type="int",
-        description="/incident report で集めた安全報告",
-        order_by="incident_id DESC",
-        # 安全報告は L3（/incident list と同じ）。全員に見せる前提の表ではない
-        min_level=3,
-        columns=(
-            _c("incident_id", "ID", "number", number_type="int"),
-            _c("occurred_at", "発生日時"),
-            _c("place", "場所"),
-            _c("description", "内容"),
-            _c("injury", "けが"),
-            _c("prevention", "再発防止案"),
-            _c("anonymous_flag", "匿名", "bool"),
-            # **reporter_id は列に含めない。** 匿名の約束を、表示側の if では
-            # なく列ホワイトリスト（ADR 0016）で守る。匿名報告では
-            # reporter_name が NULL なので、この表からは誰か分からない
-            _c("reporter_name", "報告者"),
-            _c("created_at", "登録日時", "datetime"),
         ),
     ),
     "settings": TableSpec(

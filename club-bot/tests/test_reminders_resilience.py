@@ -105,16 +105,16 @@ def test_daily_morning_isolates_each_job_and_guild():
 
         return _run
 
-    cog._notify_due_within_7days = job("due7", fail_on=G1)
     cog._notify_today_label = job("today", fail_on=G1)
-    cog.push_section_tasks = job("section")
+    cog.push_section_tasks = job("section", fail_on=G1)
+    cog._notify_low_stock = job("stock")
 
     run(cog.daily_morning())
 
     # 同じギルドの後続ジョブも、他ギルドも止まらない
-    assert ("today", G1) in calls
     assert ("section", G1) in calls
-    assert [c for c in calls if c[1] == G2] == [("due7", G2), ("today", G2), ("section", G2)]
+    assert ("stock", G1) in calls
+    assert [c for c in calls if c[1] == G2] == [("today", G2), ("section", G2), ("stock", G2)]
 
 
 def test_daily_night_survives_dispatch_failure():
@@ -122,26 +122,35 @@ def test_daily_night_survives_dispatch_failure():
     cog = _cog(bot)
     dispatched: list[int] = []
 
-    async def list_overdue(guild_id, _today):
-        return [{"title": "t", "due_date": "2026-08-01", "team_key": None}]
-
-    async def dispatch(guild_id, tasks_, **kwargs):
+    async def notify(guild_id):
         dispatched.append(guild_id)
         if guild_id == G1:
             raise ValueError("壊れたデータ")
 
-    cog.task_repo = SimpleNamespace(list_overdue=list_overdue)
-    cog._dispatch_by_team = dispatch
+    cog._notify_overdue_tasks = notify
 
     run(cog.daily_night())
     assert dispatched == [G1, G2]
 
 
 # ---------------------------------------------------------------------
-# _dispatch_by_team: 壊れた行を捨てて残りを通知する
+# _dispatch_todoist_tasks: 期限が読めない行を捨てて残りを通知する
 # ---------------------------------------------------------------------
-def test_dispatch_skips_unparsable_due_date():
-    channel = FakeChannel()
+def _ttask(content: str, due_date):
+    from services.todoist_task_service import TodoistTask
+
+    return TodoistTask(
+        id=content,
+        content=content,
+        description="",
+        due_date=due_date,
+        due_string=None,
+        priority=1,
+        section_id=None,
+    )
+
+
+def _dispatch_cog(channel):
     bot = FakeBot([G1], channel=channel)
     cog = _cog(bot)
 
@@ -154,22 +163,28 @@ def test_dispatch_skips_unparsable_due_date():
     async def log_reminder(*args, **kwargs):
         return None
 
+    async def list_links(_guild_id):
+        return []
+
     cog._team_map = team_map
     cog._task_channel = task_channel
     cog._log_reminder = log_reminder
+    cog.section_repo = SimpleNamespace(list_links=list_links)
+    return cog
 
+
+def test_dispatch_skips_tasks_without_a_due_date():
     from datetime import date
 
+    channel = FakeChannel()
+    cog = _dispatch_cog(channel)
     today = date(2026, 8, 11)
     run(
-        cog._dispatch_by_team(
+        cog._dispatch_todoist_tasks(
             G1,
-            [
-                {"title": "壊れた行", "due_date": "not-a-date", "team_key": None},
-                {"title": "正常な行", "due_date": "2026-08-12", "team_key": None},
-            ],
+            [_ttask("期限なしの行", None), _ttask("正常な行", date(2026, 8, 12))],
             title="テスト",
-            reminder_type="task_due_7days",
+            reminder_type="task_overdue",
             period_desc="今日から7日以内",
             period_start=today,
             period_end=today,
@@ -179,36 +194,21 @@ def test_dispatch_skips_unparsable_due_date():
     assert len(channel.sent) == 1
     description = channel.sent[0]["embed"].description
     assert "正常な行" in description
-    assert "壊れた行" not in description
+    assert "期限なしの行" not in description
 
 
-def test_dispatch_sends_nothing_when_all_rows_are_broken():
-    channel = FakeChannel()
-    bot = FakeBot([G1], channel=channel)
-    cog = _cog(bot)
-
-    async def team_map(_guild_id):
-        return {}
-
-    async def task_channel(_guild_id):
-        return channel
-
-    async def log_reminder(*args, **kwargs):
-        return None
-
-    cog._team_map = team_map
-    cog._task_channel = task_channel
-    cog._log_reminder = log_reminder
-
+def test_dispatch_sends_nothing_when_no_task_has_a_due_date():
     from datetime import date
 
+    channel = FakeChannel()
+    cog = _dispatch_cog(channel)
     today = date(2026, 8, 11)
     run(
-        cog._dispatch_by_team(
+        cog._dispatch_todoist_tasks(
             G1,
-            [{"title": "壊れた行", "due_date": None, "team_key": None}],
+            [_ttask("期限なしの行", None)],
             title="テスト",
-            reminder_type="task_due_7days",
+            reminder_type="task_overdue",
             period_desc="今日から7日以内",
             period_start=today,
             period_end=today,

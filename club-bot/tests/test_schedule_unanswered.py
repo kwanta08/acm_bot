@@ -421,8 +421,8 @@ def test_a_broken_user_id_does_not_stop_the_others():
             # リポジトリを通さず壊れた行を直接入れる
             await db.execute(
                 "INSERT INTO members (guild_id, user_id, display_name, secondary_teams,"
-                " is_leader, skills, joined_at, active_flag, status)"
-                " VALUES (?, ?, ?, '[]', 0, '[]', ?, 1, 'active')",
+                " is_leader, joined_at, active_flag, status)"
+                " VALUES (?, ?, ?, '[]', 0, ?, 1, 'active')",
                 (G1, "unknown", "壊れた行", "2026-01-01T00:00:00"),
             )
             guild = _Guild([_Member(1)])

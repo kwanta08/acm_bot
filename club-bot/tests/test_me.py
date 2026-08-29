@@ -1,15 +1,18 @@
 """`/me` 個人サマリーのテスト（G4-4）。
 
-部員視点の入口が無かった。自分のタスク・未回答の投票・積層実績・担当ノードが
-それぞれ別コマンドで、`/task list` は全体を返す。新入生が
+部員視点の入口が無かった。未回答の投票・積層実績・担当ノードが
+それぞれ別コマンドに散らばっている。新入生が
 「今日自分は何をすればいいか」を1コマンドで確認できなかった。
+
+タスクは `/me` に出ない（スキーマ v22 でローカルの tasks テーブルを廃止し、
+正本を Todoist へ移した。Todoist に Discord ユーザー単位の担当が無い）。
 
 このファイルが特に固定しているもの:
 
 1. **新しいテーブルを作っていないこと。** 既存クエリの合成だけで済ませる
    のがこのタスクの前提（マイグレーション不要）
 2. **`user` 引数は L2 以上のみ。** ここが緩むと、一般部員が他人の
-   担当タスクと出欠回答状況を引けるようになる
+   出欠回答状況と担当ノードを引けるようになる
 3. **未回答は投票「単位」**（候補単位ではない）。候補単位で数えると
    「3候補中2つだけ答えた」人が未回答として出る
 4. **他ギルドの行が混ざらないこと**
@@ -34,7 +37,6 @@ from repositories.layer_session_repository import LayerSessionRepository
 from repositories.member_repository import MemberRepository
 from repositories.progress_repository import ProgressRepository
 from repositories.schedule_repository import ScheduleRepository
-from repositories.task_repository import TaskRepository
 from utils.db import TABLE_DDL, Database
 from utils.parser import TZ, now, to_iso
 from utils.permissions import Level, command_required_level
@@ -74,14 +76,6 @@ async def _seed(db: Database, guild_id: int = G1, prefix: str = "sch") -> None:
     `schedules.schedule_id` は**グローバルな主キー**（guild_id を含まない）
     なので、2ギルド分を入れるときは prefix を変える。
     """
-    tasks = TaskRepository(db)
-    await tasks.create_task(
-        guild_id, "翼リブを削る", ME, assignee_id=ME, due_date=_today_iso(1)
-    )
-    await tasks.create_task(
-        guild_id, "他人のタスク", ME, assignee_id=OTHER, due_date=_today_iso(1)
-    )
-
     sched = ScheduleRepository(db)
     from datetime import datetime, timedelta
 
@@ -376,8 +370,6 @@ def test_me_shows_every_section():
             interaction = _Interaction()
             await Me.me.callback(cog, interaction, user=None)
             text = interaction.text
-            assert "翼リブを削る" in text
-            assert "他人のタスク" not in text, "他人のタスクが出ている"
             assert "秋合宿" in text
             assert "作業日" not in text, "回答済みの投票が未回答として出ている"
             assert "2 層" in text
@@ -397,7 +389,7 @@ def test_me_shows_an_empty_state_with_a_next_command():
             _permission(cog, True)
             interaction = _Interaction()
             await Me.me.callback(cog, interaction, user=None)
-            assert "`/task add`" in interaction.text
+            assert "`/schedule create`" in interaction.text
         finally:
             await db.close()
 
@@ -416,7 +408,7 @@ def test_a_plain_member_cannot_look_at_someone_else():
             await Me.me.callback(cog, interaction, user=target)
             text = interaction.text
             assert "班長以上" in text
-            assert "他人のタスク" not in text, "権限が無いのに他人の内容が出ている"
+            assert "はなこ" not in text, "権限が無いのに他人の内容が出ている"
             assert asked == [str(OTHER)], "判定にかけた相手が違う"
         finally:
             config.clear_guild_cache()
@@ -437,7 +429,6 @@ def test_a_leader_can_look_at_someone_else():
             await Me.me.callback(cog, interaction, user=target)
             text = interaction.text
             assert "はなこ" in text
-            assert "他人のタスク" in text
             assert asked == [str(OTHER)]
         finally:
             config.clear_guild_cache()
@@ -451,10 +442,19 @@ def test_me_does_not_leak_another_guilds_rows():
         db = await _make_db()
         try:
             await _seed(db, guild_id=G1)
-            tasks = TaskRepository(db)
-            await tasks.create_task(
-                G2, "B大学のタスク", ME, assignee_id=ME, due_date=_today_iso(1)
+            sched = ScheduleRepository(db)
+            await sched.create_schedule(
+                G2,
+                "b_1",
+                "B大学の部会",
+                None,
+                "部室",
+                None,
+                "2030-01-10T23:59:00+09:00",
+                "tester",
+                "555",
             )
+            await sched.add_option(G2, "b_1_o1", "b_1", "10/1", "2030-01-11T00:00:00", None, None)
             cog = _cog(db)
             _permission(cog, True)
             interaction = _Interaction(guild_id=G1)

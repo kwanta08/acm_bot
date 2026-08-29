@@ -121,9 +121,20 @@ class TodoistService:
         return await self._run(self._api.update_task, task_id, **kwargs)
 
     async def close_task(self, task_id: str) -> bool:
+        """タスクを完了にする。
+
+        SDK v2 は `close_task`、v3 以降は `complete_task`（同じ操作の改名）。
+        requirements は `>=2.1.0` で両方を許すので、ここで吸収する。
+        **タスクの正本は Todoist だけ**（ローカルに複製が無い）ので、
+        ここが版差で落ちると `/task done` が丸ごと効かなくなる。
+        """
         if not self.enabled:
             return False
-        await self._run(self._api.close_task, task_id)
+        fn = getattr(self._api, "close_task", None) or getattr(self._api, "complete_task", None)
+        if fn is None:
+            log.error("Todoist SDK に close_task / complete_task がありません")
+            raise TodoistError("close_task/complete_task not found")
+        await self._run(fn, task_id)
         return True
 
     async def delete_task(self, task_id: str) -> bool:
@@ -142,6 +153,29 @@ class TodoistService:
             return []
         result = await self._run(self._api.get_tasks, **kwargs)
         return _to_list(result)
+
+    async def get_completed_tasks_between(self, since, until) -> list[Any] | None:
+        """完了タスク（`[since, until]`）。取得できない場合は None。
+
+        `[]`（0件）と None（そもそも取れない）を区別する。**取れないときに
+        0 を返すと「先週は1件も完了しなかった」と嘘をつく**ため、呼び出し側が
+        表示そのものを省けるようにしている。
+
+        完了タスクの取得は SDK v3 以降の
+        `get_completed_tasks_by_completion_date` に依存する。requirements は
+        v2 も許しているので、メソッドが無ければ None を返す。
+        """
+        if not self.enabled:
+            return None
+        fn = getattr(self._api, "get_completed_tasks_by_completion_date", None)
+        if fn is None:
+            return None
+        result = _to_list(await self._run(fn, since=since, until=until))
+        if not self.project_id:
+            return result
+        # filter_query はプロジェクト**名**の構文なので使わない。
+        # ID での絞り込みは取得後に行う
+        return [t for t in result if str(getattr(t, "project_id", "")) == str(self.project_id)]
 
     # ---------- プロジェクト / セクション ----------
     async def get_projects(self) -> list[Any]:

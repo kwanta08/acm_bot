@@ -1,6 +1,6 @@
-"""班（teams）・技能タグ（skill_tags）の DB 管理化テスト。
+"""班（teams）の DB 管理化テスト。
 
-- skill_tags / teams の CRUD とギルド分離
+- teams の CRUD とギルド分離
 - 班ロール紐付け（member_role_id / secondary_role_id）のギルド分離
 - v2 -> v3 マイグレーション（teams カラム追加 + settings からのバックフィル）
 - autocomplete 候補生成（team_service）の絞り込み・25件上限
@@ -18,7 +18,6 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import aiosqlite
 
 from repositories.member_repository import MemberRepository
-from repositories.skill_tag_repository import SkillTagRepository
 from services import team_service
 from utils.db import SCHEMA_VERSION, TABLE_DDL, Database
 
@@ -60,58 +59,14 @@ async def _connected_db() -> Database:
 # ---------------------------------------------------------------------
 # スキーマ
 # ---------------------------------------------------------------------
-def test_fresh_schema_has_skill_tags_and_team_columns():
+def test_fresh_schema_has_team_columns():
     async def _main():
         db = await _connected_db()
         try:
-            cols = {r["name"] for r in await db.fetchall("PRAGMA table_info(skill_tags)")}
-            assert {
-                "skill_tag_id",
-                "guild_id",
-                "skill_name",
-                "active_flag",
-                "created_by",
-                "created_at",
-            } <= cols
             cols = {r["name"] for r in await db.fetchall("PRAGMA table_info(teams)")}
             assert {"member_role_id", "secondary_role_id", "created_at", "updated_at"} <= cols
             row = await db.fetchone("PRAGMA user_version")
             assert row[0] == SCHEMA_VERSION
-        finally:
-            await db.close()
-
-    run(_main())
-
-
-# ---------------------------------------------------------------------
-# skill_tags CRUD とギルド分離
-# ---------------------------------------------------------------------
-def test_skill_tags_crud_and_isolation():
-    async def _main():
-        db = await _connected_db()
-        try:
-            repo = SkillTagRepository(db)
-            await repo.add(G1, "CAD", "u1")
-            await repo.add(G1, "はんだ", "u1")
-            await repo.add(G2, "CAD", "u2")  # 同名タグを別ギルドに登録
-
-            assert sorted(await repo.list_active(G1)) == sorted(["CAD", "はんだ"])
-            assert await repo.list_active(G2) == ["CAD"]
-
-            # 一意制約: 同ギルドでの再登録は UPDATE（再有効化）になり重複しない
-            await repo.add(G1, "CAD", "u1")
-            assert len(await repo.list_all(G1)) == 2
-
-            # 無効化はギルド単位
-            assert await repo.deactivate(G1, "CAD") is True
-            assert await repo.exists_active(G1, "CAD") is False
-            assert await repo.exists_active(G2, "CAD") is True  # G2 には影響なし
-            # 未登録の無効化は False
-            assert await repo.deactivate(G1, "存在しない") is False
-            # 再有効化
-            await repo.add(G1, "CAD", "u1")
-            assert await repo.exists_active(G1, "CAD") is True
-            assert len(await repo.list_all(G1)) == 2
         finally:
             await db.close()
 
@@ -172,10 +127,10 @@ def test_team_roles_and_isolation():
 def test_v2_to_v3_migration_backfills_team_roles():
     async def _main():
         path = _tmp_db_path()
-        # v2 相当の DB を準備（skill_tags 無し、teams は旧カラム構成、user_version=2）
+        # v2 相当の DB を準備（teams は旧カラム構成、user_version=2）
         conn = await aiosqlite.connect(path)
         for name, ddl in TABLE_DDL.items():
-            if name in ("skill_tags", "todoist_configs", "guild_directus_access"):
+            if name in ("todoist_configs", "guild_directus_access"):
                 continue
             if name == "teams":
                 await conn.executescript(V2_TEAMS_DDL)
@@ -207,9 +162,6 @@ def test_v2_to_v3_migration_backfills_team_roles():
             # カラム追加
             cols = {r["name"] for r in await db.fetchall("PRAGMA table_info(teams)")}
             assert {"member_role_id", "secondary_role_id", "created_at", "updated_at"} <= cols
-            # skill_tags 作成
-            cols = {r["name"] for r in await db.fetchall("PRAGMA table_info(skill_tags)")}
-            assert "guild_id" in cols
             # バックフィル: G1 の design に member/secondary が入る
             repo = MemberRepository(db)
             t1 = await repo.get_team(G1, "design")
@@ -248,14 +200,10 @@ def test_team_service_choices():
         db = await _connected_db()
         try:
             repo = MemberRepository(db)
-            skill_repo = SkillTagRepository(db)
             for key, name in (("design", "設計"), ("wing", "翼"), ("cfrp", "CFRP")):
                 await repo.upsert_team(G1, key, name)
             await repo.upsert_team(G2, "design", "設計")
             await repo.deactivate_team(G1, "cfrp")
-            await skill_repo.add(G1, "CAD", "u1")
-            await skill_repo.add(G1, "はんだ", "u1")
-            await skill_repo.add(G2, "解析", "u2")
 
             # 班名マップはギルド単位（無効化済みも含む）
             names = await team_service.team_name_map(db, G1)
@@ -274,20 +222,15 @@ def test_team_service_choices():
             choices = await team_service.team_choices(db, G2, "")
             assert [c.value for c in choices] == ["design"]
 
-            # 技能タグの候補もギルド単位
-            choices = await team_service.skill_choices(db, G1, "")
-            assert sorted(c.value for c in choices) == ["CAD", "はんだ"]
-            choices = await team_service.skill_choices(db, G2, "")
-            assert [c.value for c in choices] == ["解析"]
-
             # 25件上限（30件登録しても25件まで）
             for i in range(30):
-                await skill_repo.add(G1, f"tag{i:02d}", "u1")
-            choices = await team_service.skill_choices(db, G1, "")
+                await repo.upsert_team(G1, f"team{i:02d}", f"班{i:02d}")
+            choices = await team_service.team_choices(db, G1, "")
             assert len(choices) == 25
-            # 絞り込めば上限内でも目的のタグに届く
-            choices = await team_service.skill_choices(db, G1, "tag29")
-            assert [c.value for c in choices] == ["tag29"]
+            # 絞り込めば上限内でも目的の班に届く
+            choices = await team_service.team_choices(db, G1, "team29")
+            assert [c.value for c in choices] == ["team29"]
+
         finally:
             await db.close()
 
@@ -295,10 +238,8 @@ def test_team_service_choices():
 
 
 if __name__ == "__main__":
-    test_fresh_schema_has_skill_tags_and_team_columns()
-    print("test_fresh_schema_has_skill_tags_and_team_columns: OK")
-    test_skill_tags_crud_and_isolation()
-    print("test_skill_tags_crud_and_isolation: OK")
+    test_fresh_schema_has_team_columns()
+    print("test_fresh_schema_has_team_columns: OK")
     test_team_roles_and_isolation()
     print("test_team_roles_and_isolation: OK")
     test_v2_to_v3_migration_backfills_team_roles()

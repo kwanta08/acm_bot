@@ -123,15 +123,14 @@ class MemberRepository(BaseRepository):
             await self.db.execute(
                 """
                 INSERT INTO members (guild_id, user_id, display_name, primary_team, secondary_teams,
-                                     is_leader, skills, joined_at, active_flag)
-                VALUES (?, ?, ?, ?, ?, 0, ?, ?, 1)
+                                     is_leader, joined_at, active_flag)
+                VALUES (?, ?, ?, ?, ?, 0, ?, 1)
                 """,
                 (
                     guild_id,
                     user_id,
                     display_name,
                     primary_team,
-                    json.dumps([]),
                     json.dumps([]),
                     to_iso(now()),
                 ),
@@ -145,7 +144,6 @@ class MemberRepository(BaseRepository):
             return None
         d = dict(row)
         d["secondary_teams"] = json.loads(d.get("secondary_teams") or "[]")
-        d["skills"] = json.loads(d.get("skills") or "[]")
         return d
 
     async def list_members(
@@ -169,7 +167,6 @@ class MemberRepository(BaseRepository):
         for r in rows:
             d = dict(r)
             d["secondary_teams"] = json.loads(d.get("secondary_teams") or "[]")
-            d["skills"] = json.loads(d.get("skills") or "[]")
             out.append(d)
         return out
 
@@ -229,33 +226,10 @@ class MemberRepository(BaseRepository):
             (1 if is_leader else 0, guild_id, user_id),
         )
 
-    async def add_skill(self, guild_id: int, user_id: str, skill: str) -> bool:
-        m = await self.get_member(guild_id, user_id)
-        if not m:
-            return False
-        skills = set(m["skills"])
-        skills.add(skill)
-        await self.db.execute(
-            "UPDATE members SET skills = ? WHERE guild_id = ? AND user_id = ?",
-            (json.dumps(sorted(skills), ensure_ascii=False), guild_id, user_id),
-        )
-        return True
-
-    async def remove_skill(self, guild_id: int, user_id: str, skill: str) -> bool:
-        m = await self.get_member(guild_id, user_id)
-        if not m:
-            return False
-        skills = [s for s in m["skills"] if s != skill]
-        await self.db.execute(
-            "UPDATE members SET skills = ? WHERE guild_id = ? AND user_id = ?",
-            (json.dumps(skills, ensure_ascii=False), guild_id, user_id),
-        )
-        return True
-
     async def search_support(
-        self, guild_id: int, team_key: str | None, skill: str | None, include_alumni: bool = False
+        self, guild_id: int, team_key: str, include_alumni: bool = False
     ) -> list[dict[str, Any]]:
-        """班・技能タグで支援候補を検索する（仕様 11.4.4）。
+        """班で支援候補を検索する（仕様 11.4.4）。
 
         既定では現役のみ。卒業者に頼るケースのために include_alumni を残す。
         """
@@ -267,8 +241,6 @@ class MemberRepository(BaseRepository):
                 and m.get("primary_team") != team_key
                 and team_key not in m["secondary_teams"]
             ):
-                continue
-            if skill and skill not in m["skills"]:
                 continue
             out.append(m)
         return out

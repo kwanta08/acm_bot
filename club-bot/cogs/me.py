@@ -1,9 +1,13 @@
 """
 `/me` — 部員視点の個人サマリー（G4-4）。
 
-部員から見た入口が無かった。自分のタスク・未回答の投票・積層実績・
-担当ノードはそれぞれ別コマンドで、`/task list` は全体を返す。
+部員から見た入口が無かった。未回答の投票・積層実績・担当ノードは
+それぞれ別コマンドに散らばっている。
 **新入生が「今日自分は何をすればいいか」を1コマンドで確認できない。**
+
+タスクはここに出ない。タスクの正本は Todoist で、Todoist には
+「どの Discord ユーザーが担当か」という概念が無い（スキーマ v22）。
+自分のタスクは Todoist 側で確認する。
 
 **新しいテーブルは作らない。** 既存のクエリを合成するだけの読み取り専用
 コマンドなので、マイグレーションも新しい設定も無い。
@@ -23,7 +27,6 @@ from repositories.layer_session_repository import LayerSessionRepository
 from repositories.member_repository import MemberRepository
 from repositories.progress_repository import ProgressRepository
 from repositories.schedule_repository import ScheduleRepository
-from repositories.task_repository import TaskRepository
 from services.layer_stats_service import PERIOD_MONTH, aggregate_layer_stats, period_start
 from services.spar_winding_service import STATUS_DONE
 from utils.embeds import empty_state_embed, error_embed, info_embed
@@ -48,14 +51,9 @@ def _fmt_minutes(minutes: int) -> str:
     return f"{hours}時間{rest}分" if rest else f"{hours}時間"
 
 
-def _due_label(due_date: str | None) -> str:
-    return f"〜{due_date}" if due_date else "期限なし"
-
-
 class Me(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.task_repo = TaskRepository(bot.db)
         self.schedule_repo = ScheduleRepository(bot.db)
         self.session_repo = LayerSessionRepository(bot.db)
         self.progress_repo = ProgressRepository(bot.db)
@@ -149,7 +147,6 @@ class Me(commands.Cog):
             return
 
         user_id = str(target.id)
-        tasks_ = await self.task_repo.list_tasks(guild_id, status="open", assignee_id=user_id)
         unanswered = await self.unanswered_schedules(guild_id, user_id)
         layers, minutes = await self.layer_summary(guild_id, user_id)
 
@@ -159,29 +156,18 @@ class Me(commands.Cog):
             names.add(str(member["display_name"]))
         nodes = await self.assigned_nodes(guild_id, names)
 
-        if not tasks_ and not unanswered and not nodes and layers == 0:
+        if not unanswered and not nodes and layers == 0:
             await interaction.followup.send(
                 embed=empty_state_embed(
                     f"{target.display_name} さんのサマリー",
-                    "担当タスク・未回答の投票・今月の積層記録・担当ノードのいずれもありません。",
-                    "/task add",
+                    "未回答の投票・今月の積層記録・担当ノードのいずれもありません。",
+                    "/schedule create",
                 ),
                 ephemeral=True,
             )
             return
 
         embed = info_embed(f"{target.display_name} さんのサマリー")
-
-        if tasks_:
-            lines = [
-                f"・{t['title']}（{_due_label(t.get('due_date'))}）"
-                for t in tasks_[:SECTION_LIMIT]
-            ]
-            if len(tasks_) > SECTION_LIMIT:
-                lines.append(f"…ほか {len(tasks_) - SECTION_LIMIT} 件（`/task list`）")
-            embed.add_field(name=f"未完了タスク（{len(tasks_)}）", value="\n".join(lines))
-        else:
-            embed.add_field(name="未完了タスク", value="なし")
 
         if unanswered:
             lines = []

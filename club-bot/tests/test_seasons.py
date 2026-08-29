@@ -189,8 +189,9 @@ def test_existing_member_columns_are_preserved():
             assert row["primary_team"] == "struct"
             assert json.loads(row["secondary_teams"]) == ["elec"]
             assert row["is_leader"] == 1
-            assert json.loads(row["skills"]) == ["溶接"]
             assert row["notes"] == "メモ"
+            # skills は v22 で廃止した（技能タグ機能ごと）
+            assert "skills" not in row.keys()
             assert row["joined_at"] == "2026-04-01"
             assert row["active_flag"] == 1
         finally:
@@ -235,7 +236,6 @@ def test_existing_member_reads_still_work_after_migration():
         try:
             members = await MemberRepository(db).list_members(G1)
             assert [m["display_name"] for m in members] == ["山田", "田中"]
-            assert members[0]["skills"] == ["溶接"]
         finally:
             await db.close()
 
@@ -420,15 +420,13 @@ def test_alumni_are_excluded_from_default_listing():
         try:
             repo = MemberRepository(db)
             await repo.upsert_member(G1, "u1", "現役", primary_team="struct")
-            await repo.add_skill(G1, "u1", "溶接")
             await repo.upsert_member(G1, "u2", "卒業生", primary_team="struct")
-            await repo.add_skill(G1, "u2", "溶接")
             await repo.set_status(G1, "u2", "alumni", left_season="2026年度")
 
             names = [m["display_name"] for m in await repo.list_members(G1)]
             assert names == ["現役"]
 
-            found = await repo.search_support(G1, "struct", "溶接")
+            found = await repo.search_support(G1, "struct")
             assert [m["display_name"] for m in found] == ["現役"]
         finally:
             await db.close()
@@ -442,15 +440,13 @@ def test_alumni_can_be_included_explicitly():
         try:
             repo = MemberRepository(db)
             await repo.upsert_member(G1, "u1", "現役", primary_team="struct")
-            await repo.add_skill(G1, "u1", "溶接")
             await repo.upsert_member(G1, "u2", "卒業生", primary_team="struct")
-            await repo.add_skill(G1, "u2", "溶接")
             await repo.set_status(G1, "u2", "alumni", left_season="2026年度")
 
             names = {m["display_name"] for m in await repo.list_members(G1, include_alumni=True)}
             assert names == {"現役", "卒業生"}
 
-            found = await repo.search_support(G1, "struct", "溶接", include_alumni=True)
+            found = await repo.search_support(G1, "struct", include_alumni=True)
             assert len(found) == 2
         finally:
             await db.close()

@@ -77,6 +77,31 @@ def test_empty_state_embed_formats_the_command_as_code():
     assert "`/task add`" in (embed.description or "")
 
 
+def _reports_bot(db, open_tasks=()):
+    """Reports が要求する todoist_manager 付きの bot スタブ。
+
+    タスクの正本は Todoist なので、空状態かどうかも Todoist が決める。
+    """
+
+    class _Svc:
+        enabled = True
+        project_id = None
+
+        async def get_tasks(self, **kwargs):
+            return list(open_tasks)
+
+        async def get_completed_tasks_between(self, since, until):
+            return []
+
+    class _Manager:
+        async def for_guild(self, guild_id):
+            return _Svc()
+
+    return SimpleNamespace(
+        db=db, guilds=[], get_channel=lambda cid: None, todoist_manager=_Manager()
+    )
+
+
 # ---------------------------------------------------------------------
 # 各コマンドの空状態
 # ---------------------------------------------------------------------
@@ -89,7 +114,7 @@ def test_task_list_empty_state_suggests_task_add():
         try:
             bot = SimpleNamespace(db=db, guilds=[], get_channel=lambda cid: None)
             cog = Tasks(bot)
-            embed = cog._build_task_list_embed("タスク一覧", [], None)
+            embed = cog._build_task_list_embed("タスク一覧", [])
             assert "/task add" in _text(embed)
         finally:
             await db.close()
@@ -203,7 +228,7 @@ def test_weekly_report_with_no_data_says_not_started():
         db = Database(_tmp_db_path())
         await db.connect()
         try:
-            bot = SimpleNamespace(db=db, guilds=[], get_channel=lambda cid: None)
+            bot = _reports_bot(db)
             cog = Reports(bot)
             interaction = _Interaction()
             with _patched_config():
@@ -220,14 +245,20 @@ def test_weekly_report_with_no_data_says_not_started():
 def test_weekly_report_with_data_shows_the_numbers():
     """データがあれば従来どおり集計を出す（空状態表示に乗っ取られない）。"""
     from cogs.reports import Reports
-    from repositories.task_repository import TaskRepository
 
     async def _main():
         db = Database(_tmp_db_path())
         await db.connect()
         try:
-            await TaskRepository(db).create_task(G1, "主桁の積層", created_by="tester")
-            bot = SimpleNamespace(db=db, guilds=[], get_channel=lambda cid: None)
+            task = SimpleNamespace(
+                id="td_1",
+                content="主桁の積層",
+                description="",
+                due=None,
+                priority=1,
+                section_id=None,
+            )
+            bot = _reports_bot(db, [task])
             cog = Reports(bot)
             interaction = _Interaction()
             with _patched_config():

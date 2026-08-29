@@ -38,7 +38,6 @@ from repositories.table_repository import (
     UnknownTableError,
     rows_to_csv,
 )
-from repositories.task_repository import TaskRepository
 from utils.db import Database
 
 GUILD_A = 100000000000000001
@@ -46,10 +45,9 @@ GUILD_B = 200000000000000002
 USER_ID = "42"
 NOW = "2026-08-11 10:00"
 
-# G4-3 で読み取り専用の6表を追加した。**件数ではなくキー集合で書く**
+# **件数ではなくキー集合で書く**
 # （件数だけだと、別の表と入れ替わっても緑のまま通る）。
 EXPECTED_TABLES = {
-    "tasks",
     "members",
     "teams",
     "schedules",
@@ -61,18 +59,12 @@ EXPECTED_TABLES = {
     "seasons",
     "progress_milestones",
     "layer_keta",
-    "skill_tags",
     "settings",
     # 進捗の日次履歴（G4-7）
     "progress_snapshots",
     # 資材・消耗品の在庫（G4-8）
     "stock_items",
     "stock_movements",
-    # 工具・機材の貸出（G4-9）
-    "tools",
-    "tool_loans",
-    # ヒヤリハット・事故報告（G4-10）
-    "incidents",
 }
 
 
@@ -102,7 +94,6 @@ async def _seed(db_path: str) -> None:
         await GuildRepository(db).ensure(GUILD_A, "A大学")
         await GuildRepository(db).ensure(GUILD_B, "B大学")
         members = MemberRepository(db)
-        tasks = TaskRepository(db)
         progress = ProgressRepository(db)
         schedules = ScheduleRepository(db)
         sessions = LayerSessionRepository(db)
@@ -110,7 +101,6 @@ async def _seed(db_path: str) -> None:
         for guild_id, mark in ((GUILD_A, "A大学"), (GUILD_B, "B大学")):
             await members.upsert_member(guild_id, USER_ID, f"{mark}の部員")
             await members.upsert_team(guild_id, "wing", f"{mark}の主翼班")
-            await tasks.create_task(guild_id, f"{mark}のタスク", USER_ID)
             await progress.upsert_node(guild_id, "m1", name=f"{mark}の機体", now_text=NOW)
             await schedules.create_schedule(
                 guild_id,
@@ -239,8 +229,8 @@ def test_limit_is_capped():
         try:
             repo = TableRepository(db)
             # 上限を超える指定でも例外にならず、SQL に巨大値が渡らない
-            assert await repo.list_rows(GUILD_A, "tasks", limit=10**9) == []
-            assert await repo.list_rows(GUILD_A, "tasks", offset=-5) == []
+            assert await repo.list_rows(GUILD_A, "members", limit=10**9) == []
+            assert await repo.list_rows(GUILD_A, "members", offset=-5) == []
         finally:
             await db.close()
 
@@ -598,9 +588,9 @@ def test_csv_export_is_not_capped_at_display_limit():
         db = Database(db_path)
         await db.connect()
         try:
-            repo = TaskRepository(db)
+            repo = MemberRepository(db)
             for i in range(over):
-                await repo.create_task(GUILD_A, title=f"タスク{i:04d}", created_by="42")
+                await repo.upsert_member(GUILD_A, f"u{i:04d}", f"部員{i:04d}")
         finally:
             await db.close()
 
@@ -608,11 +598,11 @@ def test_csv_export_is_not_capped_at_display_limit():
 
     client = _logged_in_client(db_path)
     try:
-        res = client.get(f"/api/guilds/{GUILD_A}/tables/tasks/export.csv")
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/members/export.csv")
         assert res.status_code == 200
         body = res.content.decode("utf-8-sig")
-        assert "タスク0000" in body
-        assert f"タスク{over - 1:04d}" in body, "MAX_LIMIT で打ち切られている"
+        assert "部員0000" in body
+        assert f"部員{over - 1:04d}" in body, "MAX_LIMIT で打ち切られている"
         # 見出し1行 + データ行（末尾の改行で空要素が出ないよう strip）
         assert len(body.strip().splitlines()) >= over + 1
     finally:

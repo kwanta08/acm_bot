@@ -1,6 +1,6 @@
 """複数ギルド統合テスト。
 
-2つのギルドに全エンティティ（teams / skill_tags / members / tasks /
+2つのギルドに全エンティティ（teams / members /
 schedules+attendance / settings / todoist_configs / audit_log /
 reminders_log / layer 系）を混在させ、Repository・ビュー経由で
 相互に取得・更新・削除できないことを包括的に検証する。
@@ -25,8 +25,6 @@ from repositories.member_repository import MemberRepository
 from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.schedule_repository import ScheduleRepository
 from repositories.settings_repository import SettingsRepository
-from repositories.skill_tag_repository import SkillTagRepository
-from repositories.task_repository import TaskRepository
 from repositories.todoist_config_repository import TodoistConfigRepository
 from utils import crypto
 from utils.db import Database
@@ -57,15 +55,12 @@ def test_full_multiguild_isolation():
             guilds = GuildRepository(db)
             settings = SettingsRepository(db)
             members = MemberRepository(db)
-            skills = SkillTagRepository(db)
-            tasks = TaskRepository(db)
             schedules = ScheduleRepository(db)
             todoist = TodoistConfigRepository(db)
             audit = AuditLogRepository(db)
             rlog = RemindersLogRepository(db)
             keta = LayerKetaRepository(db)
             sessions = LayerSessionRepository(db)
-            task_ids: dict[int, int] = {}
 
             # ---- 両ギルドにデータを投入 ----
             for gid, suffix in ((G1, "A"), (G2, "B")):
@@ -73,10 +68,7 @@ def test_full_multiguild_isolation():
                 await settings.set(gid, "DEFAULT_TASK_CHANNEL_ID", f"ch-{suffix}")
                 await members.upsert_team(gid, "wing", f"翼{suffix}")
                 await members.set_team_roles(gid, "wing", member_role_id=f"role-{suffix}")
-                await skills.add(gid, f"技能{suffix}", "admin")
                 await members.upsert_member(gid, "u1", f"太郎{suffix}", "wing")
-                await members.add_skill(gid, "u1", f"技能{suffix}")
-                task_ids[gid] = await tasks.create_task(gid, f"タスク{suffix}", created_by="u1")
                 await schedules.create_schedule(
                     gid,
                     schedule_id=f"sch-{suffix}",
@@ -116,17 +108,9 @@ def test_full_multiguild_isolation():
             assert t1["team_name"] == "翼A" and t2["team_name"] == "翼B"
             assert t1["member_role_id"] == "role-A" and t2["member_role_id"] == "role-B"
 
-            assert await skills.exists_active(G1, "技能A") is True
-            assert await skills.exists_active(G1, "技能B") is False
-            assert await skills.exists_active(G2, "技能B") is True
-
             m1 = await members.get_member(G1, "u1")
             m2 = await members.get_member(G2, "u1")
             assert m1["display_name"] == "太郎A" and m2["display_name"] == "太郎B"
-            assert m1["skills"] == ["技能A"] and m2["skills"] == ["技能B"]
-
-            assert [t["title"] for t in await tasks.list_tasks(G1)] == ["タスクA"]
-            assert [t["title"] for t in await tasks.list_tasks(G2)] == ["タスクB"]
 
             assert await schedules.get_schedule(G1, "sch-B") is None
             assert await schedules.get_schedule(G2, "sch-A") is None
@@ -157,10 +141,6 @@ def test_full_multiguild_isolation():
             assert dict(sum1[0])["member_count"] == 1
 
             # ---- 片方の変更・削除が他方に波及しないこと ----
-            await tasks.delete_task(G1, task_ids[G1])
-            assert (await tasks.get_task(G1, task_ids[G1]))["status"] == "archived"
-            assert (await tasks.get_task(G2, task_ids[G2]))["status"] == "open"
-
             await settings.delete(G1, "DEFAULT_TASK_CHANNEL_ID")
             assert await settings.get(G1, "DEFAULT_TASK_CHANNEL_ID") is None
             assert await settings.get(G2, "DEFAULT_TASK_CHANNEL_ID") == "ch-B"
