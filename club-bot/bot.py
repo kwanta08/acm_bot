@@ -218,6 +218,15 @@ class ClubBot(commands.Bot):
         except Exception:
             log.exception("DynamicItem の登録に失敗: cogs.welcome")
 
+        # 日程調整のボタン投票（候補ボタンとステータス選択）。
+        # こちらも登録を忘れると再起動後に投票ボードが無反応になる
+        try:
+            from cogs.schedule import VoteOptionButton, VoteStatusButton
+
+            self.add_dynamic_items(VoteOptionButton, VoteStatusButton)
+        except Exception:
+            log.exception("DynamicItem の登録に失敗: cogs.schedule")
+
         # スラッシュコマンドはグローバル登録に統一する。
         # 新規サーバーへ参加してもコマンド登録の追加作業は不要
         # （グローバル反映には最大1時間程度かかることがある。README 参照）。

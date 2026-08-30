@@ -29,13 +29,14 @@ class ScheduleRepository(BaseRepository):
         deadline_iso: str,
         created_by: str,
         channel_id: str,
+        ui_style: str = "reaction",
     ) -> None:
         await self.db.execute(
             """
             INSERT INTO schedules
                 (schedule_id, guild_id, title, description, place, target_role_id, deadline,
-                 created_by, channel_id, closed_flag, reminder_sent_flag)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
+                 created_by, channel_id, closed_flag, reminder_sent_flag, ui_style)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?)
             """,
             (
                 schedule_id,
@@ -47,6 +48,7 @@ class ScheduleRepository(BaseRepository):
                 deadline_iso,
                 created_by,
                 channel_id,
+                ui_style,
             ),
         )
 
@@ -242,6 +244,14 @@ class ScheduleRepository(BaseRepository):
             (guild_id, schedule_id),
         )
         return [dict(r) for r in rows]
+
+    async def get_option(self, guild_id: int, option_id: str) -> dict[str, Any] | None:
+        """候補を1件返す（ボタン投票の custom_id → 候補の解決に使う）。"""
+        row = await self.db.fetchone(
+            "SELECT * FROM schedule_options WHERE guild_id = ? AND option_id = ?",
+            (guild_id, option_id),
+        )
+        return dict(row) if row else None
 
     async def get_option_by_message(self, guild_id: int, message_id: str) -> dict[str, Any] | None:
         row = await self.db.fetchone(

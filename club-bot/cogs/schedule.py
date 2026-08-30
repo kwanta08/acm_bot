@@ -16,6 +16,8 @@ select_unanswered_targets は、ギルドも DB も触らない純関数とし�
 
 from __future__ import annotations
 
+import re
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -150,6 +152,100 @@ def resolve_emoji_input(guild: discord.Guild, raw: str) -> discord.Emoji | None:
     return discord.utils.get(guild.emojis, name=name)
 
 
+# =====================================================================
+# ボタン投票（ui_style='buttons'）の部品
+#
+# 全候補を1メッセージ（投票ボード）に集約し、候補は inline field で
+# 横に並べる。投票は「候補ボタン → 自分にだけ見えるステータス選択」の
+# 2段階。どちらのボタンも discord.ui.DynamicItem（cogs/welcome.py と
+# 同じ作法）なので、bot を再起動しても押せる。
+#
+# custom_id に guild_id は埋めない。候補の解決が
+# repo.get_option(interaction.guild_id, option_id) で必ずギルドスコープに
+# なるため、他ギルドの custom_id を持ち込んでも「見つかりません」で終わる。
+# =====================================================================
+class VoteOptionButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"sched:opt:(?P<option_id>[^:]+)",
+):
+    """投票ボードの候補ボタン。押すと自分にだけステータス選択が出る。"""
+
+    def __init__(self, option_id: str, label: str = "候補"):
+        self.option_id = option_id
+        super().__init__(
+            discord.ui.Button(
+                # ラベルの上限は80文字。切り詰めても custom_id で候補は特定できる
+                label=str(label)[:80],
+                style=discord.ButtonStyle.secondary,
+                custom_id=f"sched:opt:{option_id}",
+            )
+        )
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match: re.Match[str], /):
+        # 再起動後はラベルを復元できないが、表示は投稿済みメッセージ側に
+        # 残っているので既定値でよい（処理は option_id だけで進む）
+        return cls(match["option_id"])
+
+    async def callback(self, interaction: discord.Interaction):
+        cog = interaction.client.get_cog("Schedule")
+        if cog is None:
+            log.warning("Schedule コグが読み込まれていません")
+            return
+        await cog.open_vote_picker(interaction, self.option_id)
+
+
+class VoteStatusButton(
+    discord.ui.DynamicItem[discord.ui.Button],
+    template=r"sched:vote:(?P<option_id>[^:]+):(?P<status>ok|maybe|ng|clear)",
+):
+    """ステータス選択（ephemeral）の 参加/未定/不参加/取り消し ボタン。"""
+
+    STYLES = {
+        "ok": discord.ButtonStyle.success,
+        "ng": discord.ButtonStyle.danger,
+    }
+
+    def __init__(self, option_id: str, status: str, emoji=None):
+        self.option_id = option_id
+        self.status = status
+        label = "回答を取り消す" if status == "clear" else STATUS_LABELS[status]
+        super().__init__(
+            discord.ui.Button(
+                label=label,
+                style=self.STYLES.get(status, discord.ButtonStyle.secondary),
+                emoji=emoji,
+                custom_id=f"sched:vote:{option_id}:{status}",
+            )
+        )
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match: re.Match[str], /):
+        # 絵文字はギルド設定由来の飾りなので復元しない（既定表示に落ちる）
+        return cls(match["option_id"], match["status"])
+
+    async def callback(self, interaction: discord.Interaction):
+        cog = interaction.client.get_cog("Schedule")
+        if cog is None:
+            log.warning("Schedule コグが読み込まれていません")
+            return
+        await cog.apply_vote(interaction, self.option_id, self.status)
+
+
+def build_status_picker_view(gconf, guild: discord.Guild | None, option_id: str) -> discord.ui.View:
+    """ステータス選択の View（✅参加 / ❓未定 / ❌不参加 / 取り消し）。
+
+    絵文字はギルド別設定を反映する。View 自体は ephemeral メッセージに
+    付くが、中身が DynamicItem なので再起動後に押されても動く。
+    """
+    emojis = svc.get_schedule_emojis(gconf, guild)
+    view = discord.ui.View(timeout=None)
+    for status in ("ok", "maybe", "ng"):
+        view.add_item(VoteStatusButton(option_id, status, emoji=emojis[status]))
+    view.add_item(VoteStatusButton(option_id, "clear"))
+    return view
+
+
 class Schedule(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -230,6 +326,7 @@ class Schedule(commands.Cog):
             return
 
         schedule_id = svc.new_schedule_id()
+        ui_style = getattr(gconf, "schedule_ui_style", "buttons")
         await self.repo.create_schedule(
             guild_id,
             schedule_id=schedule_id,
@@ -240,44 +337,67 @@ class Schedule(commands.Cog):
             deadline_iso=to_iso(deadline_dt),
             created_by=str(interaction.user.id),
             channel_id=str(target_channel.id),
+            ui_style=ui_style,
         )
+        for label, start in parsed_options:
+            await self.repo.add_option(
+                guild_id, svc.new_option_id(), schedule_id, label, to_iso(start), None, None
+            )
 
         schedule = await self.repo.get_schedule(guild_id, schedule_id)
         # 未回答者数は催促と同じ母集団で出す（G4-12）。名簿は予定ごとに
         # 1回だけ引き、候補の数だけ引き直さない
         roster_active, roster_retired = await self._roster_ids(guild_id)
+        # 投稿は list_options の並び（start_at 昇順）で行う。入力順ではなく
+        # 日付順に揃うので、ボードの field も従来の候補メッセージも
+        # 時系列で読める
+        options = await self.repo.list_options(guild_id, schedule_id)
 
-        # 候補ごとに1メッセージ投稿（仕様 11.2.3）
-        # リアクション絵文字はギルド別設定（/schedule emoji set）を参照
-        emoji_maps = build_emoji_maps(gconf, interaction.guild)
-        all_emojis = emoji_maps["all_emojis"]
+        # 対象ロールへは先頭の1通だけでメンションする（候補の数だけ
+        # 鳴らさない）。従来はメンションが無く、対象者は投票の開始に
+        # 気付けなかった（G2-3）
+        mention = (
+            f"{target_role.mention} 日程調整「{title}」の投票が始まりました。"
+            if target_role
+            else None
+        )
 
-        for index, (label, start) in enumerate(parsed_options):
-            option_id = svc.new_option_id()
-            await self.repo.add_option(
-                guild_id, option_id, schedule_id, label, to_iso(start), None, None
-            )
-            opt = {"option_id": option_id, "label": label}
-            embed = await svc.build_option_embed(
-                self.repo,
+        if ui_style == "buttons":
+            # 全候補を1メッセージ（投票ボード）に集約し、候補ボタンで投票する。
+            # 候補が 25 件を超える分はページ分割（Embed field・ボタンとも上限25）
+            await self._post_vote_boards(
                 guild_id,
-                self.bot,
                 schedule,
-                opt,
+                options,
+                target_channel,
                 interaction.guild,
-                roster_active_ids=roster_active,
-                roster_retired_ids=roster_retired,
+                mention,
+                roster_active,
+                roster_retired,
             )
-            # 対象ロールへは先頭の1通だけでメンションする（候補の数だけ
-            # 鳴らさない）。従来はメンションが無く、対象者は投票の開始に
-            # 気付けなかった（G2-3）
-            content = None
-            if index == 0 and target_role:
-                content = f"{target_role.mention} 日程調整「{title}」の投票が始まりました。"
-            msg = await target_channel.send(content=content, embed=embed)
-            await self.repo.set_option_message(guild_id, option_id, str(msg.id))
-            for emoji in all_emojis:
-                await msg.add_reaction(emoji)
+        else:
+            # 候補ごとに1メッセージ投稿（仕様 11.2.3 の従来方式）
+            # リアクション絵文字はギルド別設定（/schedule emoji set）を参照
+            emoji_maps = build_emoji_maps(gconf, interaction.guild)
+            all_emojis = emoji_maps["all_emojis"]
+
+            for index, opt in enumerate(options):
+                embed = await svc.build_option_embed(
+                    self.repo,
+                    guild_id,
+                    self.bot,
+                    schedule,
+                    opt,
+                    interaction.guild,
+                    roster_active_ids=roster_active,
+                    roster_retired_ids=roster_retired,
+                )
+                msg = await target_channel.send(
+                    content=mention if index == 0 else None, embed=embed
+                )
+                await self.repo.set_option_message(guild_id, str(opt["option_id"]), str(msg.id))
+                for emoji in all_emojis:
+                    await msg.add_reaction(emoji)
 
         await interaction.followup.send(
             embed=success_embed(
@@ -556,6 +676,28 @@ class Schedule(commands.Cog):
             return
         roster_active, roster_retired = await self._roster_ids(guild_id)
         options = await self.repo.list_options(guild_id, schedule_id)
+        if schedule.get("ui_style") == "buttons":
+            # ボタン式は候補を横並びにしたボードと同じ形で返す（1〜2通）。
+            # 候補 0 件でも無言にしない（締切などの情報は出す）
+            chunks = [
+                options[i : i + svc.MAX_BOARD_OPTIONS]
+                for i in range(0, len(options), svc.MAX_BOARD_OPTIONS)
+            ] or [[]]
+            for page, chunk in enumerate(chunks, start=1):
+                embed = await svc.build_vote_board_embed(
+                    self.repo,
+                    guild_id,
+                    self.bot,
+                    schedule,
+                    chunk,
+                    interaction.guild,
+                    roster_active_ids=roster_active,
+                    roster_retired_ids=roster_retired,
+                    page=page,
+                    total_pages=len(chunks),
+                )
+                await interaction.followup.send(embed=embed, ephemeral=True)
+            return
         for opt in options:
             embed = await svc.build_option_embed(
                 self.repo,
@@ -991,31 +1133,37 @@ class Schedule(commands.Cog):
         # 更新後のスケジュール情報でEmbedを再取得
         updated_schedule = await self.repo.get_schedule(guild_id, schedule_id)
 
-        # 各候補メッセージの締切表示を更新
-        roster_active, roster_retired = await self._roster_ids(guild_id)
-        options = await self.repo.list_options(guild_id, schedule_id)
+        # 各投票メッセージの締切表示を更新
         channel = self.bot.get_channel(int(schedule["channel_id"]))
         updated_msgs = 0
         if channel:
-            for opt in options:
-                if not opt.get("message_id"):
-                    continue
-                try:
-                    msg = await channel.fetch_message(int(opt["message_id"]))
-                    embed = await svc.build_option_embed(
-                        self.repo,
-                        guild_id,
-                        self.bot,
-                        updated_schedule,
-                        opt,
-                        interaction.guild,
-                        roster_active_ids=roster_active,
-                        roster_retired_ids=roster_retired,
-                    )
-                    await msg.edit(embed=embed)
-                    updated_msgs += 1
-                except (discord.NotFound, discord.Forbidden, discord.HTTPException):
-                    pass
+            if (updated_schedule or schedule).get("ui_style") == "buttons":
+                # ボタン式は候補ではなくボード単位で描き直す
+                updated_msgs = await self._refresh_all_vote_boards(
+                    guild_id, updated_schedule or schedule
+                )
+            else:
+                roster_active, roster_retired = await self._roster_ids(guild_id)
+                options = await self.repo.list_options(guild_id, schedule_id)
+                for opt in options:
+                    if not opt.get("message_id"):
+                        continue
+                    try:
+                        msg = await channel.fetch_message(int(opt["message_id"]))
+                        embed = await svc.build_option_embed(
+                            self.repo,
+                            guild_id,
+                            self.bot,
+                            updated_schedule,
+                            opt,
+                            interaction.guild,
+                            roster_active_ids=roster_active,
+                            roster_retired_ids=roster_retired,
+                        )
+                        await msg.edit(embed=embed)
+                        updated_msgs += 1
+                    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                        pass
 
         # 変更をチャンネルに通知
         if channel:
@@ -1070,6 +1218,11 @@ class Schedule(commands.Cog):
             return
         schedule = await self.repo.get_schedule(guild_id, option["schedule_id"])
         if not schedule or schedule["closed_flag"]:
+            return
+        if schedule.get("ui_style") == "buttons":
+            # ボタン式の投票ボードに付いたリアクションは投票ではない。
+            # message_id がボードを指すため、放っておくと誰かの落書き
+            # リアクションが「ボードの先頭候補への投票」に化ける
             return
 
         user_id = str(payload.user_id)
@@ -1146,6 +1299,242 @@ class Schedule(commands.Cog):
             await message.edit(embed=embed)
         except discord.HTTPException:
             pass
+
+    # ====================================================================
+    # ボタン投票（ui_style='buttons'）
+    # ====================================================================
+    async def _post_vote_boards(
+        self,
+        guild_id: int,
+        schedule: dict,
+        options: list[dict],
+        channel,
+        guild: discord.Guild | None,
+        mention: str | None,
+        roster_active: set[str],
+        roster_retired: set[str],
+    ) -> int:
+        """投票ボードを投稿する（候補 25 件ごとに1メッセージ）。
+
+        メンションは先頭の1通だけに付ける（リアクション式と同じ判断）。
+        各候補の message_id には**載っているボードの ID** を入れる。
+        削除・締切変更のフローが従来どおり message_id を辿れるようにするため
+        （同じ ID が候補の数だけ並ぶが、重複は各フローが除外する）。
+        """
+        chunks = [
+            options[i : i + svc.MAX_BOARD_OPTIONS]
+            for i in range(0, len(options), svc.MAX_BOARD_OPTIONS)
+        ]
+        for page, chunk in enumerate(chunks, start=1):
+            embed = await svc.build_vote_board_embed(
+                self.repo,
+                guild_id,
+                self.bot,
+                schedule,
+                chunk,
+                guild,
+                roster_active_ids=roster_active,
+                roster_retired_ids=roster_retired,
+                page=page,
+                total_pages=len(chunks),
+            )
+            view = discord.ui.View(timeout=None)
+            for opt in chunk:
+                view.add_item(VoteOptionButton(str(opt["option_id"]), str(opt["label"])))
+            msg = await channel.send(
+                content=mention if page == 1 else None, embed=embed, view=view
+            )
+            for opt in chunk:
+                await self.repo.set_option_message(guild_id, str(opt["option_id"]), str(msg.id))
+        return len(chunks)
+
+    async def _resolve_vote_target(
+        self, interaction: discord.Interaction, option_id: str
+    ) -> tuple[dict, dict] | None:
+        """ボタンの option_id を (候補, 予定) へ解決する。ダメなら理由を返信。
+
+        検索は interaction.guild_id でスコープされるので、他ギルドの
+        custom_id を持ち込んでも「見つかりません」で終わる（越境しない）。
+        """
+        if interaction.guild_id is None:
+            await interaction.response.send_message(
+                embed=error_embed("この操作はサーバー内でのみ行えます。"), ephemeral=True
+            )
+            return None
+        option = await self.repo.get_option(interaction.guild_id, option_id)
+        schedule = None
+        if option:
+            schedule = await self.repo.get_schedule(interaction.guild_id, option["schedule_id"])
+        if option is None or schedule is None:
+            await interaction.response.send_message(
+                embed=error_embed(
+                    "この候補は見つかりません。投票が削除された可能性があります。"
+                ),
+                ephemeral=True,
+            )
+            return None
+        if schedule["closed_flag"]:
+            await interaction.response.send_message(
+                embed=error_embed("この投票は締切済みです。"), ephemeral=True
+            )
+            return None
+        return option, schedule
+
+    async def open_vote_picker(self, interaction: discord.Interaction, option_id: str) -> None:
+        """候補ボタン → 自分にだけ見えるステータス選択を出す。
+
+        Embed は候補1件の詳細（build_option_embed）。ボードでは名前を
+        打ち切っているので、全員分の顔ぶれはここで見える。
+        """
+        resolved = await self._resolve_vote_target(interaction, option_id)
+        if resolved is None:
+            return
+        option, schedule = resolved
+        guild_id = interaction.guild_id
+
+        roster_active, roster_retired = await self._roster_ids(guild_id)
+        embed = await svc.build_option_embed(
+            self.repo,
+            guild_id,
+            self.bot,
+            schedule,
+            option,
+            interaction.guild,
+            roster_active_ids=roster_active,
+            roster_retired_ids=roster_retired,
+        )
+        votes = await self.repo.list_votes(guild_id, option_id)
+        mine = next((v for v in votes if v["user_id"] == str(interaction.user.id)), None)
+        note = (
+            f"あなたの現在の回答: **{STATUS_LABELS[mine['status']]}**"
+            if mine
+            else "あなたはこの候補にまだ回答していません。"
+        )
+        gconf = await config.for_guild(guild_id)
+        view = build_status_picker_view(gconf, interaction.guild, option_id)
+        await interaction.response.send_message(
+            content=note, embed=embed, view=view, ephemeral=True
+        )
+
+    async def apply_vote(
+        self, interaction: discord.Interaction, option_id: str, status: str
+    ) -> None:
+        """ステータスボタン → 票を書き、ボードとステータス選択を描き直す。"""
+        resolved = await self._resolve_vote_target(interaction, option_id)
+        if resolved is None:
+            return
+        option, schedule = resolved
+        guild_id = interaction.guild_id
+        user_id = str(interaction.user.id)
+
+        if status == "clear":
+            await self.repo.remove_vote(guild_id, option_id, user_id)
+            note = f"「{option['label']}」の回答を取り消しました。"
+        else:
+            await self.repo.set_vote(guild_id, option_id, user_id, status)
+            note = f"「{option['label']}」に **{STATUS_LABELS[status]}** で回答しました。"
+
+        # 自分への応答を先に返す（ボードの更新失敗で回答まで失敗に
+        # 見せない。票は既に書けている）
+        roster_active, roster_retired = await self._roster_ids(guild_id)
+        embed = await svc.build_option_embed(
+            self.repo,
+            guild_id,
+            self.bot,
+            schedule,
+            option,
+            interaction.guild,
+            roster_active_ids=roster_active,
+            roster_retired_ids=roster_retired,
+        )
+        try:
+            await interaction.response.edit_message(content=note, embed=embed)
+        except discord.HTTPException as e:
+            log.warning("ステータス選択の更新に失敗 (guild=%s): %s", guild_id, e)
+
+        await self._refresh_vote_board(
+            guild_id, schedule, option, roster_active=roster_active, roster_retired=roster_retired
+        )
+
+    async def _refresh_vote_board(
+        self,
+        guild_id: int,
+        schedule: dict,
+        option: dict,
+        *,
+        roster_active: set[str] | None = None,
+        roster_retired: set[str] | None = None,
+    ) -> bool:
+        """候補が載っている投票ボードを最新の集計で描き直す。
+
+        ページ構成（どの候補がどのメッセージに載っているか）は DB の
+        message_id から復元する。戻り値は編集できたかどうか。
+        """
+        message_id = option.get("message_id")
+        if not message_id:
+            return False
+        channel = self.bot.get_channel(int(schedule["channel_id"]))
+        if channel is None:
+            return False
+
+        options = await self.repo.list_options(guild_id, schedule["schedule_id"])
+        board_ids: list[str] = []
+        for o in options:
+            mid = str(o.get("message_id") or "")
+            if mid and mid not in board_ids:
+                board_ids.append(mid)
+        page_options = [o for o in options if str(o.get("message_id") or "") == str(message_id)]
+        if not page_options:
+            return False
+        page = board_ids.index(str(message_id)) + 1 if str(message_id) in board_ids else 1
+
+        if roster_active is None or roster_retired is None:
+            roster_active, roster_retired = await self._roster_ids(guild_id)
+        embed = await svc.build_vote_board_embed(
+            self.repo,
+            guild_id,
+            self.bot,
+            schedule,
+            page_options,
+            getattr(channel, "guild", None),
+            roster_active_ids=roster_active,
+            roster_retired_ids=roster_retired,
+            page=page,
+            total_pages=max(len(board_ids), 1),
+        )
+        try:
+            msg = await channel.fetch_message(int(message_id))
+            await msg.edit(embed=embed)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as e:
+            log.warning(
+                "投票ボードの更新に失敗 (guild=%s, schedule=%s): %s",
+                guild_id,
+                schedule.get("schedule_id"),
+                e,
+            )
+            return False
+        return True
+
+    async def _refresh_all_vote_boards(self, guild_id: int, schedule: dict) -> int:
+        """予定の全投票ボードを描き直す（締切変更などの一括更新用）。"""
+        options = await self.repo.list_options(guild_id, schedule["schedule_id"])
+        seen: set[str] = set()
+        updated = 0
+        roster_active, roster_retired = await self._roster_ids(guild_id)
+        for opt in options:
+            mid = str(opt.get("message_id") or "")
+            if not mid or mid in seen:
+                continue
+            seen.add(mid)
+            if await self._refresh_vote_board(
+                guild_id,
+                schedule,
+                opt,
+                roster_active=roster_active,
+                roster_retired=roster_retired,
+            ):
+                updated += 1
+        return updated
 
     # ====================================================================
     # 締切・通知ヘルパー（Reminders から呼ばれる）

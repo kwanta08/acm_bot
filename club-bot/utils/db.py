@@ -178,7 +178,10 @@ CREATE TABLE IF NOT EXISTS schedules (
     -- （/schedule delete は投票メッセージを消すが、票データは残す）
     deleted_flag       INTEGER NOT NULL DEFAULT 0,
     -- 確定した候補（v17。schedule_options.option_id）。NULL は未確定
-    confirmed_option_id TEXT
+    confirmed_option_id TEXT,
+    -- 投票 UI 方式（v23）。'reaction' = 候補ごとに1メッセージ＋リアクション、
+    -- 'buttons' = 全候補を1メッセージに集約＋ボタン投票
+    ui_style           TEXT NOT NULL DEFAULT 'reaction'
 );
 """,
     "schedule_options": f"""
@@ -626,6 +629,9 @@ POSTGRES_VIEW_DDL = "\n".join(
 #    （年度替わり。既存メンバーはすべて active。migrations/013）
 # 15: discord_name_cache を追加（ダッシュボードの ID → 表示名解決用。
 #    bot がギルドキャッシュから書き、Web 側が読む。migrations/014）
+# 23: schedules に ui_style を追加（投票 UI 方式。'reaction' = 候補ごとに
+#    1メッセージ＋リアクション投票（従来）、'buttons' = 全候補を1メッセージに
+#    集約＋ボタン投票。既存行は 'reaction' のまま。migrations/022）
 # 22: skill_tags / members.skills / tools / tool_loans / incidents / tasks を
 #    DROP（技能タグ・工具の貸出・ヒヤリハット報告を廃止し、タスクの正本を
 #    Todoist へ一本化した。migrations/021）
@@ -636,7 +642,7 @@ POSTGRES_VIEW_DDL = "\n".join(
 # 16: layer_sessions.layer_num を INTEGER から TEXT へ変更（/layer start は
 #    「シュリンク」等のテキスト層番号を受け付ける仕様。PostgreSQL では
 #    asyncpg の DataError になっていた。migrations/015）
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
@@ -1083,6 +1089,9 @@ class Database:
         if version < 22:
             await self._migrate_v22_remove_features()
 
+        if version < 23:
+            await self._migrate_v23_schedule_ui_style()
+
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
 
@@ -1370,6 +1379,26 @@ class Database:
         ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
         await self._executescript(ddl_map["progress_snapshots"])
         log.info("progress_snapshots テーブルを作成しました（v18）。")
+
+    async def _migrate_v23_schedule_ui_style(self) -> None:
+        """
+        v23: schedules に ui_style を追加する（冪等）。
+
+        'reaction' = 候補ごとに1メッセージ＋リアクション投票（従来）、
+        'buttons' = 全候補を1メッセージに集約＋ボタン投票。
+
+        既定値つきの列追加のみで、**既存行はすべて 'reaction' になる**。
+        投稿済みの投票メッセージはリアクションで動いているので、
+        マイグレーションで挙動を変えない（新規作成分だけがギルド別設定
+        SCHEDULE_UI_STYLE に従う）。ALTER 前に列の有無を確認するのは
+        v17 と同じ理由（PostgreSQL の DuplicateColumn 対策）。
+        """
+        cols = await self._table_columns("schedules")
+        if "ui_style" not in cols:
+            await self.execute(
+                "ALTER TABLE schedules ADD COLUMN ui_style TEXT NOT NULL DEFAULT 'reaction'"
+            )
+            log.info("schedules テーブルに ui_style カラムを追加しました（v23）。")
 
     async def _migrate_v17_schedule_confirmed(self) -> None:
         """

@@ -119,6 +119,13 @@ DEFAULT_LAYER_SESSION_AUTO_CANCEL_MINUTES = 720
 # 送るかどうかは WEEKLY_DIGEST_ENABLED（既定 OFF）が決める（ADR 0024）。
 DEFAULT_WEEKLY_DIGEST_WEEKDAY = 0
 
+# 日程調整の投票 UI 方式。'buttons' = 全候補を1メッセージに集約しボタンで
+# 投票（候補が横に並ぶ）、'reaction' = 候補ごとに1メッセージ＋リアクション
+# （従来）。ギルド別設定 SCHEDULE_UI_STYLE で上書きできる。
+# 不正値は既定へ落とす（例外を投げるとそのギルドの全コマンドが死ぬ）。
+SCHEDULE_UI_STYLES = ("buttons", "reaction")
+DEFAULT_SCHEDULE_UI_STYLE = "buttons"
+
 # 複数のロールをカンマ区切りで保存する設定キー（GuildConfig 側は list[int]）。
 # 追加するときは GuildConfig の属性も list[int] にすること。
 # /setup（cogs/setup_wizard.py）と /set_role（cogs/settings.py）が
@@ -184,6 +191,9 @@ class GuildConfig:
     schedule_emoji_ok_id: int | None = None
     schedule_emoji_maybe_id: int | None = None
     schedule_emoji_ng_id: int | None = None
+
+    # 日程調整の投票 UI 方式（SCHEDULE_UI_STYLES のいずれか）
+    schedule_ui_style: str = DEFAULT_SCHEDULE_UI_STYLE
 
     @property
     def today_channel_id(self) -> int | None:
@@ -278,6 +288,11 @@ class Config:
     # 囲い引用符・空白・不正値で例外を投げると for_guild() が失敗し、
     # 権限チェックを含む全コマンドが動かなくなるため（不正値は未設定扱い）。
     @property
+    def schedule_ui_style(self) -> str:
+        raw = _get_str("SCHEDULE_UI_STYLE").lower()
+        return raw if raw in SCHEDULE_UI_STYLES else DEFAULT_SCHEDULE_UI_STYLE
+
+    @property
     def schedule_emoji_ok_id(self) -> int | None:
         return _get_int("SCHEDULE_EMOJI_OK_ID")
 
@@ -321,6 +336,7 @@ class Config:
             schedule_emoji_ok_id=self.schedule_emoji_ok_id,
             schedule_emoji_maybe_id=self.schedule_emoji_maybe_id,
             schedule_emoji_ng_id=self.schedule_emoji_ng_id,
+            schedule_ui_style=self.schedule_ui_style,
         )
 
         if db is not None:
@@ -366,6 +382,11 @@ class Config:
             club_name = await repo.get(guild_id, "CLUB_NAME")
             if club_name:
                 gc.club_name = club_name
+
+            # 投票 UI 方式。不正値は既定のまま（例外を投げない）
+            ui_style = await repo.get(guild_id, "SCHEDULE_UI_STYLE")
+            if ui_style and ui_style.strip().lower() in SCHEDULE_UI_STYLES:
+                gc.schedule_ui_style = ui_style.strip().lower()
 
             competition_date = await repo.get(guild_id, "COMPETITION_DATE")
             if competition_date:
