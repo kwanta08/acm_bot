@@ -34,7 +34,7 @@ from cogs.reminders import _build_grouped_description
 from config import config
 from repositories.audit_log_repository import AuditLogRepository
 from repositories.progress_repository import ProgressRepository
-from services import progress_sync_service
+from services import parent_chain, progress_sync_service
 from services import progress_tree as pt
 from services.milestone_service import (
     VERDICT_BEHIND,
@@ -378,7 +378,8 @@ def due_items(tasks: list, until, category: str) -> list[dict]:
     """通知対象タスク（期限が until 以前。超過含む）を整形して返す。
 
     _build_grouped_description が受け取る item 形式に合わせる。
-    期限なし・until より先のタスクは除外する。
+    期限なし・until より先のタスクは除外する。task_id は「親タスク」
+    パンくずの解決（push_project_tasks）で元タスクを引き直すために持つ。
     """
     items = []
     for t in tasks:
@@ -393,6 +394,7 @@ def due_items(tasks: list, until, category: str) -> list[dict]:
         pr_int = raw_pr.value if hasattr(raw_pr, "value") else (raw_pr or 1)
         items.append(
             {
+                "task_id": str(t.id),
                 "due_date": due_date,
                 "title": t.content,
                 "priority": pr_int,
@@ -909,6 +911,18 @@ class Progress(commands.Cog):
             self.db, guild_id
         )
 
+        # 「親タスク」パンくずの解決用に、進捗ツリーをギルドにつき1回だけ読む
+        # （通知1件ごとに Todoist API や DB を叩かない）。読めなくても通知は
+        # 送る（親タスク表示が省略されるだけ）
+        anchor_ids = {link["node_id"] for link in links}
+        try:
+            tree = await self.load_tree(guild_id)
+        except Exception as e:  # noqa: BLE001  (親表示の失敗で通知を止めない)
+            log.warning(
+                "親タスク表示用のツリー読込に失敗 (guild=%s): %s", guild_id, type(e).__name__
+            )
+            tree = None
+
         gconf = await config.for_guild(guild_id)
         today = now().date()
         until = today + timedelta(days=7)
@@ -928,6 +942,19 @@ class Progress(commands.Cog):
             items = due_items(proj_tasks, until, link["project_name"])
             if not items:
                 continue
+
+            if tree is not None:
+                task_by_id = {str(t.id): t for t in proj_tasks}
+                get_task = getattr(svc, "get_task", None)
+                for item in items:
+                    raw_task = task_by_id.get(item["task_id"])
+                    if raw_task is None:
+                        continue
+                    parent = await parent_chain.resolve_parent_field(
+                        tree, raw_task, anchor_ids, get_task
+                    )
+                    if parent:
+                        item["parent"] = parent
 
             channel_id = (
                 progress_sync_service.resolve_link_channel_id(link, default_channel_id)
