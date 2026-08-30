@@ -16,8 +16,14 @@ from functools import lru_cache
 # セッション Cookie 名（署名付き。サーバー側セッションストアは持たない）
 SESSION_COOKIE = "clubbot_dashboard_session"
 
-# 既定のセッション有効期間（秒）。7日
-DEFAULT_SESSION_MAX_AGE = 7 * 24 * 60 * 60
+# 既定のセッション有効期間（秒）。24時間（D2-4）。
+#
+# Cookie には**所属ギルド一覧と manage_guild** が焼き込まれるため、
+# 退会・降格の反映がセッション寿命まで遅れる。7日は長すぎた。
+# 権限レベル（L1〜L4）は Cookie に焼かれず毎リクエスト DB から引くので、
+# 古くなるのはこの2つだけ（dashboard/README.md 参照）。
+# DASHBOARD_SESSION_MAX_AGE で上書きできる。
+DEFAULT_SESSION_MAX_AGE = 24 * 60 * 60
 
 DISCORD_API_BASE = "https://discord.com/api/v10"
 DISCORD_AUTHORIZE_URL = "https://discord.com/oauth2/authorize"

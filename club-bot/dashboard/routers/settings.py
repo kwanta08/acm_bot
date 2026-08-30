@@ -35,7 +35,8 @@ class SettingSpec:
 
 # 編集を許可する設定キー（これ以外は参照も更新もしない）
 EDITABLE_SETTINGS: tuple[SettingSpec, ...] = (
-    SettingSpec("GUILD_NAME", "サークル名", "text", "週次サマリー等の表示に使う名称"),
+    # キーは config.py が読む CLUB_NAME（v22 で GUILD_NAME から統一。D2-1）
+    SettingSpec("CLUB_NAME", "サークル名", "text", "週次サマリー等の表示に使う名称"),
     SettingSpec("BOT_LOG_CHANNEL_ID", "Bot ログチャンネル", "channel"),
     SettingSpec("DEFAULT_ANNOUNCE_CHANNEL_ID", "共通アナウンス先", "channel"),
     SettingSpec("DEFAULT_TASK_CHANNEL_ID", "タスク通知先", "channel"),

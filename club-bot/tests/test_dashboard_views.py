@@ -729,3 +729,23 @@ def test_layer_records_have_no_pivot():
         assert body["pivot"] is None
     finally:
         client.__exit__(None, None, None)
+
+
+def test_summary_response_shape_is_stable():
+    """`/summary` の応答形が変わっていないこと（D2-3 のカードが依存する）。"""
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    client = _logged_in_client(db_path)
+    try:
+        body = client.get(f"/api/guilds/{GUILD_A}/summary").json()
+        assert set(body) == {"guild", "viewer", "counts"}
+        assert set(body["counts"]) == {"members", "teams", "progress_nodes", "open_tasks"}
+        for value in body["counts"].values():
+            assert isinstance(value, int)
+        viewer = body["viewer"]
+        assert isinstance(viewer["level"], int)
+        assert isinstance(viewer["manage_guild"], bool)
+        assert isinstance(viewer["can_edit"], bool)
+        assert body["guild"]["id"] == str(GUILD_A)
+    finally:
+        client.__exit__(None, None, None)

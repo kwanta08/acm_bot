@@ -210,6 +210,9 @@ def test_pg_indexes_are_created_after_migrations(monkeypatch):
         async def execute(self, sql):  # 実際の DDL 実行はしない
             return None
 
+        async def fetchval(self, sql, *params):  # advisory lock も no-op（D2-6）
+            return None
+
     class _FakeAcquire:
         async def __aenter__(self):
             return _FakeConnection()
@@ -228,6 +231,15 @@ def test_pg_indexes_are_created_after_migrations(monkeypatch):
         @staticmethod
         async def create_pool(**kwargs):
             return _FakePool()
+
+        # advisory lock 用のプール外接続（D2-6）も no-op で受ける
+        @staticmethod
+        async def connect(**kwargs):
+            class _Con(_FakeConnection):
+                async def close(self):
+                    return None
+
+            return _Con()
 
     monkeypatch.setattr("utils.db.asyncpg", _FakeAsyncpg)
 
@@ -736,3 +748,91 @@ if __name__ == "__main__":
     else:
         print("ライブ PG テストは CLUB_TEST_PG_DSN 未設定のためスキップ")
     print("全テスト成功")
+
+
+def test_pg_live_migration_lock_serializes_concurrent_connects():
+    """bot と dashboard の同時起動でマイグレーションがレースしないこと（D2-6）。
+
+    `_migrate_versioned()` の呼び出しが `pg_advisory_lock` で直列化される。
+    2つの `Database` から同時に `connect()` し、計装した
+    `_migrate_versioned` の実行区間が**重ならない**ことを確かめる
+    （ロックが無いと2区間はほぼ確実に重なる）。
+    """
+    import time
+    from unittest import mock
+
+    dsn = _guarded_dsn()
+
+    async def _main() -> None:
+        db1 = Database("./unused.db", database_url=dsn)
+        db2 = Database("./unused.db", database_url=dsn)
+        intervals: list[tuple[float, float]] = []
+
+        def _instrument(db: Database):
+            original = db._migrate_versioned
+
+            async def _wrapped() -> None:
+                start = time.monotonic()
+                # レース窓を意図的に広げる（ロックが無ければ確実に重なる）
+                await asyncio.sleep(0.3)
+                await original()
+                intervals.append((start, time.monotonic()))
+
+            return _wrapped
+
+        with (
+            mock.patch.object(db1, "_migrate_versioned", _instrument(db1)),
+            mock.patch.object(db2, "_migrate_versioned", _instrument(db2)),
+        ):
+            try:
+                await asyncio.gather(db1.connect(), db2.connect())
+            finally:
+                await db1.close()
+                await db2.close()
+
+        assert len(intervals) == 2
+        first, second = sorted(intervals)
+        assert first[1] <= second[0], (
+            f"マイグレーション区間が重なっている: {intervals}"
+        )
+
+    run(_main())
+
+
+def test_pg_live_schema_version_is_current_after_concurrent_connect():
+    """同時 connect の後もスキーマバージョンが最新で安定していること。"""
+    dsn = _guarded_dsn()
+
+    async def _main() -> None:
+        db1 = Database("./unused.db", database_url=dsn)
+        db2 = Database("./unused.db", database_url=dsn)
+        try:
+            await asyncio.gather(db1.connect(), db2.connect())
+            assert await db1._user_version() == SCHEMA_VERSION
+            assert await db2._user_version() == SCHEMA_VERSION
+        finally:
+            await db1.close()
+            await db2.close()
+
+    run(_main())
+
+
+def test_pg_live_connect_with_pool_of_one_does_not_deadlock():
+    """`DB_POOL_MAX_SIZE=1` でも connect() が完了すること（D2-6 の監査指摘）。
+
+    advisory lock をプールから借りると、`_migrate_versioned()` 内のクエリが
+    同じプールの唯一の接続を待って自己デッドロックする。ロックは
+    プール外の専用接続で保持する。
+    """
+    dsn = _guarded_dsn()
+
+    async def _main() -> None:
+        db = Database("./unused.db", database_url=dsn, pool_min_size=1, pool_max_size=1)
+        try:
+            # デッドロックしていれば永久に返らない → タイムアウトで赤にする
+            await asyncio.wait_for(db.connect(), timeout=60)
+            assert await db.is_healthy()
+        finally:
+            await db.close()
+
+    run(_main())

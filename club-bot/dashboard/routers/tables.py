@@ -60,6 +60,9 @@ AUDIT_VALUE_MAX = 200
 # ?sheet= の長さ上限（schedule_id / 桁名。異常な長文をバインドしない）
 SHEET_ID_MAX = 200
 
+# ?q= の長さ上限（検索語。異常な長文をバインドしない）
+SEARCH_MAX = 200
+
 
 def _columns_payload(spec) -> list[dict]:
     return [
@@ -120,6 +123,18 @@ def _visible_spec(scope: GuildScope, table_key: str) -> TableSpec:
     return spec
 
 
+def _validate_sort(spec: TableSpec, sort: str | None, dir: str) -> None:
+    """`?sort=` / `?dir=` を検査する（不正は 400。500 にしない）。
+
+    列名はリポジトリ側（sortable_columns）でも検査されるが、
+    HTTP 400 への変換はここで行う。
+    """
+    if dir not in ("asc", "desc"):
+        raise HTTPException(status_code=400, detail="dir は asc か desc を指定してください。")
+    if sort is not None and sort not in spec.sortable_columns:
+        raise HTTPException(status_code=400, detail="その列では並び替えできません。")
+
+
 @router.get("/tables")
 async def list_tables(scope: ScopedGuild):
     """閲覧できる表の一覧を返す（権限が足りない表は出さない）。"""
@@ -140,6 +155,9 @@ async def read_table(
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
     offset: Annotated[int, Query(ge=0)] = 0,
     sheet: Annotated[str | None, Query(max_length=SHEET_ID_MAX)] = None,
+    q: Annotated[str | None, Query(max_length=SEARCH_MAX)] = None,
+    sort: Annotated[str | None, Query(max_length=100)] = None,
+    dir: Annotated[str, Query(max_length=10)] = "asc",
 ):
     """表の内容を返す（このサーバーの行のみ）。
 
@@ -148,6 +166,11 @@ async def read_table(
     予定・桁が 0 件でもエラーにしない（空のタブ一覧と空の行を返す）。
     """
     spec = _visible_spec(scope, table_key)
+    q = q or None
+    if q is not None and not spec.searchable:
+        raise HTTPException(status_code=400, detail="この表は検索に対応していません。")
+    sort = sort or None
+    _validate_sort(spec, sort, dir)
 
     repo = scope.bind(TableRepository(get_database()))
     sheets_payload: dict | None = None
@@ -164,8 +187,10 @@ async def read_table(
         rows: list[dict[str, Any]] = []
         total = 0
     else:
-        rows = await repo.list_rows(table_key, limit=limit, offset=offset, sheet_id=sheet_id)
-        total = await repo.count_rows(table_key, sheet_id=sheet_id)
+        rows = await repo.list_rows(
+            table_key, limit=limit, offset=offset, sheet_id=sheet_id, q=q, sort=sort, dir=dir
+        )
+        total = await repo.count_rows(table_key, sheet_id=sheet_id, q=q)
 
     maps = await _name_maps(scope, spec)
 
@@ -192,6 +217,10 @@ async def read_table(
             "label": spec.label,
             "pk": spec.pk,
             "description": spec.description,
+            # 検索対象列（無い表ではフロントが検索欄を出さない）
+            "searchable": list(spec.searchable),
+            # 並び替え可能列（ヘッダクリックの対象）
+            "sortable": list(spec.sortable_columns),
         },
         "columns": _columns_payload(spec),
         "rows": display.attach_display(spec, rows, maps),
@@ -211,6 +240,9 @@ async def export_table_csv(
     scope: ScopedGuild,
     table_key: str,
     sheet: Annotated[str | None, Query(max_length=SHEET_ID_MAX)] = None,
+    q: Annotated[str | None, Query(max_length=SEARCH_MAX)] = None,
+    sort: Annotated[str | None, Query(max_length=100)] = None,
+    dir: Annotated[str, Query(max_length=10)] = "asc",
 ):
     """表を CSV でダウンロードする（このサーバーの行のみ）。
 
@@ -226,14 +258,21 @@ async def export_table_csv(
     spec = _visible_spec(scope, table_key)
     if sheet is not None and table_key not in SHEET_TABLES:
         raise HTTPException(status_code=400, detail="この表はシート切替に対応していません。")
+    q = q or None
+    if q is not None and not spec.searchable:
+        raise HTTPException(status_code=400, detail="この表は検索に対応していません。")
+    sort = sort or None
+    _validate_sort(spec, sort, dir)
 
     repo = scope.bind(TableRepository(get_database()))
-    rows = await repo.list_all_rows(table_key, sheet_id=sheet)
+    rows = await repo.list_all_rows(table_key, sheet_id=sheet, q=q, sort=sort, dir=dir)
     maps = await _name_maps(scope, spec)
 
     detail = f"{len(rows)} 行を CSV 出力"
     if sheet is not None:
         detail += f"（シート: {sheet}）"
+    if q is not None:
+        detail += f"（検索: {q}）"
     await _audit(scope, "dashboard.export", spec.table, detail)
     # ファイル名にサーバー名を入れない（他者へ共有されたときの情報漏れを避ける）
     filename = f"{spec.key}_{scope.guild_id}.csv"
