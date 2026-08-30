@@ -3,3 +3,8 @@ target-version = "py310"
 line-length = 100
 # select は指定せず ruff 既定のルールセットを使う
 # （プロジェクト固有の緩和は下の ignore / per-file-ignores で行う）
+
+[tool.ruff.lint.per-file-ignores]
+# tests は import より前に sys.path / sys.modules（dotenv のモック等）の
+# 細工が必要で、E402（import が先頭にない）はここでは意図的
+"tests/**" = ["E402"]
