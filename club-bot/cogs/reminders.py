@@ -41,6 +41,7 @@ from repositories.stock_repository import StockRepository
 from services import todoist_task_service
 from services.layer_tracking_service import classify_stale_sessions
 from services.milestone_service import days_until_competition, evaluate_all
+from services.parent_chain import PARENT_FIELD_NAME
 from services.progress_sync_service import resolve_default_channel_id
 from services.progress_tree import load_tree
 from services.stock_service import low_items
@@ -133,7 +134,10 @@ def _build_grouped_description(
 ) -> str:
     """
     items: [{"due_date": date, "title": str, "priority": int,
-            "url": str | None, "category": str}]
+            "url": str | None, "category": str, "parent": str | None}]
+
+    parent は任意（進捗プロジェクト通知の「親タスク」パンくず。
+    services/parent_chain.py が組み立てる）。無いタスクには行を出さない。
     """
     today = now().date()
     lines = [
@@ -151,6 +155,8 @@ def _build_grouped_description(
                 line += f" （[開く]({it['url']})）"
             lines.append(line)
             lines.append(f"　　📂 {it['category']}")
+            if it.get("parent"):
+                lines.append(f"　　🧭 {PARENT_FIELD_NAME}: {it['parent']}")
         lines.append("")
     return "\n".join(lines).rstrip()
 
