@@ -19,6 +19,10 @@ from types import SimpleNamespace
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from cogs import progress as progress_cog
+from cogs.progress import Progress
+from config import GuildConfig
+from repositories.progress_repository import ProgressRepository
 from services import parent_chain as pc
 from services.parent_chain import (
     MAX_FIELD_VALUE_LEN,
@@ -31,6 +35,7 @@ from services.parent_chain import (
 )
 from services.progress_tree import ProgressNode, ProgressTree, build_and_aggregate
 from services.todoist_task_service import task_url
+from utils.db import Database
 from utils.parser import now
 
 G1 = 111
@@ -245,13 +250,6 @@ def test_cache_miss_without_parent_is_top_level():
 # ---------------------------------------------------------------------
 # push_project_tasks への統合（通知の埋め込み）
 # ---------------------------------------------------------------------
-from cogs import progress as progress_cog  # noqa: E402
-from cogs.progress import Progress  # noqa: E402
-from config import GuildConfig  # noqa: E402
-from repositories.progress_repository import ProgressRepository  # noqa: E402
-from utils.db import Database  # noqa: E402
-
-
 def _tmp_db_path() -> str:
     fd, path = tempfile.mkstemp(suffix=".db")
     os.close(fd)
