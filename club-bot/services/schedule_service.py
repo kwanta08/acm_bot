@@ -14,7 +14,7 @@ from typing import Any
 import discord
 
 from repositories.schedule_repository import ScheduleRepository
-from utils.embeds import schedule_embed
+from utils.embeds import MAX_EMBED_FIELDS, add_truncation_note, schedule_embed
 from utils.logger import get_logger
 from utils.parser import fmt_jp, from_iso
 
@@ -263,16 +263,19 @@ async def build_summary_embed(
     """締切後の結果要約 Embed（仕様 11.2.5）。
 
     `guild_id` を明示引数で受ける（ADR 0009 の完了条件2）。
+
+    **候補は inline field で横に並べる**（Discord は最大3列/行。
+    縦積みだと候補が多い予定で「どの日が良いか」の比較ができない）。
+    場所・締切を field にすると先頭の候補が同じ行に混ざって列がずれるため、
+    description 側に置く。value は3列時の狭い列幅でも読めるよう
+    状態ごとに1行（`参加 N: 名前…`）にする。
     """
     options = await repo.list_options(guild_id, schedule["schedule_id"])
     embed = schedule_embed(f"【締切】{schedule['title']} 集計結果")
-    if schedule.get("place"):
-        embed.add_field(name="場所", value=schedule["place"], inline=True)
-    embed.add_field(name="締切", value=fmt_jp(from_iso(schedule["deadline"])), inline=True)
 
     best_label = None
     best_ok = -1
-    for opt in options:
+    for index, opt in enumerate(options):
         votes = await repo.list_votes(guild_id, opt["option_id"])
 
         ok_users, ng_users, maybe_users = [], [], []
@@ -285,35 +288,38 @@ async def build_summary_embed(
             elif v["status"] == "maybe":
                 maybe_users.append(name)
 
-        summary_line = f"参加 {len(ok_users)}　不参加 {len(ng_users)}　未定 {len(maybe_users)}"
-        detail_lines = []
-        if ok_users:
-            detail_lines.append(f"参加: {', '.join(ok_users)}")
-        if ng_users:
-            detail_lines.append(f"不参加: {', '.join(ng_users)}")
-        if maybe_users:
-            detail_lines.append(f"未定: {', '.join(maybe_users)}")
-
-        value = summary_line
-        if detail_lines:
-            value += "\n" + "\n".join(detail_lines)
-
-        embed.add_field(name=opt["label"], value=value, inline=False)
-
+        # 最多参加の判定は**全候補**で行う。表示は 25 field で打ち切っても、
+        # 人に見せる集計値を打ち切った分だけで出さない
         if len(ok_users) > best_ok:
             best_ok = len(ok_users)
             best_label = opt["label"]
+
+        # 26 件目以降を add_field すると送信時に HTTPException(400) になり、
+        # finalize_schedule が握り潰すため集計サマリーごと無言で消える
+        if index >= MAX_EMBED_FIELDS:
+            continue
+
+        detail_lines = []
+        for status_label, users in (("参加", ok_users), ("不参加", ng_users), ("未定", maybe_users)):
+            line = f"{status_label} {len(users)}"
+            if users:
+                line += f": {', '.join(users)}"
+            detail_lines.append(line)
+
+        embed.add_field(name=opt["label"], value="\n".join(detail_lines), inline=True)
 
     # 「結局いつに決まったのか」を残す（G3-4）。
     #
     # **field ではなく description に足す。** 候補数に上限が無いので、
     # field を1つ増やすと上限25に当たる閾値が下がり、候補の多い予定で
-    # 集計サマリーごと投稿されなくなる（finalize_schedule は
-    # HTTPException を握り潰すため無言で消える）。
+    # 表示できる候補が減る。
     #
     # このサマリーは公開チャンネルへ出るので、L1 の部員に実行できない
     # コマンドを命令しない（主語を書く）。
     lines: list[str] = []
+    if schedule.get("place"):
+        lines.append(f"場所: {schedule['place']}")
+    lines.append(f"締切: {fmt_jp(from_iso(schedule['deadline']))}")
     if best_label:
         lines.append(f"最多参加候補: **{best_label}**（{best_ok}名）")
 
@@ -331,4 +337,7 @@ async def build_summary_embed(
 
     if lines:
         embed.description = "\n".join(lines)
+    add_truncation_note(
+        embed, len(options), MAX_EMBED_FIELDS, "最多参加候補は全候補から算出しています"
+    )
     return embed
