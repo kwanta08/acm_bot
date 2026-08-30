@@ -768,7 +768,16 @@ Docker で動かす場合は `deploy/docker-compose.dashboard.yml`
 - 死活: `curl -s https://<ドメイン>/healthz` → `{"status":"ok", "pool":{...}}`
   `pool.in_use` が `max_size` に張り付く場合は
   `DASHBOARD_DB_POOL_MAX_SIZE` を上げる
-- ログ: `journalctl -u club-bot-dashboard -f` / `/var/log/caddy/dashboard.log`
+- ログの見方（D2-5 でアプリログを追加）:
+  - **アプリの動作ログ（INFO 以上）**: `/home/ubuntu/club-bot/logs/dashboard.log`。
+    `utils/logger.py` の RotatingFileHandler（5MB × 5世代）が書く。
+    出力先はサービスの `Environment=LOG_DIR=` で指定（相対 `logs/` は
+    `ProtectHome=read-only` で書けず再起動ループになるため必ず絶対パス）。
+    レベルは `DASHBOARD_LOG_LEVEL`（例: `DEBUG` / `WARNING`）で上書きできる
+  - **プロセスの標準出力（uvicorn のアクセスログ等）**: 同 `dashboard.out` /
+    `dashboard.err`（systemd の append。dashboard.log とはファイルを分けてある —
+    同じファイルに向けるとローテーションと追記 fd が競合する）
+  - ほか: `journalctl -u club-bot-dashboard -f` / `/var/log/caddy/dashboard.log`
 - 接続数の目安: bot(10) + ダッシュボード(10) + LISTEN 用(1) で、
   PostgreSQL の `max_connections`（既定 100）に十分収まる
 

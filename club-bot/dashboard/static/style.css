@@ -1,29 +1,163 @@
-/* ダッシュボードの最小スタイル（自己ホスト。外部 CDN に依存しない） */
+/* ダッシュボードの最小スタイル（自己ホスト。外部 CDN に依存しない）
+ *
+ * D0-3: 値はすべて :root のデザイントークンで定義し、ルール本体では
+ * var() だけを参照する（検査: tests/test_dashboard_style_tokens.py）。
+ * ダークテーマは prefers-color-scheme でトークンを再定義する
+ * （明示切替 [data-theme] は D3-4 で追加する）。
+ */
 :root {
+  /* --- 色（ライト） --- */
   --bg: #ffffff;
   --fg: #1f2328;
   --muted: #656d76;
   --border: #d8dee4;
-  --accent: #4a86e8;
+  /* アクセントは白文字と 4.88:1（WCAG AA。§色の受入条件で実測） */
+  --accent: #2f6fd0;
   --accent-fg: #ffffff;
   --row-alt: #f6f8fa;
   --danger: #b42318;
+
+  /* --- 余白スケール（4px 基準） --- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+
+  /* --- 微調整の余白（既存レイアウトを保持する実測値） --- */
+  --pad-hairline: 0.15rem;
+  --pad-xs: 0.3rem;
+  --pad-s: 0.35rem;
+  --pad-cell-y: 0.4rem;
+  --pad-cell-x: 0.65rem;
+  --pad-control-x: 0.85rem;
+  --stack-m: 0.9rem;
+
+  /* --- タイポグラフィ --- */
+  --font-body: 15px;
+  --font-title: 1.05rem;
+  --font-s: 0.9rem;
+  --font-xs: 0.85rem;
+  --font-2xs: 0.8rem;
+  --font-em-s: 0.85em;
+  --font-card-value: 1.6rem;
+  --leading-body: 1.6;
+  --leading-names: 1.7;
+
+  /* --- 幅 --- */
+  --w-input-min: 8rem;
+  --w-settings-max: 36rem;
+  --w-card-min: 11rem;
+  --w-sidenav: 13rem;
+
+  /* --- 表の最大高さ（sticky ヘッダを効かせる。D3-5） --- */
+  --grid-max-h: 70vh;
+  --w-cell-min: 9rem;
+  --w-tab-max: 16rem;
+
+  /* --- 角丸（§デザイン方針の体系。D3 で参照をこちらへ移す） --- */
+  --radius-card: 16px;
+  --radius-control: 10px;
+  --radius-input: 8px;
+  /* 既存の見た目を保持している現行値（D3 で上の体系へ置き換える） */
+  --radius-legacy-s: 4px;
+  --radius-legacy-m: 6px;
+  --radius-legacy-l: 8px;
+
+  /* --- 線 --- */
+  --border-w: 1px;
+  --border-w-strong: 2px;
+
+  /* --- 影（ダークでは影に頼らず境界線で面を分ける） --- */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px -12px rgb(0 0 0 / 0.12);
+
+  /* --- モーション（120〜180ms。§デザイン方針） --- */
+  --motion-fast: 150ms;
+
+  /* --- タップ領域の最小サイズ（44×44px。D1-4 / D3-5） --- */
+  --tap-min: 44px;
+
+  /* --- 押下時のシフト量（モーションは opacity と translateY のみ） --- */
+  --press-shift: 2px;
+
+  /* --- sr-only の折りたたみサイズ --- */
+  --sr-size: 1px;
+
+  /* --- z-index --- */
+  --z-sticky: 1;
 }
 
+/* ダークテーマ（D3-4）。3箇所で矛盾なく定義する:
+   1. :root                              … ライトの既定（上）
+   2. @media + :root:not([data-theme="light"]) … OS がダーク、かつ明示ライトでない
+   3. :root[data-theme="dark"]           … 明示ダーク（OS 設定より優先）
+   2 と 3 の値は**必ず同じ**に保つ（tests/test_dashboard_style_tokens.py が
+   色トークンの過不足を検査する） */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0d1117;
     --fg: #e6edf3;
     --muted: #9198a1;
     --border: #30363d;
-    --accent: #4a86e8;
+    --accent: #2f6fd0;
     --accent-fg: #ffffff;
     --row-alt: #161b22;
     --danger: #ff7b72;
+    --shadow-card: none;
   }
 }
 
+:root[data-theme="dark"] {
+  --bg: #0d1117;
+  --fg: #e6edf3;
+  --muted: #9198a1;
+  --border: #30363d;
+  --accent: #2f6fd0;
+  --accent-fg: #ffffff;
+  --row-alt: #161b22;
+  --danger: #ff7b72;
+  --shadow-card: none;
+}
+
 * { box-sizing: border-box; }
+
+/* キーボードフォーカスの可視化（D3-6）。outline: none はどこにも書かない。
+   offset で要素の外側に出すため、アクセント背景のボタンでも周囲の地色との
+   境界にリングが見える */
+:focus-visible {
+  outline: var(--border-w-strong) solid var(--accent);
+  outline-offset: var(--border-w-strong);
+}
+
+/* モーション（§デザイン方針: 120〜180ms、opacity と transform のみ） */
+button, .button, .sheet-tab, .card {
+  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) ease;
+}
+
+button:active, .button:active, .sheet-tab:active {
+  transform: translateY(var(--press-shift));
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* スクリーンリーダー専用テキスト（表の caption 等。D3-6） */
+.sr-only {
+  position: absolute;
+  width: var(--sr-size);
+  height: var(--sr-size);
+  margin: calc(-1 * var(--sr-size));
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
 
 body {
   margin: 0;
@@ -31,46 +165,46 @@ body {
   color: var(--fg);
   font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans",
     "Noto Sans JP", sans-serif;
-  font-size: 15px;
-  line-height: 1.6;
+  font-size: var(--font-body);
+  line-height: var(--leading-body);
 }
 
 .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1rem;
-  padding: 0.75rem 1.25rem;
-  border-bottom: 1px solid var(--border);
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: var(--border-w) solid var(--border);
 }
 
-.topbar h1 { font-size: 1.05rem; margin: 0; }
+.topbar h1 { font-size: var(--font-title); margin: 0; }
 
-.account { color: var(--muted); font-size: 0.9rem; }
+.account { color: var(--muted); font-size: var(--font-s); }
 
-main { padding: 1.25rem; }
+main { padding: var(--space-5); }
 
 .footer {
-  padding: 1rem 1.25rem;
+  padding: var(--space-4) var(--space-5);
   color: var(--muted);
-  font-size: 0.85rem;
-  border-top: 1px solid var(--border);
+  font-size: var(--font-xs);
+  border-top: var(--border-w) solid var(--border);
 }
 
 .loading, .empty { color: var(--muted); }
 
 .error {
   color: var(--danger);
-  border: 1px solid var(--danger);
-  border-radius: 6px;
-  padding: 0.75rem 1rem;
+  border: var(--border-w) solid var(--danger);
+  border-radius: var(--radius-legacy-m);
+  padding: var(--space-3) var(--space-4);
 }
 
 button, .button {
   font: inherit;
-  padding: 0.35rem 0.85rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  padding: var(--pad-s) var(--pad-control-x);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-legacy-m);
   background: var(--bg);
   color: var(--fg);
   cursor: pointer;
@@ -88,20 +222,20 @@ button.primary, .button.primary {
 .sheetbar {
   display: flex;
   align-items: stretch;
-  gap: 0.25rem;
-  margin-bottom: 0.9rem;
-  border-bottom: 2px solid var(--border);
+  gap: var(--space-1);
+  margin-bottom: var(--stack-m);
+  border-bottom: var(--border-w-strong) solid var(--border);
   overflow-x: auto;               /* タブが多いときは横スクロール */
   scrollbar-width: thin;
 }
 
 .sheet-tab {
   flex: 0 0 auto;                 /* タブを潰さず横に並べてスクロールさせる */
-  max-width: 16rem;
-  padding: 0.35rem 0.85rem;
-  border: 1px solid var(--border);
+  max-width: var(--w-tab-max);
+  padding: var(--pad-s) var(--pad-control-x);
+  border: var(--border-w) solid var(--border);
   border-bottom: none;
-  border-radius: 6px 6px 0 0;
+  border-radius: var(--radius-legacy-m) var(--radius-legacy-m) 0 0;
   background: var(--row-alt);
   color: var(--fg);
   cursor: pointer;
@@ -131,23 +265,36 @@ table.grid.pivot td { vertical-align: top; }
 
 td.pivot-at { white-space: nowrap; font-weight: 600; }
 
-td.pivot-cell { white-space: normal; min-width: 9rem; }
+td.pivot-cell { white-space: normal; min-width: var(--w-cell-min); }
 
 .pivot-count {
   color: var(--muted);
-  font-size: 0.8rem;
-  margin-bottom: 0.15rem;
+  font-size: var(--font-2xs);
+  margin-bottom: var(--pad-hairline);
 }
 
-.pivot-names { white-space: pre-line; line-height: 1.7; }
+.pivot-names { white-space: pre-line; line-height: var(--leading-names); }
 
-/* 表グリッド（横スクロールは表の中だけに閉じ込める） */
-.grid-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+/* 表グリッド（横スクロールは表の中だけに閉じ込める）。
+   面はカード1種類（.card）に統一し、ここはレイアウトだけ持つ（D3-2） */
+.grid-wrap {
+  overflow: auto;
+  /* 高さ制限が無いと sticky ヘッダは実際には効かない（D3-5）。
+     dvh が使える環境では @supports で差し替える（アドレスバーの伸縮で跳ねない） */
+  max-height: var(--grid-max-h);
+  padding: 0; /* 表はカードの縁いっぱいまで使う（スクロールバーを内側に寄せない） */
+}
 
-table.grid { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+@supports (height: 1dvh) {
+  :root {
+    --grid-max-h: 70dvh;
+  }
+}
+
+table.grid { border-collapse: collapse; width: 100%; font-size: var(--font-s); }
 table.grid th, table.grid td {
-  border-bottom: 1px solid var(--border);
-  padding: 0.4rem 0.65rem;
+  border-bottom: var(--border-w) solid var(--border);
+  padding: var(--pad-cell-y) var(--pad-cell-x);
   text-align: left;
   white-space: nowrap;
 }
@@ -155,49 +302,225 @@ table.grid thead th {
   position: sticky;
   top: 0;
   background: var(--row-alt);
-  z-index: 1;
+  z-index: var(--z-sticky);
 }
-table.grid tbody tr:nth-child(even) { background: var(--row-alt); }
+
+/* 行の区切りは 1px 線＋ホバーだけ（D3-3。ゼブラ縞は廃止） */
+table.grid tbody tr:hover { background: var(--row-alt); }
+
+/* 数値列は桁を揃える（D3-3） */
+table.grid th.num, table.grid td.num { font-variant-numeric: tabular-nums; }
+
+/* 行の高さ「詰めて」（D3-3） */
+table.grid.dense th, table.grid.dense td {
+  padding: var(--pad-hairline) var(--pad-cell-x);
+}
+
+/* 編集可能列のバッジ（D3-3。ヘッダーに1つだけ出す） */
+.badge-edit {
+  display: inline-block;
+  margin-left: var(--space-1);
+  color: var(--muted);
+  font-size: var(--font-2xs);
+}
 
 .toolbar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.5rem;
-  margin-bottom: 0.9rem;
+  gap: var(--space-2);
+  margin-bottom: var(--stack-m);
 }
 
+/* アプリシェル（D3-1）。900px 以上でサイドナビ＋コンテンツの2カラム */
+.guild-slot, .theme-slot { color: var(--muted); font-size: var(--font-s); }
+
+.guild-slot select,
+.theme-slot select,
 .toolbar select {
   font: inherit;
-  padding: 0.3rem 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  padding: var(--pad-xs) var(--space-2);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-legacy-m);
   background: var(--bg);
   color: var(--fg);
 }
 
 a.button { text-decoration: none; display: inline-block; }
 
-td.editable { cursor: text; }
-td.editable:hover { outline: 1px dashed var(--accent); outline-offset: -1px; }
+/* 表タブ（D3-1）。既定（900px 未満）は横スクロールの1列 */
+.tabs {
+  display: flex;
+  gap: var(--space-2);
+  margin-bottom: var(--stack-m);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
 
-td input {
+.tabs button { flex: 0 0 auto; }
+
+/* モバイル（D3-5）。640px 未満: ツールバーの折り返し・ヘッダーの2段化・
+   タップ対象の最小 44×44px */
+@media (max-width: 640px) {
+  .topbar { flex-wrap: wrap; }
+
+  /* タイトルを1段目に、サーバー選択・テーマ切替を2段目に畳む */
+  .topbar h1 { flex: 1 1 100%; }
+
+  /* 検索欄は1行を専有させ、ページャと2段に折り返す */
+  .toolbar .search-box { flex: 1 1 100%; }
+
+  button, .button, .sheet-tab,
+  .toolbar select, .guild-slot select, .theme-slot select {
+    min-height: var(--tap-min);
+  }
+}
+
+@media (min-width: 900px) {
+  .shell {
+    display: grid;
+    grid-template-columns: var(--w-sidenav) 1fr;
+    gap: var(--space-5);
+    align-items: start;
+  }
+
+  /* サイドナビ: 縦一列・左揃え。キーボードのフォーカス順は
+     DOM 順（ヘッダー → ナビ → コンテンツ）で視覚順と一致する */
+  .tabs {
+    flex-direction: column;
+    align-items: stretch;
+    overflow-x: visible;
+    position: sticky;
+    top: var(--space-4);
+  }
+
+  .tabs button { text-align: left; }
+}
+
+/* 列ヘッダのソートボタン（D1-3）。見た目は th のテキストのまま */
+th.sortable .sort-button {
   font: inherit;
-  width: 100%;
-  min-width: 8rem;
-  padding: 0.15rem 0.3rem;
-  border: 1px solid var(--accent);
-  border-radius: 4px;
+  font-weight: inherit;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+/* 検索欄（D1-2） */
+.search-box {
+  font: inherit;
+  min-width: var(--w-input-min);
+  padding: var(--pad-xs) var(--space-2);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-legacy-m);
   background: var(--bg);
   color: var(--fg);
 }
 
-.cell-error { color: var(--danger); font-size: 0.85em; }
+td.editable { cursor: text; }
+
+/* キーボードフォーカス（D1-5）。outline: none をどこにも書かない */
+td.editable:focus {
+  outline: var(--border-w-strong) solid var(--accent);
+  outline-offset: calc(-1 * var(--border-w-strong));
+}
+td.editable:hover {
+  outline: var(--border-w) dashed var(--accent);
+  outline-offset: calc(-1 * var(--border-w));
+}
+
+td input {
+  font: inherit;
+  width: 100%;
+  min-width: var(--w-input-min);
+  padding: var(--pad-hairline) var(--pad-xs);
+  border: var(--border-w) solid var(--accent);
+  border-radius: var(--radius-legacy-s);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.cell-error { color: var(--danger); font-size: var(--font-em-s); }
+
+/* サマリーの bento グリッド（D2-3。§デザイン方針の本命） */
+.bento {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--w-card-min), 1fr));
+  gap: var(--space-3);
+  margin-bottom: var(--stack-m);
+}
+
+/* カードは1種類だけ（D3-2）。サマリー・グラフ・表がすべてこれで包まれる。
+   入れ子は1段まで（カードの中にカードを置かない） */
+.card {
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-card);
+  background: var(--bg);
+  box-shadow: var(--shadow-card);
+}
+
+.card-value {
+  font-size: var(--font-card-value);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-label { color: var(--muted); font-size: var(--font-xs); }
+
+/* 設定フォーム（D2-2） */
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: var(--w-settings-max);
+}
+
+.settings-item { display: flex; flex-direction: column; gap: var(--space-1); }
+
+.settings-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-weight: 600;
+}
+
+.settings-input {
+  font: inherit;
+  font-weight: 400;
+  padding: var(--pad-xs) var(--space-2);
+  border: var(--border-w) solid var(--border);
+  border-radius: var(--radius-legacy-m);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.settings-input[readonly] { color: var(--muted); }
+
+.settings-desc { margin: 0; font-size: var(--font-xs); }
+
+.settings-error { margin: 0; }
+
+.settings-form > button { align-self: flex-start; }
+
+/* 入力中セル（D1-4）。確定は Enter / ✓、キャンセルは Escape / ✕ / blur */
+.cell-editor {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.cell-action {
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding: 0;
+  flex: 0 0 auto;
+}
 
 .chart-wrap {
   overflow-x: auto;
-  margin-bottom: 0.9rem;
-  padding: 0.5rem;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  margin-bottom: var(--stack-m);
 }

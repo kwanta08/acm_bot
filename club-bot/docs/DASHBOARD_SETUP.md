@@ -166,8 +166,8 @@ DASHBOARD_BASE_URL=https://dashboard.example.com
 DATABASE_URL=postgresql://clubbot:<パスワード>@127.0.0.1:5432/clubdb
 
 # ===== 任意 =====
-# セッションの有効期間（秒。既定は7日）
-# DASHBOARD_SESSION_MAX_AGE=604800
+# セッションの有効期間（秒。既定は24時間）
+# DASHBOARD_SESSION_MAX_AGE=86400
 # 接続プールの上限（既定10。bot 側とは独立）
 # DASHBOARD_DB_POOL_MAX_SIZE=10
 ```
@@ -187,7 +187,7 @@ chmod 600 ~/club-bot/dashboard.env
 | `DISCORD_CLIENT_SECRET` | ✅ | — | 同 クライアントシークレット |
 | `DASHBOARD_REDIRECT_URI` | ✅ | — | Portal の Redirects と**完全一致**させる |
 | `DASHBOARD_BASE_URL` | | `http://127.0.0.1:8000` | 公開 URL |
-| `DASHBOARD_SESSION_MAX_AGE` | | `604800`（7日） | セッション有効期間（秒） |
+| `DASHBOARD_SESSION_MAX_AGE` | | `86400`（24時間） | セッション有効期間（秒） |
 | `DASHBOARD_SECURE_COOKIE` | | 有効 | `0` で Cookie の Secure 属性を外す。**ローカル開発専用** |
 | `DATABASE_URL` | | — | PostgreSQL 接続 URL。未設定なら `DB_PATH` の SQLite |
 | `DB_PATH` | | `./data/club.db` | SQLite のパス |

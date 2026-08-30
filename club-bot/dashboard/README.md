@@ -33,7 +33,7 @@ venv/bin/uvicorn dashboard.main:app --host 127.0.0.1 --port 8000
 | `DISCORD_CLIENT_SECRET` | ✅ | 同 クライアントシークレット |
 | `DASHBOARD_REDIRECT_URI` | ✅ | OAuth2 のリダイレクト先（例 `https://example.com/auth/callback`）。Portal 側にも同じ値を登録する |
 | `DASHBOARD_BASE_URL` | | 公開 URL（既定 `http://127.0.0.1:8000`） |
-| `DASHBOARD_SESSION_MAX_AGE` | | セッション有効期間（秒。既定 7 日） |
+| `DASHBOARD_SESSION_MAX_AGE` | | セッション有効期間（秒。既定 24 時間） |
 | `DASHBOARD_SECURE_COOKIE` | | `0` で Secure 属性を外す（**ローカル開発のみ**） |
 | `DATABASE_URL` / `DB_PATH` | | bot と同じ DB を指す |
 | `DASHBOARD_DB_POOL_MAX_SIZE` | | 接続プールの上限（既定 10。bot とは独立） |
@@ -103,6 +103,33 @@ venv/bin/uvicorn dashboard.main:app --host 127.0.0.1 --port 8000
 | `db.py` | DB 接続のライフサイクル（bot と同じ `utils.db.Database`） |
 | `display.py` | 表示整形の共通ヘルパー（ID → 表示名解決・JST 秒フォーマット） |
 | `static/` | フロント（素の HTML/CSS/JS。外部 CDN に依存しない） |
+| `static/lib/` | DOM に触れない純粋関数の ES モジュール（`app.js` が import する） |
+
+フロントの純粋関数のテストは `club-bot/tests_js/` にあり、Node 標準の
+テストランナーだけで回す（npm パッケージ・`package.json` は使わない）:
+
+```bash
+cd club-bot
+node --test "tests_js/*.test.mjs"   # Node 22.7 以上（モジュール構文の自動判別が必要）
+```
+
+テストを `static/` の外に置くのは、`static/` が認証なしで丸ごと配信されるため。
+
+## セッションと権限の鮮度（D2-4）
+
+セッション Cookie（既定 24 時間）に焼き込まれるのは
+**所属ギルド一覧と `manage_guild`（サーバー管理権限）だけ**。
+つまりセッション寿命まで古くなりうるのは次の2つに限られる:
+
+- Discord サーバーからの**退会**（一覧に残り続ける）
+- サーバー管理権限の**付け外し**（L4 判定の元）
+
+権限レベル（L1〜L4）のうち班長（L2）判定は Cookie に焼かれず、
+`dashboard/security.py` の `require_guild_scope` が**毎リクエスト**
+`resolve_level()` で DB から引くため、班長の降格は即時反映される。
+「セッション中はなんでも古い」わけではない。
+Discord への能動的な再問い合わせ（退会の即時反映）はアクセストークンの
+保存が必要になるため行わない（攻撃面を増やさない）。
 
 ## 設計上の約束
 

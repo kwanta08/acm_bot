@@ -124,3 +124,22 @@ def test_app_starts_even_when_oauth_unconfigured():
     app = create_app(_config(client_id="", client_secret="", redirect_uri=""))
     with TestClient(app) as client:
         assert client.get("/healthz").status_code == 200
+
+
+def test_preview_page_is_served_but_not_linked():
+    """コンポーネントのプレビュー（D0-4）。
+
+    開発用の静的ページとして配信される一方、本番の導線（index.html）からは
+    リンクされない。認証の後ろに置かない代わりに、データを一切含めない
+    （ダミーはハードコードの文字列のみ）。
+    """
+    app = create_app(_config())
+    with TestClient(app) as client:
+        res = client.get("/static/preview.html")
+        assert res.status_code == 200
+        # style.css 以外の CSS を持たない（プレビュー専用スタイルの禁止）
+        assert "<style" not in res.text
+        assert 'style="' not in res.text
+
+        index = client.get("/").text
+        assert "preview.html" not in index
