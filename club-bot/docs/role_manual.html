@@ -605,6 +605,73 @@
   </div>
 </div>
 
+<div class="page">
+  <h2>0-6　タスク機能だけは、外部サービス（Todoist）が必要です</h2>
+  <p>
+    この Bot の機能のうち、<strong>タスク（<code>/task</code>）だけは Todoist という外部の
+    タスク管理サービスを土台にしています。</strong>
+    タスクの本体は Bot の中ではなく Todoist 側にあり、Bot はそれを読み書きしているだけです。
+    そのため <strong>Todoist をつないでいないサークルでは、タスク機能は一切使えません。</strong>
+    他の機能は Todoist が無くてもすべて使えます。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 296" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <!-- 左：Todoist なしで使える -->
+      <text x="176" y="18" font-size="10.8" font-weight="700" fill="#1e7a51" text-anchor="middle">Todoist が無くても使える</text>
+      <rect x="6" y="26" width="340" height="166" rx="10" fill="#f2faf6" stroke="#2f9e6b" stroke-width="1.6"/>
+      <g font-size="10.2" fill="#23303a">
+        <text x="30" y="54">・日程調整と出欠</text>
+        <text x="30" y="76">・桁巻きの記録（<tspan font-weight="700">/layer</tspan>）</text>
+        <text x="30" y="98">・機体の進捗・重量・節目</text>
+        <text x="30" y="120">・資材の在庫（<tspan font-weight="700">/stock</tspan>）</text>
+        <text x="30" y="142">・メンバーと班の管理</text>
+        <text x="30" y="164">・年度の切り替え、データの書き出し</text>
+      </g>
+      <text x="176" y="184" font-size="9.6" font-weight="700" fill="#1e7a51" text-anchor="middle">＝ この説明書のほとんど</text>
+
+      <!-- 右：Todoist が要る -->
+      <text x="524" y="18" font-size="10.8" font-weight="700" fill="#b76c0d" text-anchor="middle">Todoist をつないで初めて使える</text>
+      <rect x="354" y="26" width="340" height="166" rx="10" fill="#fff8ef" stroke="#e0a94e" stroke-width="1.6"/>
+      <g font-size="10.2" fill="#23303a">
+        <text x="378" y="54">・<tspan font-weight="700">/task</tspan> のすべて（追加・一覧・完了・優先度…）</text>
+        <text x="378" y="76">・<tspan font-weight="700">/today</tspan>（今日やること）</text>
+        <text x="378" y="98">・毎朝 8:30 と 21:00 のタスク通知</text>
+        <text x="378" y="120">・タスクの CSV 出力（<tspan font-weight="700">/report export-tasks</tspan>）</text>
+        <text x="378" y="142">・進捗ツリーと Todoist の紐付け</text>
+        <text x="378" y="164">　（<tspan font-weight="700">/progress setup</tspan>）</text>
+      </g>
+      <text x="524" y="184" font-size="9.6" font-weight="700" fill="#b76c0d" text-anchor="middle">＝ 未連携なら全部使えません</text>
+
+      <!-- 未設定のときの実際の返事 -->
+      <text x="6" y="216" font-size="9.6" fill="#5d7481">つないでいないサークルで <tspan font-weight="700" fill="#23303a">/task</tspan> を実行すると、こう返ってきます（故障ではありません）:</text>
+      <rect x="60" y="224" width="580" height="66" rx="8" fill="#f4f7fb" stroke="#2f7fd1" stroke-width="1.5"/>
+      <circle cx="84" cy="248" r="11" fill="#2f7fd1"/>
+      <text x="84" y="252" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">B</text>
+      <text x="104" y="244" font-size="10.6" font-weight="700" fill="#2467ab">Todoist 未設定</text>
+      <text x="104" y="262" font-size="9.6" fill="#23303a">このサーバーでは Todoist が未設定です。タスクの追加・削除・管理は</text>
+      <text x="104" y="278" font-size="9.6" fill="#23303a">Todoist で行うため、管理者が /todoist-setup で登録するまで /task は使えません。</text>
+    </svg>
+    <div class="figcap">図0-7　Todoist の有無で変わる範囲。左は Todoist と関係なく動きます。</div>
+  </div>
+
+  <div class="box tip">
+    <span class="t">自分のサークルがつないでいるかを確かめるには</span>
+    <code>/task list</code> を実行してみてください。一覧が出れば連携済みです。
+    上の「Todoist 未設定」が返ってきたら未連携なので、
+    <strong>管理者に <code>/todoist-setup</code> を依頼してください</strong>（第4章 4-3）。
+    <code>/setup-status</code> でも未完了の設定を確認できます。
+  </div>
+
+  <div class="box note">
+    <span class="t">Todoist はサークル単位で1つ登録します</span>
+    部員一人ひとりが Todoist のアカウントを作る必要はありません。
+    管理者がサークルの Todoist を1回登録すれば、部員は Discord から
+    <code>/task</code> を使うだけです。
+  </div>
+</div>
+
 <!-- ============================= 第1章 L1 ============================= -->
 <div class="page">
   <div class="chapter-head lv1">
@@ -642,12 +709,14 @@
         <circle cx="587" cy="44" r="20" fill="#2f9e6b"/>
         <text x="587" y="51" font-size="17" text-anchor="middle">📋</text>
         <text x="587" y="86" font-size="12.5" font-weight="700" fill="#1e7a51" text-anchor="middle">タスクを見る</text>
-        <text x="587" y="108" font-size="10" fill="#5d7481" text-anchor="middle">やることの一覧を確認する</text>
-        <rect x="547" y="118" width="80" height="19" rx="4" fill="#dff0e8"/>
-        <text x="587" y="132" font-size="9.6" font-weight="700" fill="#1e7a51" text-anchor="middle">/task list</text>
+        <text x="587" y="106" font-size="10" fill="#5d7481" text-anchor="middle">やることの一覧を確認する</text>
+        <rect x="549" y="109" width="76" height="18" rx="4" fill="#dff0e8"/>
+        <text x="587" y="122" font-size="9.4" font-weight="700" fill="#1e7a51" text-anchor="middle">/task list</text>
+        <rect x="511" y="130" width="152" height="15" rx="7.5" fill="#fdf0dc"/>
+        <text x="587" y="141" font-size="8.2" font-weight="700" fill="#b76c0d" text-anchor="middle">Todoist 連携が要ります</text>
       </g>
     </svg>
-    <div class="figcap">図1-1　一般メンバーが最初に覚える3つ。残りは必要になったときで構いません。</div>
+    <div class="figcap">図1-1　一般メンバーが最初に覚える3つ。3つ目は Todoist をつないでいるサークルだけです。</div>
   </div>
 
   <h2>1-2　桁巻きを記録する</h2>
@@ -827,7 +896,7 @@
     <tr><td><code>/layer status</code></td><td>いま誰が作業中かの一覧</td></tr>
     <tr><td><code>/layer stats</code></td><td>桁別・作業者別の集計（層数・時間・平均）</td></tr>
     <tr><td><code>/layer keta-list</code></td><td>登録されている桁名の一覧</td></tr>
-    <tr><td colspan="2" style="background:#eef8f3; font-weight:700; color:#1e7a51;">タスク　<span style="font-weight:400; color:#5d7481;">※ Todoist を連携しているサークルのみ</span></td></tr>
+    <tr><td colspan="2" style="background:#eef8f3; font-weight:700; color:#1e7a51;">タスク　<span style="font-weight:400; color:#b76c0d;">※ Todoist 未連携のサークルでは、この区分は丸ごと使えません（0-6）</span></td></tr>
     <tr><td><code>/task list</code></td><td>未完了タスクの一覧</td></tr>
     <tr><td><code>/task add</code></td><td>タスクを追加する</td></tr>
     <tr><td><code>/task done</code></td><td>タスクを完了にする</td></tr>
@@ -1057,7 +1126,7 @@
 
   <table>
     <tr><th style="width:34%;">コマンド</th><th>何ができるか</th></tr>
-    <tr><td colspan="2" style="background:#eef4fa; font-weight:700; color:#2467ab;">タスク</td></tr>
+    <tr><td colspan="2" style="background:#eef4fa; font-weight:700; color:#2467ab;">タスク　<span style="font-weight:400; color:#b76c0d;">※ Todoist 連携が前提（0-6）</span></td></tr>
     <tr><td><code>/task delete</code></td><td>タスクを削除する</td></tr>
     <tr><td><code>/task sections</code></td><td>Todoist のセクションと班の紐付け状況を見る</td></tr>
     <tr><td><code>/task push</code></td><td>班ごとのタスクを各班チャンネルへ手動で流す</td></tr>
@@ -1074,7 +1143,7 @@
     <tr><td><code>/report weekly</code></td><td>今週のまとめ（<code>public:true</code> でチャンネルへ公開）</td></tr>
     <tr><td><code>/report attendance-rate</code></td><td>投票ごとの出欠率</td></tr>
     <tr><td><code>/report member-attendance</code></td><td>メンバー別の回答率・連続未回答数</td></tr>
-    <tr><td><code>/report export-tasks</code></td><td>タスク一覧を CSV で書き出す</td></tr>
+    <tr><td><code>/report export-tasks</code></td><td>タスク一覧を CSV で書き出す（<strong>Todoist 連携が前提</strong>）</td></tr>
   </table>
 
   <div class="box tip">
@@ -1287,7 +1356,7 @@
     <tr><td><code>/member setup</code></td><td>主所属・副所属・班長フラグを一括で設定する</td></tr>
     <tr><td><code>/member set-leader</code></td><td>名簿の班長フラグを変える</td></tr>
     <tr><td><code>/member set-channel</code></td><td>班の通知先チャンネルを決める</td></tr>
-    <tr><td colspan="2" style="background:#fdf4e8; font-weight:700; color:#b76c0d;">Todoist セクションの紐付け</td></tr>
+    <tr><td colspan="2" style="background:#fdf4e8; font-weight:700; color:#b76c0d;">Todoist セクションの紐付け　<span style="font-weight:400;">※ Todoist 連携が前提（0-6）</span></td></tr>
     <tr><td><code>/task link-section</code></td><td>Todoist のセクションを班につなぐ</td></tr>
     <tr><td><code>/task unlink-section</code></td><td>セクションの紐付けを外す</td></tr>
     <tr><td><code>/task unlink-team-sections</code></td><td>ある班につながっているセクションをまとめて外す</td></tr>
@@ -1373,7 +1442,7 @@
         途中でやめても大丈夫です。<tspan font-weight="700" fill="#23303a">/setup-status</tspan> が、残っている項目を教えてくれます。
       </text>
     </svg>
-    <div class="figcap">図4-1　導入の5ステップ。Todoist 連携は任意なので、あとから足せます。</div>
+    <div class="figcap">図4-1　導入の5ステップ。Todoist 連携はこの後でよく、あとから足せます。</div>
   </div>
 
   <h2>4-2　<code>/setup</code> で決めること</h2>
@@ -1400,9 +1469,11 @@
 </div>
 
 <div class="page">
-  <h2>4-3　Todoist をつなぐ（任意）</h2>
+  <h2>4-3　Todoist をつなぐ（タスク機能を使うなら必須）</h2>
   <p>
-    タスク機能を使うなら、サークルの Todoist トークンを1回だけ登録します。
+    <strong>つながないという選択もできます</strong>（他の機能は Todoist が無くても全部動きます）。
+    ただし <strong>つなぐまで <code>/task</code>・<code>/today</code>・毎朝のタスク通知・タスクの CSV は
+    一切使えません</strong>（0-6）。使うなら、サークルの Todoist トークンを1回だけ登録します。
     <strong>トークンはコマンドの引数では受け取りません。</strong>
     引数に入れた値は Discord のチャンネル履歴に残ってしまうためです。
     代わりに、履歴に残らないフォーム（モーダル）で受け取ります。
@@ -1799,7 +1870,7 @@
 
   <h2>5-5　見られる表</h2>
   <p>
-    次の表を見られます。<strong>ここに無いもの（Todoist のトークンなど）は画面に出ません。</strong>
+    次の表を見られます。<strong>タスクは出ません</strong>（正本が Todoist にあるため。0-6）。
   </p>
 
   <table>
@@ -1886,18 +1957,19 @@
     <svg viewBox="0 0 700 244" xmlns="http://www.w3.org/2000/svg"
          font-family="Zen Maru Gothic, sans-serif">
       <!-- 08:30 の吹き出し -->
-      <rect x="150" y="10" width="300" height="104" rx="9" fill="#eef8f3" stroke="#7cc4a4" stroke-width="1.5"/>
+      <rect x="150" y="10" width="300" height="118" rx="9" fill="#eef8f3" stroke="#7cc4a4" stroke-width="1.5"/>
       <text x="166" y="30" font-size="11" font-weight="700" fill="#1e7a51">毎朝 8:30 — まとめて届きます</text>
-      <text x="166" y="49" font-size="9.6" fill="#23303a">・今日〜7日以内が期限のタスク</text>
-      <text x="166" y="66" font-size="9.6" fill="#23303a">・班ごとのタスク（各班のチャンネルへ）</text>
-      <text x="166" y="83" font-size="9.6" fill="#23303a">・「今日やること」の印を付けたタスク</text>
+      <text x="166" y="49" font-size="9.6" fill="#23303a">・今日〜7日以内が期限のタスク <tspan font-weight="700" fill="#b76c0d">※</tspan></text>
+      <text x="166" y="66" font-size="9.6" fill="#23303a">・班ごとのタスク（各班のチャンネルへ）<tspan font-weight="700" fill="#b76c0d">※</tspan></text>
+      <text x="166" y="83" font-size="9.6" fill="#23303a">・「今日やること」の印を付けたタスク <tspan font-weight="700" fill="#b76c0d">※</tspan></text>
       <text x="166" y="100" font-size="9.6" fill="#23303a">・今日の確定予定 ／ 在庫が足りないもの</text>
-      <line x1="262" y1="114" x2="262" y2="128" stroke="#7cc4a4" stroke-width="1.5"/>
+      <text x="166" y="120" font-size="8.6" font-weight="700" fill="#b76c0d">※ は Todoist 連携が前提（0-6）</text>
+      <line x1="262" y1="128" x2="262" y2="132" stroke="#7cc4a4" stroke-width="1.5"/>
 
       <!-- 21:00 の吹き出し -->
       <rect x="496" y="36" width="200" height="56" rx="9" fill="#fff6ec" stroke="#f0cfa0" stroke-width="1.5"/>
       <text x="512" y="56" font-size="11" font-weight="700" fill="#b76c0d">21:00</text>
-      <text x="512" y="76" font-size="9.6" fill="#23303a">期限が過ぎたタスクの通知</text>
+      <text x="512" y="76" font-size="9.6" fill="#23303a">期限が過ぎたタスクの通知 <tspan font-weight="700" fill="#b76c0d">※</tspan></text>
       <line x1="586" y1="92" x2="586" y2="128" stroke="#f0cfa0" stroke-width="1.5"/>
 
       <!-- 軸 -->
@@ -1939,7 +2011,7 @@
       <text x="456" y="196" font-size="11" font-weight="700" fill="#2467ab">20:00</text>
       <text x="456" y="215" font-size="9.6" fill="#23303a">明日の確定予定をリマインド</text>
     </svg>
-    <div class="figcap">図A-1　1日のうちに Bot が動く時刻。予定やタスクが無い日は、何も送りません。</div>
+    <div class="figcap">図A-1　1日のうちに Bot が動く時刻。予定やタスクが無い日は、何も送りません。※ の通知は Todoist をつないでいないサークルでは出ません。</div>
   </div>
 
   <h3>そのほか、いつも動いているもの</h3>
@@ -1976,7 +2048,7 @@
     </tr>
     <tr>
       <td><strong><code>/task</code> が「管理者が登録してください」と返す</strong></td>
-      <td>そのサークルは Todoist をつないでいません。使うなら管理者が <code>/todoist-setup</code> を実行します（4-3）</td>
+      <td>故障ではありません。<strong>タスク機能は Todoist が土台</strong>で、未連携だと一切使えません（0-6）。使うなら管理者が <code>/todoist-setup</code> を実行します（4-3）</td>
     </tr>
     <tr>
       <td><strong>桁名がメニューに出てこない</strong></td>
