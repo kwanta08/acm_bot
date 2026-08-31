@@ -31,7 +31,6 @@
     --base:     #0b5f7d;
     --accent:   #0f9b8e;
     --accent-l: #7fe0d3;
-    --amber:    #e08b1e;
     --sky:      #eaf5f8;
     --ink:      #22333d;
     --ink-soft: #5f7784;
@@ -59,30 +58,30 @@
 
   /* ============ 表紙ヒーロー ============ */
   .hero {
-    position: relative; height: 76mm; color: #fff;
+    position: relative; height: 65mm; color: #fff;
     background: linear-gradient(152deg, #073448 0%, #0b5f7d 48%, #12897f 100%);
-    padding: 11mm 14mm 0;
+    padding: 9mm 14mm 0;
     overflow: hidden;
   }
-  .hero-art { position: absolute; right: -8mm; top: -3mm; width: 110mm; opacity: .95; }
+  .hero-art { position: absolute; right: 0; top: 0; width: 96mm; height: 65mm; opacity: .9; }
   .hero-copy { position: relative; z-index: 2; }
   .kicker {
     display: inline-block; font-size: 8pt; font-weight: 500; letter-spacing: 2.2px;
     border: 1.2px solid rgba(255,255,255,.55); border-radius: 999px;
-    padding: 1.4mm 4.2mm; margin-bottom: 4mm;
+    padding: 1.2mm 4mm; margin-bottom: 3.2mm;
   }
-  .hero h1 { font-size: 23pt; font-weight: 700; line-height: 1.35; letter-spacing: .5px; }
+  .hero h1 { font-size: 21pt; font-weight: 700; line-height: 1.32; letter-spacing: .5px; }
   .hero h1 .em { color: var(--accent-l); }
-  .hero .lead { font-size: 9.6pt; line-height: 1.7; margin-top: 3.4mm; max-width: 124mm; opacity: .95; }
-  .chips { display: flex; gap: 2.2mm; margin-top: 5mm; flex-wrap: wrap; }
+  .hero .lead { font-size: 9.2pt; line-height: 1.6; margin-top: 2.8mm; max-width: 132mm; opacity: .95; }
+  .chips { display: flex; gap: 2mm; margin-top: 3.6mm; flex-wrap: wrap; }
   .chip {
     background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.32);
-    border-radius: 999px; padding: 1.4mm 4mm; font-size: 8.6pt; font-weight: 500;
+    border-radius: 999px; padding: 1.2mm 3.6mm; font-size: 8.2pt; font-weight: 500;
   }
   .chip.solid { background: var(--accent-l); border-color: var(--accent-l); color: #06413b; font-weight: 700; }
 
   /* ============ 見出し ============ */
-  .sec { margin-top: 6mm; }
+  .sec { margin-top: 5mm; }
   .sec-h { display: flex; align-items: baseline; gap: 3mm; margin-bottom: 3.6mm; }
   .sec-h h2 { font-size: 13pt; font-weight: 700; color: var(--navy); letter-spacing: .3px; }
   .sec-h .en { font-size: 7.6pt; letter-spacing: 2px; color: var(--accent); font-weight: 500; }
@@ -96,7 +95,7 @@
   .scatter { flex: 1; display: flex; flex-wrap: wrap; gap: 2.2mm; }
   .scatter .s {
     background: #f4f7f8; border: 1px dashed #c3d1d7; color: #7c8f99;
-    border-radius: 3mm; padding: 1.7mm 3mm; font-size: 8pt;
+    border-radius: 3mm; padding: 1.4mm 2.8mm; font-size: 7.8pt;
   }
   .arrow { flex: none; width: 16mm; text-align: center; color: var(--accent); }
   .arrow .t { font-size: 7.4pt; font-weight: 700; letter-spacing: 1px; margin-top: 1mm; }
@@ -107,14 +106,14 @@
   .hub-h { display: flex; align-items: center; gap: 2.2mm; font-weight: 700; color: var(--navy); font-size: 10pt; margin-bottom: 2.8mm; }
   .hub-h .dot { width: 6.4mm; height: 6.4mm; border-radius: 2mm; background: #5865f2; flex: none; position: relative; }
   .hub-h .dot svg { position: absolute; inset: 1.1mm; }
-  .hub li { list-style: none; display: flex; gap: 2mm; align-items: center; font-size: 8.2pt; padding: .8mm 0; }
+  .hub li { list-style: none; display: flex; gap: 2mm; align-items: center; font-size: 8.2pt; padding: .6mm 0; }
   .hub li .k { color: var(--accent); font-weight: 700; font-size: 8.2pt; flex: none; width: 20mm; }
   .hub li .v { color: var(--ink-soft); }
 
-  /* ============ 4つの理由 ============ */
+  /* ============ 4つの特徴 ============ */
   .reasons { display: grid; grid-template-columns: 1fr 1fr; gap: 3.4mm; }
   .reason {
-    border: 1px solid var(--line); border-radius: 4mm; padding: 3.6mm 4mm;
+    border: 1px solid var(--line); border-radius: 4mm; padding: 3mm 3.6mm;
     background: linear-gradient(180deg, #fbfdfe 0%, #fff 100%);
   }
   .reason .ic {
@@ -122,13 +121,13 @@
     color: var(--base); display: flex; align-items: center; justify-content: center; margin-bottom: 2mm;
   }
   .reason h3 { font-size: 10pt; font-weight: 700; color: var(--navy); margin-bottom: 1.2mm; line-height: 1.45; }
-  .reason p { font-size: 8.2pt; color: var(--ink-soft); line-height: 1.62; }
+  .reason p { font-size: 8.1pt; color: var(--ink-soft); line-height: 1.55; }
   .reason p b { color: var(--ink); font-weight: 700; }
 
   /* ============ 3ステップ ============ */
   .steps { display: flex; gap: 3mm; }
   .step {
-    flex: 1; background: var(--sky); border-radius: 4mm; padding: 3.4mm 3.8mm; position: relative;
+    flex: 1; background: var(--sky); border-radius: 4mm; padding: 3mm 3.4mm; position: relative;
   }
   .step .n {
     width: 7.6mm; height: 7.6mm; border-radius: 999px; background: var(--base); color: #fff;
@@ -136,7 +135,7 @@
     margin-bottom: 2.4mm;
   }
   .step h4 { font-size: 9.6pt; font-weight: 700; color: var(--navy); margin-bottom: 1.4mm; }
-  .step p { font-size: 8pt; color: var(--ink-soft); line-height: 1.6; }
+  .step p { font-size: 7.9pt; color: var(--ink-soft); line-height: 1.55; }
   .step code, code.cmd {
     font-family: 'Zen Maru Gothic', monospace; background: #fff; border: 1px solid #cfe1e6;
     border-radius: 1.6mm; padding: .3mm 1.4mm; color: var(--base); font-weight: 700; font-size: 8.2pt;
@@ -152,12 +151,12 @@
   .foot b { color: #fff; font-weight: 700; }
 
   /* ============ 2ページ目 ============ */
-  .p2top { background: var(--navy); color: #fff; padding: 5mm 14mm 4.4mm; }
+  .p2top { background: var(--navy); color: #fff; padding: 4.5mm 14mm 4mm; }
   .p2top h2 { font-size: 14pt; font-weight: 700; letter-spacing: .4px; }
   .p2top p { font-size: 9pt; opacity: .82; margin-top: 1.6mm; }
 
-  .feat { display: grid; grid-template-columns: 1fr 1fr; gap: 1.8mm 4.5mm; }
-  .f { display: flex; gap: 2.4mm; align-items: flex-start; padding: 1.2mm 0; border-bottom: 1px solid var(--line); }
+  .feat { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4mm 4.5mm; }
+  .f { display: flex; gap: 2.4mm; align-items: flex-start; padding: .9mm 0; border-bottom: 1px solid var(--line); }
   .f .ic { width: 7.6mm; height: 7.6mm; border-radius: 2.2mm; background: var(--sky); color: var(--base);
            display: flex; align-items: center; justify-content: center; flex: none; margin-top: .4mm; }
   .f .tx { min-width: 0; }
@@ -168,13 +167,13 @@
   /* パイプライン図 */
   .pipe {
     display: flex; align-items: stretch; gap: 0; background: var(--sky);
-    border-radius: 4mm; padding: 3.4mm 4mm;
+    border-radius: 4mm; padding: 3mm 4mm;
   }
   .pipe .box { flex: 1; text-align: center; }
   .pipe .box .cap { font-size: 7.4pt; color: var(--accent); font-weight: 700; letter-spacing: .6px; }
   .pipe .box .bd {
     background: #fff; border: 1px solid #c9dee4; border-radius: 3mm; padding: 2.2mm 2mm;
-    margin-top: 1.4mm; min-height: 15mm; display: flex; flex-direction: column;
+    margin-top: 1.2mm; min-height: 12.5mm; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 1mm;
   }
   .pipe .box .t1 { font-size: 8.8pt; font-weight: 700; color: var(--navy); line-height: 1.4; }
@@ -187,45 +186,80 @@
   .bar .fl { height: 100%; background: var(--accent); border-radius: 999px; }
   .bar .pc { width: 8mm; flex: none; font-weight: 700; color: var(--base); }
 
-  /* ダッシュボード */
-  .dash { display: flex; gap: 5mm; align-items: flex-start; }
-  .dash .txt { flex: none; width: 64mm; }
-  .dash .txt li { list-style: none; font-size: 8.1pt; line-height: 1.55; color: var(--ink); padding-left: 4.6mm; position: relative; margin-bottom: 1.6mm; }
-  .dash .txt li::before {
-    content: ''; position: absolute; left: 0; top: 1.5mm; width: 2.6mm; height: 2.6mm;
-    border-radius: .8mm; background: var(--accent-l); border: 1.2px solid var(--accent);
-  }
-  .dash .txt li b { color: var(--navy); font-weight: 700; }
+  /* ============ ダッシュボードのモック（実画面に合わせた配色） ============ */
   .win {
-    flex: 1; border: 1px solid #c9dee4; border-radius: 3.4mm; overflow: hidden;
+    --p: #0071e3; --wbg: #e8eef6; --wink: #1d2230; --wmute: #5b6472; --wline: #d7dfea;
+    border: 1px solid #c9d5e2; border-radius: 3.4mm; overflow: hidden;
     box-shadow: 0 1.6mm 4mm rgba(11,95,125,.12); background: #fff;
   }
-  .win .bar0 { background: #edf3f5; padding: 1.3mm 3mm; display: flex; align-items: center; gap: 1.6mm; border-bottom: 1px solid #dae7eb; }
-  .win .bar0 .d { width: 2mm; height: 2mm; border-radius: 999px; background: #c3d3d9; }
-  .win .bar0 .url { flex: 1; background: #fff; border: 1px solid #dae7eb; border-radius: 999px; font-size: 6.8pt; color: #8ba0a9; padding: .4mm 2.4mm; margin-left: 1.6mm; }
-  .win .top { background: var(--navy); color: #fff; padding: 1.3mm 3mm; font-size: 7.6pt; display: flex; justify-content: space-between; align-items: center; }
-  .win .top .who { opacity: .8; font-size: 6.8pt; }
-  .win .tabs { display: flex; gap: 1.2mm; padding: 1.5mm 3mm 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
-  .win .tabs span { font-size: 6.8pt; padding: .8mm 2mm; border-radius: 1.6mm 1.6mm 0 0; color: var(--ink-soft); background: #f4f8f9; }
-  .win .tabs span.on { background: var(--accent); color: #fff; font-weight: 700; }
-  .win .sheets { display: flex; gap: 1.4mm; padding: 1.5mm 3mm; font-size: 6.6pt; color: var(--ink-soft); align-items: center; }
-  .win .sheets span { border: 1px solid var(--line); border-radius: 1.4mm; padding: .5mm 1.8mm; }
-  .win .sheets span.on { border-color: var(--accent); background: #e9f7f5; color: var(--base); font-weight: 700; }
-  .win table { width: 100%; border-collapse: collapse; font-size: 6.6pt; }
-  .win th { background: #f4f8f9; color: var(--base); font-weight: 700; text-align: left; padding: .9mm 2mm; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-  .win td { padding: 1mm 2mm; border-bottom: 1px solid #eef4f6; color: var(--ink-soft); vertical-align: middle; white-space: nowrap; }
-  .win td.k { color: var(--ink); font-weight: 500; white-space: nowrap; }
-  .win td .num { color: var(--accent); font-weight: 700; }
-  .win .csv { display: flex; justify-content: flex-end; gap: 1.6mm; padding: 1.2mm 3mm; }
-  .win .csv span { font-size: 6.6pt; border: 1px solid var(--accent); color: var(--accent); border-radius: 1.4mm; padding: .5mm 2mm; font-weight: 700; }
+  .win .bar0 { background: #eef2f7; padding: 1.3mm 3mm; display: flex; align-items: center; gap: 1.6mm; border-bottom: 1px solid #dde5ee; }
+  .win .bar0 .d { width: 2mm; height: 2mm; border-radius: 999px; background: #c3d0dd; }
+  .win .bar0 .url { flex: 1; background: #fff; border: 1px solid #dde5ee; border-radius: 999px; font-size: 6.8pt; color: #8b98a8; padding: .4mm 2.4mm; margin-left: 1.6mm; }
 
-  /* 安心 */
-  .safe { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2.6mm; background: var(--sky);
-          border-radius: 4mm; padding: 3mm 4mm; }
-  .safe .s { padding-left: 3mm; border-left: 1px solid #bcd7de; }
-  .safe .s:first-child { border-left: none; padding-left: 0; }
-  .safe .s h4 { font-size: 8.6pt; font-weight: 700; color: var(--navy); margin-bottom: .6mm; line-height: 1.35; }
-  .safe .s p { font-size: 7.2pt; color: var(--ink-soft); line-height: 1.45; }
+  .ui { display: flex; background: var(--wbg); padding: 1.8mm; gap: 2mm; }
+  .side {
+    flex: none; width: 34mm; background: rgba(255,255,255,.82); border: 1px solid rgba(255,255,255,.9);
+    border-radius: 3mm; padding: 1.8mm 1.6mm; box-shadow: 0 1mm 2.6mm rgba(20,40,70,.10);
+    display: flex; flex-direction: column; gap: 1mm;
+  }
+  .side .brand { font-size: 6.8pt; font-weight: 700; color: var(--wink); padding: 0 1.2mm 1mm; }
+  .side .gpill, .side .nav-i, .side .theme {
+    font-size: 6.3pt; border-radius: 2mm; padding: .8mm 1.8mm; color: var(--wmute);
+  }
+  .side .gpill { background: #fff; border: 1px solid var(--wline); display: flex; justify-content: space-between; }
+  .side .nav { display: flex; flex-direction: column; gap: .6mm; margin-top: .6mm; }
+  .side .nav-i { background: rgba(255,255,255,.7); border: 1px solid rgba(215,223,234,.7); }
+  .side .nav-i.on { background: #d6e8fb; border-color: #b9d8f7; color: var(--p); font-weight: 700; }
+  .side .foot2 { margin-top: auto; padding-top: 1.2mm; display: flex; flex-direction: column; gap: 1mm; }
+  .side .theme { background: #fff; border: 1px solid var(--wline); display: flex; justify-content: space-between; }
+  .side .acct { display: flex; align-items: center; gap: 1.4mm; font-size: 6.2pt; color: var(--wmute); }
+  .side .acct .av { width: 4.2mm; height: 4.2mm; border-radius: 999px; background: var(--p); color: #fff;
+                    display: flex; align-items: center; justify-content: center; font-size: 5.4pt; font-weight: 700; }
+
+  .wbody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1.3mm; }
+  .phead { display: flex; align-items: flex-end; justify-content: space-between; }
+  .phead .t { font-size: 8pt; font-weight: 700; color: var(--wink); }
+  .phead .d { font-size: 6.2pt; color: var(--wmute); }
+  .pill { font-size: 6.2pt; border: 1px solid var(--wline); background: #fff; color: var(--wmute); border-radius: 999px; padding: .8mm 2.2mm; }
+  .sheetbar { display: flex; gap: 1.2mm; }
+  .sheetbar span { font-size: 6.2pt; color: var(--wmute); background: rgba(255,255,255,.7); border-radius: 2mm; padding: .7mm 1.8mm; }
+  .sheetbar span.on { background: #d6e8fb; color: var(--p); font-weight: 700; }
+  .wtool { display: flex; align-items: center; gap: 1.4mm; font-size: 6.2pt; color: var(--wmute); }
+  .wtool .sb { flex: 1; background: #fff; border: 1px solid var(--wline); border-radius: 2mm; padding: .7mm 1.8mm; color: #9aa5b3; }
+  .wtool .bt { background: #fff; border: 1px solid var(--wline); border-radius: 2mm; padding: .7mm 1.6mm; }
+  .cards { display: flex; gap: 1.6mm; }
+  .mcard { flex: 1; background: #fff; border: 1px solid rgba(255,255,255,.9); border-radius: 2.6mm;
+           padding: 1.3mm 1.8mm; box-shadow: 0 1mm 2.4mm rgba(20,40,70,.08); }
+  .mcard .l { font-size: 6pt; color: var(--wmute); }
+  .mcard .v { font-size: 9pt; font-weight: 700; color: var(--p); line-height: 1.25; }
+  .mcard .v.teal { color: #12897f; }
+  .mcard .mb { height: 1.3mm; border-radius: 999px; background: #e3eaf3; overflow: hidden; margin-top: .6mm; }
+  .mcard .mb i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #4ba3f0, var(--p)); }
+  .mcard .mb i.teal { background: linear-gradient(90deg, #7fd8c6, #12897f); }
+  .wgrid { background: #fff; border-radius: 2.6mm; overflow: hidden; box-shadow: 0 1mm 2.4mm rgba(20,40,70,.08); }
+  .wgrid table { width: 100%; border-collapse: collapse; font-size: 6.2pt; }
+  .wgrid th { text-align: left; color: var(--wmute); font-weight: 700; padding: .8mm 1.8mm; border-bottom: 1px solid var(--wline); white-space: nowrap; }
+  .wgrid td { padding: .8mm 1.8mm; color: var(--wink); border-bottom: 1px solid #eef2f7; white-space: nowrap; }
+  .wgrid tr:nth-child(even) td { background: #f6f9fc; }
+  .wgrid .c { color: var(--p); font-weight: 700; }
+  .wgrid .m { color: var(--wmute); }
+
+  .dash-notes { display: grid; grid-template-columns: 1fr 1fr; gap: .6mm 5mm; margin-top: 2.6mm; }
+  .dash-notes li { list-style: none; font-size: 8pt; line-height: 1.5; color: var(--ink); padding-left: 4.4mm; position: relative; }
+  .dash-notes li::before {
+    content: ''; position: absolute; left: 0; top: 1.4mm; width: 2.4mm; height: 2.4mm;
+    border-radius: .8mm; background: var(--accent-l); border: 1.2px solid var(--accent);
+  }
+  .dash-notes li b { color: var(--navy); font-weight: 700; }
+
+  /* 安心（1行の帯） */
+  .safe {
+    display: flex; align-items: center; gap: 3mm; background: var(--sky);
+    border-radius: 3.4mm; padding: 2.2mm 3.6mm; margin-top: 3.4mm;
+  }
+  .safe .hd { flex: none; font-size: 8.6pt; font-weight: 700; color: var(--navy); }
+  .safe .it { flex: 1; font-size: 7.6pt; color: var(--ink-soft); line-height: 1.45; border-left: 1px solid #bcd7de; padding-left: 3mm; }
+  .safe .it b { display: block; color: var(--navy); font-size: 8pt; }
 
   .note { font-size: 7.4pt; color: var(--ink-soft); margin-top: 2.4mm; line-height: 1.55; }
 </style>
@@ -236,45 +270,21 @@
 <section class="page">
 
   <div class="hero">
-    <svg class="hero-art" viewBox="0 0 460 200" fill="none">
-      <!-- 雲 -->
-      <g fill="#ffffff" opacity=".10">
-        <ellipse cx="70" cy="36" rx="46" ry="17"/>
-        <ellipse cx="104" cy="28" rx="30" ry="14"/>
-        <ellipse cx="372" cy="150" rx="58" ry="20"/>
-        <ellipse cx="330" cy="158" rx="34" ry="14"/>
-      </g>
-      <!-- 主翼（桁＋リブ） -->
-      <g stroke="#ffffff" stroke-linecap="round">
-        <path d="M22 96 L438 62" stroke-width="13" opacity=".92"/>
-        <g stroke-width="1.4" opacity=".45">
-          <path d="M64 87 L64 105"/><path d="M98 84 L98 102"/><path d="M132 81 L132 99"/>
-          <path d="M166 79 L166 97"/><path d="M200 76 L200 94"/><path d="M234 73 L234 91"/>
-          <path d="M268 70 L268 88"/><path d="M302 67 L302 85"/><path d="M336 65 L336 83"/>
-          <path d="M370 62 L370 80"/><path d="M404 59 L404 77"/>
-        </g>
-        <path d="M40 95 L420 64" stroke="#7fe0d3" stroke-width="2.6" opacity=".95"/>
-      </g>
-      <!-- 支柱 -->
-      <g stroke="#ffffff" stroke-width="2" opacity=".7">
-        <path d="M160 100 L162 122"/><path d="M196 97 L192 120"/>
-      </g>
-      <!-- 胴体ポッド -->
-      <g>
-        <ellipse cx="180" cy="132" rx="44" ry="17" fill="#ffffff" opacity=".95" transform="rotate(-4 180 132)"/>
-        <circle cx="166" cy="127" r="6" fill="#0b5f7d" opacity=".55"/>
-      </g>
-      <!-- テールブーム＋尾翼 -->
-      <g stroke="#ffffff" stroke-linecap="round" opacity=".92">
-        <path d="M222 130 L372 116" stroke-width="3.4"/>
-        <path d="M372 116 L384 92 L388 115 Z" fill="#ffffff" stroke-width="2" stroke-linejoin="round"/>
-        <path d="M356 118 L392 113" stroke-width="3"/>
-      </g>
-      <!-- プロペラ -->
-      <g fill="#ffffff" opacity=".9">
-        <ellipse cx="136" cy="108" rx="5.4" ry="23"/>
-        <ellipse cx="136" cy="156" rx="5.4" ry="23"/>
-        <circle cx="136" cy="132" r="6"/>
+    <svg class="hero-art" viewBox="0 0 340 234" fill="none" preserveAspectRatio="xMaxYMin slice">
+      <defs>
+        <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#ffffff" stop-opacity=".30"/>
+          <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+        </radialGradient>
+        <pattern id="dots" width="13" height="13" patternUnits="userSpaceOnUse">
+          <circle cx="2" cy="2" r="1.5" fill="#ffffff" opacity=".22"/>
+        </pattern>
+      </defs>
+      <circle cx="252" cy="52" r="126" fill="url(#glow)"/>
+      <rect x="150" y="16" width="182" height="104" fill="url(#dots)"/>
+      <g stroke="#ffffff" fill="none" opacity=".18">
+        <circle cx="286" cy="176" r="54" stroke-width="1.4"/>
+        <circle cx="286" cy="176" r="86" stroke-width="1.4"/>
       </g>
     </svg>
 
@@ -289,7 +299,7 @@
         <span class="chip solid">導入は15分</span>
         <span class="chip">VPS もトークンも不要</span>
         <span class="chip">MIT ライセンスの OSS</span>
-        <span class="chip">他サークルとデータは完全分離</span>
+        <span class="chip">サーバーごとにデータを分離</span>
       </div>
     </div>
   </div>
@@ -297,7 +307,7 @@
   <div class="pad">
 
     <!-- 集約図 -->
-    <div class="sec" style="margin-top:8mm">
+    <div class="sec" style="margin-top:6mm">
       <div class="sec-h"><h2>バラバラの運営を、1か所に集めます</h2><span class="en">ALL IN DISCORD</span></div>
       <div class="gather">
         <div class="scatter">
@@ -332,9 +342,9 @@
       </div>
     </div>
 
-    <!-- 4つの理由 -->
+    <!-- 4つの特徴 -->
     <div class="sec">
-      <div class="sec-h"><h2>他大学のサークルに選ばれる4つの理由</h2><span class="en">WHY</span></div>
+      <div class="sec-h"><h2>この Bot の4つの特徴</h2><span class="en">HOW IT WORKS</span></div>
       <div class="reasons">
         <div class="reason">
           <div class="ic">
@@ -399,6 +409,15 @@
       </div>
     </div>
 
+    <!-- 安心（1行の帯） -->
+    <div class="safe">
+      <span class="hd">安心して<br>使えます</span>
+      <span class="it"><b>本文を読まない</b>メッセージ本文と DM を読む権限を持ちません</span>
+      <span class="it"><b>サーバー単位で分離</b>設定も通知も他サーバーから見えません</span>
+      <span class="it"><b>トークンは渡さない</b>Todoist の鍵は各サーバーで暗号化保存</span>
+      <span class="it"><b>やめるのも自由</b>キックで停止し、30日後に自動削除</span>
+    </div>
+
   </div>
 
   <div class="foot">
@@ -444,7 +463,7 @@
         <span class="ds">目標重量と実測重量をツリーで積み上げ、超過の大きい順に表示。重量は成績に直結します。</span></span>
       </div>
       <div class="f">
-        <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V3"/><path d="M6 4h11l-2.2 3.6L17 11H6"/><circle cx="6" cy="21" r="0"/></svg></span>
+        <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V3"/><path d="M6 4h11l-2.2 3.6L17 11H6"/></svg></span>
         <span class="tx"><span class="nm">大会からの逆算<span class="cm">/milestone /countdown</span></span>
         <span class="ds">大会日と節目から必要ペースを逆算。<b>遅れがある週だけ</b>月曜に通知します。</span></span>
       </div>
@@ -521,74 +540,94 @@
     <!-- ダッシュボード -->
     <div class="sec" style="margin-top:6mm">
       <div class="sec-h"><h2>Web ダッシュボード</h2><span class="en">BROWSER · OPTIONAL</span></div>
-      <div class="dash">
-        <ul class="txt">
-          <li><b>Discord でログインするだけ</b>。新しいアカウントは要りません</li>
-          <li>タスク / メンバー / 班 / 日程調整 / 出欠回答 / 桁巻き積層 / 機体進捗を<b>表で一覧</b>・<b>CSV で出力</b></li>
-          <li>出欠回答は予定ごと、桁巻きは桁ごとの<b>シートタブ</b>で切り替え</li>
-          <li>人物は<b>サーバーでの表示名</b>、日時は<b>日本時間</b>。ID を読む必要はありません</li>
-          <li><b>班長以上はセルをクリックしてその場で編集</b>。変更は履歴に残ります</li>
-        </ul>
-        <div class="win">
-          <div class="bar0"><span class="d"></span><span class="d"></span><span class="d"></span><span class="url">https://dashboard.example.com</span></div>
-          <div class="top"><span>鳥人間サークル運営 Bot</span><span class="who">〇〇サークル ▼　ログイン中</span></div>
-          <div class="tabs">
-            <span>メンバー</span><span>班</span><span>日程調整</span><span class="on">出欠回答</span><span>桁巻き積層記録</span><span>機体進捗</span>
-          </div>
-          <div class="sheets">シート：<span class="on">全体ミーティング</span><span>主翼班 定例</span><span>テストフライト</span></div>
-          <table>
-            <tr><th>候補日時</th><th>参加</th><th>不参加</th><th>未定</th><th>未回答</th></tr>
-            <tr>
-              <td class="k">2026-09-05 18:00</td>
-              <td><span class="num">(8)</span> 山田 / 佐藤 …</td>
-              <td><span class="num">(1)</span> 田中</td>
-              <td><span class="num">(2)</span> 高橋 …</td>
-              <td><span class="num">(3)</span> 渡辺 …</td>
-            </tr>
-            <tr>
-              <td class="k">2026-09-06 13:00</td>
-              <td><span class="num">(11)</span> 山田 / 田中 …</td>
-              <td><span class="num">(0)</span> —</td>
-              <td><span class="num">(1)</span> 鈴木</td>
-              <td><span class="num">(2)</span> 中村 …</td>
-            </tr>
-          </table>
-          <div class="csv"><span>CSV ダウンロード</span></div>
-        </div>
-      </div>
-      <p class="note">
-        ※ 機体進捗は横棒グラフでも表示。Bot とは別プロセスで動くので、<b>Web が落ちても Discord は止まりません</b>（任意機能なので、動かさなくても Bot は通常どおり動きます）。<br>
-        <b>表示・編集できるのは自分のサーバーのデータだけ</b>で、他サークルのデータは取得できません。
-      </p>
-    </div>
 
-    <!-- 安心 -->
-    <div class="sec" style="margin-top:5mm">
-      <div class="sec-h"><h2>安心して使えます</h2><span class="en">PRIVACY</span></div>
-      <div class="safe">
-        <div class="s">
-          <h4>本文を読まない</h4>
-          <p>メッセージ本文と DM を読む権限を持ちません。再混入は回帰テストで検出。</p>
-        </div>
-        <div class="s">
-          <h4>サーバー単位で分離</h4>
-          <p>全データ・設定・通知がサーバー単位で完全分離。DM からの実行は拒否。</p>
-        </div>
-        <div class="s">
-          <h4>トークンは渡さない</h4>
-          <p>Todoist のトークンは各サーバーの管理者が登録し、暗号化して保存。</p>
-        </div>
-        <div class="s">
-          <h4>やめるのも自由</h4>
-          <p>キックすれば停止し、30日後に自動削除。すぐ消すなら <b>/data&nbsp;delete</b>。</p>
+      <div class="win">
+        <div class="bar0"><span class="d"></span><span class="d"></span><span class="d"></span><span class="url">https://dashboard.example.com</span></div>
+        <div class="ui">
+          <aside class="side">
+            <div class="brand">鳥人間サークル運営 Bot</div>
+            <div class="gpill"><span>〇〇サークル</span><span>▼</span></div>
+            <div class="nav">
+              <div class="nav-i">メンバー</div>
+              <div class="nav-i">班</div>
+              <div class="nav-i">日程調整</div>
+              <div class="nav-i on">出欠回答</div>
+              <div class="nav-i">桁巻き積層記録</div>
+              <div class="nav-i">機体進捗</div>
+              <div class="nav-i">設定</div>
+            </div>
+            <div class="foot2">
+              <div class="theme"><span>テーマ</span><span>システム ▼</span></div>
+              <div class="acct"><span class="av">や</span><span>やまだ</span></div>
+            </div>
+          </aside>
+
+          <div class="wbody">
+            <div class="phead">
+              <span><span class="t">出欠回答</span><br><span class="d">予定ごとに、誰が答えて誰が未回答かを一覧する</span></span>
+              <span class="pill">CSV をダウンロード</span>
+            </div>
+            <div class="sheetbar">
+              <span class="on">全体ミーティング</span><span>主翼班 定例</span><span>テストフライト</span>
+            </div>
+            <div class="wtool">
+              <span class="sb">検索</span><span class="bt">前へ</span><span>1〜200 件 / 全 320 件</span><span class="bt">次へ</span><span class="bt">行の高さ: 標準</span>
+            </div>
+            <div class="cards">
+              <div class="mcard"><div class="l">参加</div><div class="v">14</div></div>
+              <div class="mcard"><div class="l">不参加</div><div class="v">3</div></div>
+              <div class="mcard"><div class="l">未回答</div><div class="v">5</div></div>
+              <div class="mcard"><div class="l">回答率</div><div class="v teal">77%</div><div class="mb"><i class="teal" style="width:77%"></i></div></div>
+            </div>
+            <div class="wgrid">
+              <table>
+                <tr><th>候補日時</th><th>参加</th><th>不参加</th><th>未定</th><th>未回答</th></tr>
+                <tr>
+                  <td>2026-09-05 18:00:00</td>
+                  <td><span class="c">参加 (8)</span> 山田 / 佐藤 …</td>
+                  <td><span class="c">(1)</span> 田中</td>
+                  <td><span class="c">(2)</span> 高橋 …</td>
+                  <td><span class="c">(3)</span> 渡辺 …</td>
+                </tr>
+                <tr>
+                  <td>2026-09-06 13:00:00</td>
+                  <td><span class="c">参加 (11)</span> 山田 / 田中 …</td>
+                  <td><span class="c">(0)</span> <span class="m">—</span></td>
+                  <td><span class="c">(1)</span> 鈴木</td>
+                  <td><span class="c">(2)</span> 中村 …</td>
+                </tr>
+                <tr>
+                  <td>2026-09-12 18:00:00</td>
+                  <td><span class="c">参加 (9)</span> 佐藤 / 鈴木 …</td>
+                  <td><span class="c">(2)</span> 小林 …</td>
+                  <td><span class="c">(0)</span> <span class="m">—</span></td>
+                  <td><span class="c">(3)</span> 伊藤 …</td>
+                </tr>
+              </table>
+            </div>
+          </div>
         </div>
       </div>
+
+      <ul class="dash-notes">
+        <li><b>Discord でログインするだけ</b>。新しいアカウントは要りません</li>
+        <li>表の切り替えは<b>サイドバー</b>（スマホでは画面下の Dock）</li>
+        <li>出欠回答は予定ごと、桁巻きは桁ごとの<b>シートタブ</b>で切り替え</li>
+        <li><b>検索・列ヘッダでの並べ替え・ページング</b>で目的の行にすぐ届く</li>
+        <li><b>班長以上はセルをその場で編集</b>。回答率や進捗は<b>指標カード</b>で</li>
+        <li><b>ライト / ダーク / システム</b>のテーマ切替。スマホでも使えます</li>
+      </ul>
+
+      <p class="note">
+        ※ 人物は ID ではなく<b>サーバーでの表示名</b>、日時は<b>日本時間</b>で表示。CSV は画面と同じ表示値で全件出力します。任意機能なので、動かさなくても Bot は通常どおり動きます（別プロセスなので <b>Web が落ちても Discord は止まりません</b>）。<br>
+        <b>表示・編集できるのは自分のサーバーのデータだけ</b>で、他のサーバーのデータは取得できません。
+      </p>
     </div>
 
   </div>
 
   <div class="foot">
-    <span>導入のご相談・招待URLの配布状況は <b>GitHub リポジトリ</b>へ　/　取扱説明書とプライバシーポリシーも公開中</span>
+    <span>現在<b>公開に向けて準備中</b>です。導入のご相談・招待URLの配布状況・取扱説明書はリポジトリで公開しています</span>
     <span><b>github.com/kwanta08/acm_bot</b></span>
   </div>
 </section>
