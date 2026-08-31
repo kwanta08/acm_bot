@@ -25,8 +25,9 @@
 | [ダッシュボード セットアップ DASHBOARD_SETUP.md](DASHBOARD_SETUP.md) | Web UI の OAuth2 設定・HTTPS 公開・systemd 常駐・公開前チェックリスト |
 | [ダッシュボード構成 ../dashboard/README.md](../dashboard/README.md) | 画面仕様・環境変数・設計上の約束 |
 
-**運営者は公開前に、[TERMS.md](TERMS.md) と [PRIVACY.md](PRIVACY.md) の
-`〈運営者〉` `〈連絡先〉` `〈サーバー所在地〉` を自分の情報で埋めてください。**
+**[TERMS.md](TERMS.md) と [PRIVACY.md](PRIVACY.md) は、このリポジトリの運営者が
+運用するインスタンスについてのものです。fork して自分でホストする場合は、
+運営者名・連絡先・データの保存場所を自分のものへ置き換えてください。**
 
 ## 3. コードを読みたい・開発に参加したい
 
