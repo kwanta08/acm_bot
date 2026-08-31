@@ -629,6 +629,10 @@ POSTGRES_VIEW_DDL = "\n".join(
 #    （年度替わり。既存メンバーはすべて active。migrations/013）
 # 15: discord_name_cache を追加（ダッシュボードの ID → 表示名解決用。
 #    bot がギルドキャッシュから書き、Web 側が読む。migrations/014）
+# 24: settings のサークル名キーを CLUB_NAME へ統一（GUILD_NAME からコピー。
+#    ダッシュボードで保存した名前が週次サマリー等へ反映されない不具合の解消。
+#    D2-1。開発中は v22 だったが、main 側の v22（機能廃止）と衝突したため
+#    マージ時に v24 へ採番し直した。migrations/023）
 # 23: schedules に ui_style を追加（投票 UI 方式。'reaction' = 候補ごとに
 #    1メッセージ＋リアクション投票（従来）、'buttons' = 全候補を1メッセージに
 #    集約＋ボタン投票。既存行は 'reaction' のまま。migrations/022）
@@ -642,10 +646,18 @@ POSTGRES_VIEW_DDL = "\n".join(
 # 16: layer_sessions.layer_num を INTEGER から TEXT へ変更（/layer start は
 #    「シュリンク」等のテキスト層番号を受け付ける仕様。PostgreSQL では
 #    asyncpg の DataError になっていた。migrations/015）
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
+
+# マイグレーションの排他制御に使う advisory lock のキー（D2-6）。
+#
+# bot と dashboard が同じ DB へ同時に connect() すると
+# _migrate_versioned() がレースする（デプロイ時の同時再起動で踏む）。
+# PostgreSQL の pg_advisory_lock でプロセス間を直列化する。
+# 値は b"clubbot1" の 64bit 表現（衝突しにくい固定値。意味は任意）
+MIGRATION_ADVISORY_LOCK_KEY = int.from_bytes(b"clubbot1", "big")
 
 # PostgreSQL: スキーマバージョン管理テーブル（SQLite は PRAGMA user_version を使用）
 SCHEMA_META_DDL = """
@@ -815,7 +827,26 @@ class Database:
                 for name, ddl in TABLE_DDL_PG.items():
                     await self._pg_exec_ddl(con, f"table:{name}", ddl)
                 await self._pg_exec_ddl(con, "table:schema_meta", SCHEMA_META_DDL)
-            await self._migrate_versioned()
+            # マイグレーションの排他制御（D2-6）。ロックは**取得できるまで待つ**。
+            # pg_try_advisory_lock で「取れなければ飛ばす」にすると、
+            # 待たずに古いスキーマのまま起動して後で静かに壊れる。
+            # advisory lock はセッション（接続）に紐づくため、**プール外の
+            # 専用接続**で保持する。プールから借りると、_migrate_versioned()
+            # 内のクエリも同じプールを使うため、DB_POOL_MAX_SIZE=1 の環境で
+            # 唯一の接続をロック保持が占有して自己デッドロックする
+            lock_con = await asyncpg.connect(dsn=self.database_url)
+            try:
+                await lock_con.fetchval(
+                    "SELECT pg_advisory_lock($1)", MIGRATION_ADVISORY_LOCK_KEY
+                )
+                try:
+                    await self._migrate_versioned()
+                finally:
+                    await lock_con.fetchval(
+                        "SELECT pg_advisory_unlock($1)", MIGRATION_ADVISORY_LOCK_KEY
+                    )
+            finally:
+                await lock_con.close()
             async with self._pool.acquire() as con:
                 await self._pg_exec_ddl(con, "indexes", INDEX_DDL)
                 await self._pg_exec_ddl(con, "views", POSTGRES_VIEW_DDL)
@@ -983,6 +1014,11 @@ class Database:
     # マイグレーション
     # ------------------------------------------------------------------
     async def _migrate(self) -> None:
+        # 排他制御（D2-6）はこの SQLite 経路では no-op。
+        # SQLite は単一ファイルで、書き込みはファイルロック＋
+        # busy_timeout=5000 により元々直列化される（ADR 0006 で SQLite は
+        # ローカル開発・テスト専用。bot と dashboard の同時起動が問題になる
+        # 本番は PostgreSQL 側の pg_advisory_lock が担う）
         """
         既存 DB の簡易マイグレーション（SQLite 専用）。
 
@@ -1091,6 +1127,9 @@ class Database:
 
         if version < 23:
             await self._migrate_v23_schedule_ui_style()
+
+        if version < 24:
+            await self._migrate_v24_club_name_key()
 
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
@@ -1399,6 +1438,45 @@ class Database:
                 "ALTER TABLE schedules ADD COLUMN ui_style TEXT NOT NULL DEFAULT 'reaction'"
             )
             log.info("schedules テーブルに ui_style カラムを追加しました（v23）。")
+
+    async def _migrate_v24_club_name_key(self) -> None:
+        """
+        v24: サークル名の設定キーを `CLUB_NAME` に統一する（冪等。D2-1）。
+
+        ダッシュボードは `GUILD_NAME` キーで保存していたが、週次サマリー等が
+        読むのは `CLUB_NAME`（config.py）。保存しても反映されない不具合の解消。
+        開発中は v22 として実装したが、main 側の v22（機能廃止）と衝突した
+        ため、マージ時に v24 へ採番し直した。
+
+        既存データの扱い（ADR 0024 に照らした判断）:
+        - `GUILD_NAME` だけのギルド: 値を `CLUB_NAME` へ**コピー**する。
+          利用者がダッシュボードで明示的に保存した値を初めて有効にする移行で、
+          「既定値で勝手に動かす」ものではない
+        - `CLUB_NAME` が既にあるギルド: **上書きしない**（現に効いている値を守る）
+        - 旧キー `GUILD_NAME` の行は**消さない**（安全側。以後どのコードも
+          読まないが、監査と巻き戻しの余地を残す。bot は新規ギルド参加時に
+          今後も `GUILD_NAME` を Discord サーバー名で埋めるが（bot.py の
+          set_if_absent）、本移行以降にできた行がここへ来ることはない）
+
+        影響の注記: `GUILD_NAME` は bot がギルド参加時に **Discord サーバー名で
+        自動設定**するため、ダッシュボードで一度も編集していないギルドにも
+        値がある。そのため CLUB_NAME 未設定のギルドでは、週次サマリー等の
+        表示が既定の「サークル」からサーバー名に変わる。破壊も不可逆もなく、
+        /setup のサークル名モーダルでいつでも上書きできる。
+        """
+        await self.execute(
+            """
+            INSERT INTO settings (guild_id, setting_key, setting_value, updated_at)
+            SELECT s.guild_id, 'CLUB_NAME', s.setting_value, s.updated_at
+            FROM settings s
+            WHERE s.setting_key = 'GUILD_NAME'
+              AND NOT EXISTS (
+                SELECT 1 FROM settings c
+                WHERE c.guild_id = s.guild_id AND c.setting_key = 'CLUB_NAME'
+              )
+            """
+        )
+        log.info("サークル名の設定キーを CLUB_NAME に統一しました（v24）。")
 
     async def _migrate_v17_schedule_confirmed(self) -> None:
         """

@@ -42,7 +42,16 @@ RestartSec=10
 # DISCORD_CLIENT_SECRET / DASHBOARD_REDIRECT_URI / DATABASE_URL）。
 # bot の .env とは分ける（ダッシュボードに Bot トークンは不要）。
 EnvironmentFile=/home/ubuntu/club-bot/dashboard.env
-StandardOutput=append:/home/ubuntu/club-bot/logs/dashboard.log
+# アプリの INFO ログ（utils/logger.py の RotatingFileHandler）の書き込み先。
+# WorkingDirectory 基準の相対 logs/ は ProtectHome=read-only で書けず、
+# ディレクトリ作成に失敗 → Restart=always で再起動ループになる（D2-5）。
+# 必ず ReadWritePaths 内の絶対パスを指す。アプリ本体のログは
+# dashboard.log（ローテーションあり）に残る
+Environment=LOG_DIR=/home/ubuntu/club-bot/logs
+# プロセスの標準出力（uvicorn のアクセスログ等）。
+# dashboard.log は RotatingFileHandler が掴むため、**同じファイルへ
+# 向けない**（systemd の追記 fd とローテーションが競合する）
+StandardOutput=append:/home/ubuntu/club-bot/logs/dashboard.out
 StandardError=append:/home/ubuntu/club-bot/logs/dashboard.err
 
 # --- 権限の最小化 ---

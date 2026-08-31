@@ -89,6 +89,15 @@ class TableSpec:
     description: str = ""
     # guild_id 以外に必ず付ける絞り込み（例: 論理削除の除外）
     extra_where: str = ""
+    # 検索対象の列（D1-2）。ホワイトリスト方式（ADR 0016）: ここに無い列は
+    # 検索されない。**DDL 上 TEXT の列だけ**を指定する（PostgreSQL では
+    # lower(整数列) が型エラーになるため。SQLite だけでは検出できない）。
+    # 検索は DB の生の値に対して行う（表示名の解決後ではない）
+    searchable: tuple[str, ...] = field(default_factory=tuple)
+    # 並び替えできる列（D1-3）。None は「全列」（columns 自体がホワイトリスト
+    # なので、そのまま ORDER BY の許可リストとして使える）。
+    # ソートも DB の生の値に対して行う（表示名の解決後ではない）
+    sortable: tuple[str, ...] | None = None
     tags: tuple[str, ...] = field(default_factory=tuple)
     # ダッシュボードでこの表を**閲覧**するのに必要な権限レベル（G4-3）。
     #
@@ -108,6 +117,10 @@ class TableSpec:
     @property
     def editable_columns(self) -> tuple[str, ...]:
         return tuple(c.name for c in self.columns if c.editable)
+
+    @property
+    def sortable_columns(self) -> tuple[str, ...]:
+        return self.column_names if self.sortable is None else self.sortable
 
 
 def _c(
@@ -134,6 +147,7 @@ TABLES: dict[str, TableSpec] = {
         pk_type="int",
         description="班所属",
         order_by="display_name",
+        searchable=("display_name", "primary_team", "notes"),
         columns=(
             _c("member_id", "ID", "number", number_type="int"),
             _c("user_id", "Discordユーザー", "user"),
@@ -158,6 +172,7 @@ TABLES: dict[str, TableSpec] = {
         pk_type="int",
         description="班のマスタとロール紐付け",
         order_by="team_name",
+        searchable=("team_key", "team_name"),
         columns=(
             _c("team_id", "ID", "number", number_type="int"),
             _c("team_key", "班キー"),
@@ -185,6 +200,7 @@ TABLES: dict[str, TableSpec] = {
         pk_type="text",
         description="出欠投票の親レコード",
         order_by="deadline DESC",
+        searchable=("title", "description", "place"),
         columns=(
             _c("schedule_id", "ID"),
             _c("title", "タイトル", "text", editable=True),
@@ -226,6 +242,7 @@ TABLES: dict[str, TableSpec] = {
         pk_type="int",
         description="/layer start〜end の作業記録",
         order_by="ended_at DESC",
+        searchable=("keta", "layer_num"),
         columns=(
             _c("record_id", "ID", "number", number_type="int"),
             _c("user_id", "作業者", "user"),
@@ -244,6 +261,7 @@ TABLES: dict[str, TableSpec] = {
         pk_type="int",
         description="機体→パーツ→部品の進捗ツリー",
         order_by="sort_order, node_id",
+        searchable=("node_id", "name", "assignee", "status"),
         columns=(
             _c("progress_node_id", "ID", "number", number_type="int"),
             _c("node_id", "ノードID"),
@@ -276,6 +294,7 @@ TABLES: dict[str, TableSpec] = {
         pk_type="int",
         description="/setup・班マスタ変更・年度替わり・ダッシュボード編集の証跡",
         order_by="audit_id DESC",
+        searchable=("action", "target", "detail"),
         # 誰がいつ何を変えたかの記録。/report changes と同じ L3 に揃える
         min_level=3,
         columns=(
@@ -295,6 +314,7 @@ TABLES: dict[str, TableSpec] = {
         pk_type="int",
         description="/season new・/season rollover で区切った年度",
         order_by="started_at DESC",
+        searchable=("name",),
         columns=(
             _c("season_id", "ID", "number", number_type="int"),
             _c("name", "年度名"),
@@ -311,6 +331,7 @@ TABLES: dict[str, TableSpec] = {
         pk_type="int",
         description="大会から逆算した節目の期限",
         order_by="due_date, name",
+        searchable=("node_id", "name"),
         columns=(
             _c("milestone_id", "ID", "number", number_type="int"),
             _c("node_id", "ノードID"),
@@ -328,6 +349,7 @@ TABLES: dict[str, TableSpec] = {
         pk_type="int",
         description="/layer keta-add で登録した桁名",
         order_by="active_flag DESC, keta_name",
+        searchable=("keta_name",),
         columns=(
             _c("keta_id", "ID", "number", number_type="int"),
             _c("keta_name", "桁名"),
@@ -344,6 +366,7 @@ TABLES: dict[str, TableSpec] = {
         pk_type="int",
         description="1日1件の進捗スナップショット（/progress history が読む）",
         order_by="snapshot_date DESC, node_id",
+        searchable=("node_id",),
         columns=(
             _c("snapshot_id", "ID", "number", number_type="int"),
             _c("node_id", "ノードID"),
@@ -361,6 +384,7 @@ TABLES: dict[str, TableSpec] = {
         pk_type="int",
         description="/stock で管理する資材・消耗品",
         order_by="active_flag DESC, item_name",
+        searchable=("item_name", "unit", "note"),
         columns=(
             _c("stock_item_id", "ID", "number", number_type="int"),
             _c("item_name", "品目名"),
@@ -383,6 +407,7 @@ TABLES: dict[str, TableSpec] = {
         pk_type="int",
         description="/stock add・/stock use の履歴",
         order_by="movement_id DESC",
+        searchable=("reason",),
         columns=(
             _c("movement_id", "ID", "number", number_type="int"),
             _c("stock_item_id", "品目ID", "number", number_type="int"),
@@ -402,6 +427,7 @@ TABLES: dict[str, TableSpec] = {
         pk_type="text",
         description="/setup・/settings_set で保存したこのサーバーの設定",
         order_by="setting_key",
+        searchable=("setting_key", "setting_value"),
         # 値にロール ID・チャンネル ID が入る。GET /settings が
         # ロール ID の実値を L4 にだけ返している（G1-6）ので、同じ扱いにする
         min_level=4,
@@ -438,6 +464,17 @@ class UnknownColumnError(KeyError):
 
 class InvalidValueError(ValueError):
     """列の型に合わない値が指定された（例: 進捗率に数値でない文字列）。"""
+
+
+class UnsortableColumnError(KeyError):
+    """sortable に無い列で並び替えが指定された（HTTP 400 にする）。"""
+
+
+class UnsearchableTableError(KeyError):
+    """検索対象列（searchable）の無い表に検索語が指定された。
+
+    黙って全件を返すと「絞り込めたつもりで絞り込めていない」画面になるため、
+    エラーにする（HTTP 400）。"""
 
 
 class UnknownRowError(KeyError):
@@ -654,6 +691,25 @@ class TableRepository(BaseRepository):
             where += f" AND {spec.extra_where}"
         return where
 
+    def _search_where(self, spec: TableSpec, q: str) -> tuple[str, tuple]:
+        """検索の WHERE 断片とバインド値を返す（D1-2）。
+
+        - 対象列は spec.searchable のホワイトリストだけ。列名は定義側から取り、
+          リクエスト由来の文字列は**パターンとしてのみ**バインドする
+        - `%` / `_` はエスケープし、ワイルドカードとして扱わない
+        - SQLite の LIKE は既定で大文字小文字を区別しない（ASCII のみ）が、
+          PostgreSQL は区別する。`lower(col) LIKE lower(?)` で両者を揃える
+          （ILIKE のドライバ別出し分けはしない。方言を1つに保つ）
+        """
+        if not spec.searchable:
+            raise UnsearchableTableError(spec.key)
+        escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        parts = [
+            f"lower({name}) LIKE lower(?) ESCAPE '\\'" for name in spec.searchable
+        ]
+        return "(" + " OR ".join(parts) + ")", tuple(pattern for _ in parts)
+
     def _sheet_where(self, table_key: str, guild_id: int, sheet_id: str) -> tuple[str, tuple]:
         """シート絞り込みの WHERE 断片とバインド値を返す。
 
@@ -711,7 +767,12 @@ class TableRepository(BaseRepository):
         raise UnknownTableError(table_key)
 
     async def count_rows(
-        self, guild_id: int, table_key: str, *, sheet_id: str | None = None
+        self,
+        guild_id: int,
+        table_key: str,
+        *,
+        sheet_id: str | None = None,
+        q: str | None = None,
     ) -> int:
         spec = get_spec(table_key)
         where = self._where(spec)
@@ -720,6 +781,10 @@ class TableRepository(BaseRepository):
             sheet_sql, sheet_params = self._sheet_where(table_key, guild_id, sheet_id)
             where += f" AND {sheet_sql}"
             params += sheet_params
+        if q:
+            search_sql, search_params = self._search_where(spec, q)
+            where += f" AND {search_sql}"
+            params += search_params
         row = await self.db.fetchone(
             f"SELECT COUNT(*) AS n FROM {spec.table} WHERE {where}", params
         )
@@ -733,12 +798,18 @@ class TableRepository(BaseRepository):
         limit: int = DEFAULT_LIMIT,
         offset: int = 0,
         sheet_id: str | None = None,
+        q: str | None = None,
+        sort: str | None = None,
+        dir: str = "asc",
     ) -> list[dict[str, Any]]:
         """指定テーブルの行を返す（列はホワイトリストのものだけ）。
 
         sheet_id を指定すると、そのシート（予定・桁）の行だけに絞る。
+        q を指定すると、searchable 列の OR 部分一致で絞る（D1-2）。
+        sort を指定すると、その列で並び替える（D1-3。既定は spec.order_by）。
         """
         spec = get_spec(table_key)
+        order_by = self._order_by(spec, sort, dir)
         limit = max(1, min(int(limit), MAX_LIMIT))
         offset = max(0, int(offset))
         where = self._where(spec)
@@ -747,27 +818,67 @@ class TableRepository(BaseRepository):
             sheet_sql, sheet_params = self._sheet_where(table_key, guild_id, sheet_id)
             where += f" AND {sheet_sql}"
             params += sheet_params
+        if q:
+            search_sql, search_params = self._search_where(spec, q)
+            where += f" AND {search_sql}"
+            params += search_params
         rows = await self.db.fetchall(
             f"SELECT {', '.join(spec.column_names)} FROM {spec.table}"
             f" WHERE {where}"
-            f" ORDER BY {spec.order_by} LIMIT ? OFFSET ?",
+            f" ORDER BY {order_by} LIMIT ? OFFSET ?",
             (*params, limit, offset),
         )
         return [dict(r) for r in rows]
 
+    def _order_by(self, spec: TableSpec, sort: str | None, dir: str) -> str:
+        """ORDER BY 句を組み立てる（D1-3）。
+
+        ORDER BY はバインドできないため、**列名は必ず spec 側のホワイトリスト
+        から取る**（リクエスト由来の文字列を SQL へ連結しない）。
+        NULL は昇順・降順とも末尾に置く: SQLite に NULLS LAST が無いので
+        `(col IS NULL), col` で両ドライバの並びを揃える（PG の既定は
+        DESC で NULL が先頭に来てしまう）。
+        """
+        if sort is None:
+            return spec.order_by
+        if sort not in spec.sortable_columns:
+            raise UnsortableColumnError(sort)
+        if dir not in ("asc", "desc"):
+            raise UnsortableColumnError(dir)
+        # 検査済みの sort と同じ綴りが spec 側にあることを確認したうえで、
+        # spec が持つ列名の方を使う（リクエスト値そのものを連結しない）
+        name = next(c.name for c in spec.columns if c.name == sort)
+        direction = "DESC" if dir == "desc" else "ASC"
+        return f"({name} IS NULL), {name} {direction}"
+
     async def list_all_rows(
-        self, guild_id: int, table_key: str, *, sheet_id: str | None = None
+        self,
+        guild_id: int,
+        table_key: str,
+        *,
+        sheet_id: str | None = None,
+        q: str | None = None,
+        sort: str | None = None,
+        dir: str = "asc",
     ) -> list[dict[str, Any]]:
         """指定テーブルの全行を返す（エクスポート用）。
 
         list_rows は画面表示用に MAX_LIMIT の上限を持つため、
         全件が必要なエクスポートではページングで読み切る。
+        画面と同じ絞り込み・並び順（sheet_id / q / sort）が効く（中身をずらさない）。
         """
         out: list[dict[str, Any]] = []
         offset = 0
         while True:
             chunk = await self.list_rows(
-                guild_id, table_key, limit=MAX_LIMIT, offset=offset, sheet_id=sheet_id
+                guild_id,
+                table_key,
+                limit=MAX_LIMIT,
+                offset=offset,
+                sheet_id=sheet_id,
+                q=q,
+                sort=sort,
+                dir=dir,
             )
             out.extend(chunk)
             if len(chunk) < MAX_LIMIT:

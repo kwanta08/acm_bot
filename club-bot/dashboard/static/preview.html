@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>コンポーネントプレビュー（開発用）</title>
+<link rel="stylesheet" href="style.css">
+<!--
+  D0-4: デザイン確認用の静的ページ。ログイン不要・API 不要。
+  「まずこのページで形を決めてから本番画面へ適用する」ための Liquid Glass 部品カタログ。
+  認証の後ろに置かない代わりに、データを一切含めない
+  （以下はすべてハードコードのダミー文字列）。
+  CSS は style.css だけを使う（プレビュー専用のスタイルを書かない）。
+  バー幅・インジケーター位置は本番（app.js）と同じく JS のプロパティ代入で
+  与える（インラインの属性は書かない）。
+-->
+</head>
+<body>
+<aside class="sidebar glass">
+  <h1 class="brand">コンポーネントプレビュー</h1>
+  <div class="guild-pill">
+    <select aria-label="サーバーを選択">
+      <option selected>鳥人研（ダミー）</option>
+      <option>サブサーバー（ダミー）</option>
+    </select>
+  </div>
+  <nav class="nav" role="tablist" aria-label="表の一覧">
+    <span class="nav-indicator" aria-hidden="true"></span>
+    <button type="button" class="nav-item active" role="tab" aria-selected="true">メンバー</button>
+    <button type="button" class="nav-item" role="tab" aria-selected="false">班</button>
+    <button type="button" class="nav-item" role="tab" aria-selected="false">日程調整</button>
+    <button type="button" class="nav-item" role="tab" aria-selected="false">出欠回答</button>
+    <button type="button" class="nav-item" role="tab" aria-selected="false">桁巻き積層記録</button>
+    <button type="button" class="nav-item" role="tab" aria-selected="false">機体進捗</button>
+    <button type="button" class="nav-item" role="tab" aria-selected="false">設定</button>
+  </nav>
+  <div class="side-foot">
+    <div class="theme-mini">
+      <label><span class="theme-text">テーマ: </span>
+        <select aria-label="テーマを選択">
+          <option selected>システム</option>
+          <option>ライト</option>
+          <option>ダーク</option>
+        </select>
+      </label>
+    </div>
+    <div class="account-card">
+      <span class="avatar" aria-hidden="true">や</span>
+      <span class="account-name">やまだ</span>
+      <button type="button">ログアウト</button>
+    </div>
+    <p class="side-note">開発用プレビュー。本番の導線からはリンクしない。</p>
+  </div>
+</aside>
+
+<main>
+  <div class="content">
+
+  <div class="page-head">
+    <div>
+      <h2 class="page-title">ページタイトル行</h2>
+      <p class="page-desc">表名（Komorebi Gothic 20px 700）＋説明文＋右端に CSV ピル</p>
+    </div>
+    <a class="button" href="#">CSV をダウンロード</a>
+  </div>
+
+  <h2 class="page-title">ボタン</h2>
+  <div class="toolbar">
+    <button type="button">標準</button>
+    <button type="button" class="primary">プライマリ</button>
+    <a class="button" href="#">リンクボタン</a>
+    <a class="button primary" href="#">リンク（プライマリ）</a>
+    <button type="button" disabled>無効</button>
+  </div>
+
+  <h2 class="page-title">シートタブ（液体インジケーター）</h2>
+  <div class="sheetbar" role="tablist">
+    <span class="sheet-indicator" aria-hidden="true"></span>
+    <button type="button" class="sheet-tab active" role="tab" aria-selected="true">
+      <span class="sheet-label">8月ミーティング</span>
+    </button>
+    <button type="button" class="sheet-tab" role="tab" aria-selected="false">
+      <span class="sheet-label">9月作業日程</span>
+    </button>
+    <button type="button" class="sheet-tab" role="tab" aria-selected="false">
+      <span class="sheet-label">とても長いタイトルのシートは省略記号で切り詰められる</span>
+    </button>
+  </div>
+
+  <h2 class="page-title">ツールバー（検索・ページャ付き）</h2>
+  <div class="toolbar">
+    <input type="search" class="search-box" placeholder="検索（DB の値。表示名では検索できません）" aria-label="この表を検索">
+    <button type="button" disabled>前へ</button>
+    <span class="empty">1〜200 件 / 全 3000 件</span>
+    <button type="button">次へ</button>
+    <label class="empty">表示件数:
+      <select>
+        <option>50 件</option>
+        <option>100 件</option>
+        <option selected>200 件</option>
+        <option>500 件</option>
+      </select>
+    </label>
+    <button type="button" aria-pressed="false">行の高さ: 標準</button>
+  </div>
+
+  <h2 class="page-title">指標カード（出欠回答・機体進捗のみに出す）</h2>
+  <div class="metrics">
+    <div class="card metric">
+      <div class="metric-label">機体全体の進捗</div>
+      <div class="metric-value">62%</div>
+      <div class="metric-bar"><span class="metric-bar-fill blue" data-width="62%"></span></div>
+    </div>
+    <div class="card metric">
+      <div class="metric-label">進捗ノード数</div>
+      <div class="metric-value">120</div>
+    </div>
+    <div class="card metric">
+      <div class="metric-label">実測重量合計</div>
+      <div class="metric-value">41,900 g</div>
+      <div class="metric-sub">目標比 63%</div>
+    </div>
+    <div class="card metric">
+      <div class="metric-label">回答率</div>
+      <div class="metric-value positive">75%</div>
+      <div class="metric-bar"><span class="metric-bar-fill teal" data-width="75%"></span></div>
+    </div>
+  </div>
+
+  <h2 class="page-title">進捗チャート（上位=青+グロー / 下位=ティール、階段状に伸長）</h2>
+  <div class="chart-wrap card">
+    <div class="chart" role="img" aria-label="進捗グラフの見本">
+      <div class="chart-row">
+        <span class="chart-label">機体全体</span>
+        <div class="chart-track"><span class="chart-bar top" data-width="62%" data-delay="0s"></span></div>
+        <span class="chart-val">62%</span>
+      </div>
+      <div class="chart-row">
+        <span class="chart-label">主翼</span>
+        <div class="chart-track"><span class="chart-bar" data-width="78%" data-delay="0.12s"></span></div>
+        <span class="chart-val">78%</span>
+      </div>
+      <div class="chart-row">
+        <span class="chart-label">尾翼</span>
+        <div class="chart-track"><span class="chart-bar" data-width="30%" data-delay="0.24s"></span></div>
+        <span class="chart-val">30%</span>
+      </div>
+    </div>
+  </div>
+
+  <h2 class="page-title">表（入力中セルを含む）</h2>
+  <div class="grid-wrap panel">
+    <table class="grid">
+      <thead>
+        <tr>
+          <th class="sortable" aria-sort="none"><button type="button" class="sort-button">ID</button></th>
+          <th class="sortable" aria-sort="ascending"><button type="button" class="sort-button">名前 ✎ ▲</button></th>
+          <th class="sortable" aria-sort="none"><button type="button" class="sort-button">進捗率 ✎</button></th>
+          <th class="sortable" aria-sort="none"><button type="button" class="sort-button">状態 ✎</button></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td class="editable" title="クリックして編集" tabindex="0" role="button">主翼（Tab でフォーカスするとリングが見える）</td><td>75%</td><td class="status-text">進行中</td></tr>
+        <tr><td>2</td><td class="editable"><span class="cell-editor"><input value="尾翼（入力中）"><button type="button" class="cell-action primary" aria-label="確定">✓</button><button type="button" class="cell-action cell-action-cancel" aria-label="キャンセル">✕</button></span></td><td>30%</td><td class="status-text">進行中</td></tr>
+        <tr><td>3</td><td class="editable">胴体</td><td><span class="cell-error">0.5 または 50% の形式で入力してください。</span></td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 class="page-title">表（12列。横スクロールが表の中に閉じる。偶数行ゼブラ）</h2>
+  <div class="grid-wrap panel">
+    <table class="grid">
+      <thead>
+        <tr>
+          <th class="num">ID</th><th>名前<span class="badge-edit" title="この列は編集できます">✎</span></th><th>担当</th><th>状態</th>
+          <th class="num">進捗率</th><th class="num">目標重量(g)</th><th class="num">実測重量(g)</th><th>ソース</th>
+          <th>親ノード</th><th class="num">表示順</th><th>作成日時</th><th>更新日時</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="num">1</td><td>主翼</td><td>やまだ</td><td class="status-text">進行中</td>
+          <td class="num">75%</td><td class="num">1200</td><td class="num">1180.5</td><td>manual</td>
+          <td>—</td><td class="num">1</td><td>2026/08/01 10:00:00</td><td>2026/08/29 18:30:00</td>
+        </tr>
+        <tr>
+          <td class="num">2</td><td>尾翼</td><td>さとう</td><td class="status-text">進行中</td>
+          <td class="num">30%</td><td class="num">300</td><td class="num">—</td><td>manual</td>
+          <td>—</td><td class="num">2</td><td>2026/08/02 10:00:00</td><td>2026/08/28 09:00:00</td>
+        </tr>
+        <tr>
+          <td class="num">3</td><td>胴体</td><td>—</td><td>—</td>
+          <td class="num">—</td><td class="num">800</td><td class="num">—</td><td>manual</td>
+          <td>—</td><td class="num">3</td><td>2026/08/03 10:00:00</td><td>2026/08/27 12:00:00</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 class="page-title">表（詰めて表示）</h2>
+  <div class="grid-wrap panel">
+    <table class="grid dense">
+      <thead>
+        <tr><th class="num">ID</th><th>名前</th><th>状態</th></tr>
+      </thead>
+      <tbody>
+        <tr><td class="num">1</td><td>主翼</td><td class="status-text">進行中</td></tr>
+        <tr><td class="num">2</td><td>尾翼</td><td class="status-text">進行中</td></tr>
+        <tr><td class="num">3</td><td>胴体</td><td>—</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 class="page-title">ピボット表（出欠回答）</h2>
+  <div class="grid-wrap panel">
+    <table class="grid pivot">
+      <thead>
+        <tr><th>候補日時</th><th>参加</th><th>不参加</th><th>未回答</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="pivot-at">09/01 (火) 19:00</td>
+          <td class="pivot-cell">
+            <div class="pivot-count">参加 (2)</div>
+            <div class="pivot-names">やまだ
+さとう</div>
+          </td>
+          <td class="pivot-cell"></td>
+          <td class="pivot-cell">
+            <div class="pivot-count">未回答 (1)</div>
+            <div class="pivot-names">すずき</div>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2 class="page-title">設定フォーム</h2>
+  <div class="settings-form">
+    <div class="settings-item">
+      <label class="settings-label"><span>サークル名</span><input class="settings-input" value="鳥人研"></label>
+      <p class="empty settings-desc">週次サマリー等の表示に使う名称</p>
+      <p class="cell-error settings-error"></p>
+    </div>
+    <div class="settings-item">
+      <label class="settings-label"><span>Bot ログチャンネル</span><input class="settings-input" inputmode="numeric" placeholder="ID（数字）を入力" value="abc"></label>
+      <p class="cell-error settings-error">Bot ログチャンネル には ID（数字）を入力してください。</p>
+    </div>
+    <div class="settings-item">
+      <label class="settings-label"><span>幹部ロール（閲覧のみ）</span><input class="settings-input" readonly value="（設定済み）"></label>
+      <p class="cell-error settings-error"></p>
+    </div>
+    <button type="button" class="primary">変更を保存</button>
+    <p class="empty">1 件を保存しました。</p>
+  </div>
+
+  <h2 class="page-title">空状態・エラー</h2>
+  <p class="empty">データがありません。</p>
+  <p class="loading">読み込み中…</p>
+  <p class="error">エラーが発生しました (500)</p>
+
+  <h2 class="page-title">Dock（768px 以下で画面下部に固定表示）</h2>
+  <p class="empty">ウィンドウ幅を 768px 以下にすると、サイドバーが畳まれて下の Dock が現れる。</p>
+
+  </div>
+</main>
+
+<nav class="dock" role="tablist" aria-label="表の一覧（モバイル）">
+  <button type="button" class="dock-item active" role="tab" aria-selected="true" title="メンバー">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"></path><path d="M4 20c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5"></path></svg>
+    <span class="dock-label">メンバー</span>
+  </button>
+  <button type="button" class="dock-item" role="tab" aria-selected="false" title="日程調整">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16v14H4Z"></path><path d="M4 10h16"></path><path d="M8 3v5"></path><path d="M16 3v5"></path></svg>
+    <span class="dock-label">日程調整</span>
+  </button>
+  <button type="button" class="dock-item" role="tab" aria-selected="false" title="桁巻き積層記録">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 16c4-8 7 4 10-3s5-2 8-6"></path></svg>
+    <span class="dock-label">桁巻き</span>
+  </button>
+  <button type="button" class="dock-item" role="tab" aria-selected="false" title="機体進捗">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 20V10"></path><path d="M12 20V4"></path><path d="M19 20v-7"></path></svg>
+    <span class="dock-label">機体進捗</span>
+  </button>
+</nav>
+
+<script>
+// バー幅・アニメ遅延・インジケーター位置は本番（app.js）と同じく
+// JS のプロパティ代入で与える（インラインの属性を書かないため。
+// このページに動的なデータは無く、値はすべて上のダミー data-* 属性）
+for (const el of document.querySelectorAll("[data-width]")) {
+  el.style.width = el.dataset.width;
+}
+for (const el of document.querySelectorAll("[data-delay]")) {
+  el.style.animationDelay = el.dataset.delay;
+}
+function placePreviewIndicator(indicator, active) {
+  if (!indicator || !active) return;
+  indicator.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop}px)`;
+  indicator.style.width = `${active.offsetWidth}px`;
+  indicator.style.height = `${active.offsetHeight}px`;
+}
+function placePreviewIndicators() {
+  placePreviewIndicator(
+    document.querySelector(".nav-indicator"), document.querySelector(".nav-item.active"));
+  placePreviewIndicator(
+    document.querySelector(".sheet-indicator"), document.querySelector(".sheet-tab.active"));
+}
+placePreviewIndicators();
+window.addEventListener("resize", placePreviewIndicators);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(placePreviewIndicators);
+</script>
+</body>
+</html>
