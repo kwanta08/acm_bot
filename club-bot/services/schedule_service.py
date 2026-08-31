@@ -26,6 +26,35 @@ DEFAULT_STATUS_TO_EMOJI = {
     "ng": "❌",
 }
 
+# 投票ボード（ボタン式）の1メッセージあたり候補数（ボタンの上限）。
+# これを超える分はページ分割する
+MAX_BOARD_OPTIONS = 25
+
+# 集計サマリーの候補1つに列挙する名前の数。これを超えると field の
+# 1024 文字制限に当たり、集計サマリーごと送信に失敗する（400）
+SUMMARY_NAME_LIMIT = 20
+
+
+def format_status_lines(
+    ok_users: list[str], ng_users: list[str], maybe_users: list[str], max_names: int
+) -> str:
+    """候補1つ分の出欠を「状態ごとに1行」で整形する。
+
+    inline field（3列）の狭い幅でも読める形。0名の状態も行を残す
+    （候補同士を列で見比べるときに行がずれない）。名前は max_names で
+    打ち切り「ほか N名」を付ける（field の 1024 文字制限対策）。
+    """
+    lines = []
+    for status_label, users in (("参加", ok_users), ("不参加", ng_users), ("未定", maybe_users)):
+        line = f"{status_label} {len(users)}"
+        if users:
+            shown = users[:max_names]
+            line += f": {', '.join(shown)}"
+            if len(users) > len(shown):
+                line += f"、ほか{len(users) - len(shown)}名"
+        lines.append(line)
+    return "\n".join(lines)
+
 
 def new_schedule_id() -> str:
     return uuid.uuid4().hex[:12]
@@ -199,15 +228,7 @@ async def build_option_embed(
     渡されなかった場合は「特定できない」＝ `-` を表示する。
     """
     votes = await repo.list_votes(guild_id, option["option_id"])
-    ok_users, ng_users, maybe_users = [], [], []
-    for v in votes:
-        name = await _resolve_name(bot, guild, v["user_id"])
-        if v["status"] == "ok":
-            ok_users.append(name)
-        elif v["status"] == "ng":
-            ng_users.append(name)
-        elif v["status"] == "maybe":
-            maybe_users.append(name)
+    ok_users, ng_users, maybe_users = await _bucket_names(bot, guild, votes)
 
     target_role_name = "名簿の現役"
     if schedule.get("target_role_id") and guild:
@@ -253,6 +274,119 @@ async def _resolve_name(bot: discord.Client, guild: discord.Guild | None, user_i
     return f"<@{user_id}>"
 
 
+async def _bucket_names(
+    bot: discord.Client, guild: discord.Guild | None, votes: list[dict[str, Any]]
+) -> tuple[list[str], list[str], list[str]]:
+    """票を (参加, 不参加, 未定) の表示名リストへ振り分ける。"""
+    ok_users: list[str] = []
+    ng_users: list[str] = []
+    maybe_users: list[str] = []
+    for v in votes:
+        name = await _resolve_name(bot, guild, v["user_id"])
+        if v["status"] == "ok":
+            ok_users.append(name)
+        elif v["status"] == "ng":
+            ng_users.append(name)
+        elif v["status"] == "maybe":
+            maybe_users.append(name)
+    return ok_users, ng_users, maybe_users
+
+
+def format_board_line(
+    label: str, ok: int, maybe: int, ng: int, emojis: dict[str, Any] | None = None
+) -> str:
+    """投票ボードの候補1つ分（1行）を整形する。
+
+    **候補1つ = 1行**にするのは Discord モバイルの制約のため。inline field は
+    モバイルでは内容量に関係なく縦積み（1列）にされるので、field で
+    横並びを作ってもスマホでは崩れる。1行のコンパクト表示なら
+    どのクライアントでも同じ形で読める。
+    絵文字はギルド別設定（カスタム絵文字は `<:name:id>` で Embed 本文に
+    そのまま描画される）。
+    """
+    e = {**DEFAULT_STATUS_TO_EMOJI, **(emojis or {})}
+    return f"**{label}**　{e['ok']} {ok}　{e['maybe']} {maybe}　{e['ng']} {ng}"
+
+
+async def build_vote_board_embed(
+    repo: ScheduleRepository,
+    guild_id: int,
+    bot: discord.Client,
+    schedule: dict[str, Any],
+    options: list[dict[str, Any]],
+    guild: discord.Guild | None,
+    *,
+    roster_active_ids: set[str] | None = None,
+    roster_retired_ids: set[str] | None = None,
+    page: int = 1,
+    total_pages: int = 1,
+    emojis: dict[str, Any] | None = None,
+) -> discord.Embed:
+    """ボタン投票の投票ボード Embed（全候補を1メッセージに集約）。
+
+    候補ごとの集計は **description に1行ずつ**置く（format_board_line）。
+    以前は inline field で3列に並べていたが、Discord モバイルは inline
+    field を縦積みにするため、スマホでは候補が縦の壁に戻ってしまった。
+    横並びの本体はメッセージ下部の**候補ボタン**（ボタン行はモバイルでも
+    横に並ぶ）が担い、Embed 側は1候補1行で薄く保つ。
+
+    名前はボードに出さない。全員分の顔ぶれは候補ボタンを押したときの
+    詳細（build_option_embed）と締切後の集計サマリーで見せる。
+
+    ``options`` は**このメッセージ（ページ）に載る分だけ**を渡す
+    （最大 MAX_BOARD_OPTIONS。超える分は呼び出し側がページ分割する）。
+    未回答者数は build_option_embed と同じく予定単位・同じ母集団（G4-12）。
+    """
+    title = f"【日程調整】{schedule['title']}"
+    if total_pages > 1:
+        title += f"（{page}/{total_pages}）"
+    embed = schedule_embed(title)
+
+    target_role_name = "名簿の現役"
+    if schedule.get("target_role_id") and guild:
+        role = guild.get_role(int(schedule["target_role_id"]))
+        if role:
+            target_role_name = role.name
+
+    unanswered_count = "-"
+    if roster_active_ids is not None and roster_retired_ids is not None:
+        count = await count_unanswered(
+            repo, guild_id, schedule, guild, roster_active_ids, roster_retired_ids
+        )
+        if count is not None:
+            unanswered_count = f"{count} 名"
+
+    lines = [f"締切: {fmt_jp(from_iso(schedule['deadline']))}"]
+    if schedule.get("place"):
+        lines.append(f"場所: {schedule['place']}")
+    lines.append(f"対象: {target_role_name} / 未回答（この予定）: {unanswered_count}")
+    if schedule.get("description"):
+        lines.append(str(schedule["description"]))
+
+    if options:
+        lines.append("")
+        e = {**DEFAULT_STATUS_TO_EMOJI, **(emojis or {})}
+        lines.append(f"{e['ok']} 参加　{e['maybe']} 未定　{e['ng']} 不参加")
+        for opt in options[:MAX_BOARD_OPTIONS]:
+            votes = await repo.list_votes(guild_id, opt["option_id"])
+            counts = {"ok": 0, "maybe": 0, "ng": 0}
+            for v in votes:
+                if v["status"] in counts:
+                    counts[v["status"]] += 1
+            lines.append(
+                format_board_line(
+                    str(opt["label"]), counts["ok"], counts["maybe"], counts["ng"], emojis
+                )
+            )
+
+    lines.append("")
+    lines.append(
+        "**候補のボタンを押して出欠を回答してください**（名前の一覧もそこで見られます）。"
+    )
+    embed.description = "\n".join(lines)
+    return embed
+
+
 async def build_summary_embed(
     repo: ScheduleRepository,
     guild_id: int,
@@ -277,16 +411,7 @@ async def build_summary_embed(
     best_ok = -1
     for index, opt in enumerate(options):
         votes = await repo.list_votes(guild_id, opt["option_id"])
-
-        ok_users, ng_users, maybe_users = [], [], []
-        for v in votes:
-            name = await _resolve_name(bot, guild, v["user_id"])
-            if v["status"] == "ok":
-                ok_users.append(name)
-            elif v["status"] == "ng":
-                ng_users.append(name)
-            elif v["status"] == "maybe":
-                maybe_users.append(name)
+        ok_users, ng_users, maybe_users = await _bucket_names(bot, guild, votes)
 
         # 最多参加の判定は**全候補**で行う。表示は 25 field で打ち切っても、
         # 人に見せる集計値を打ち切った分だけで出さない
@@ -299,14 +424,11 @@ async def build_summary_embed(
         if index >= MAX_EMBED_FIELDS:
             continue
 
-        detail_lines = []
-        for status_label, users in (("参加", ok_users), ("不参加", ng_users), ("未定", maybe_users)):
-            line = f"{status_label} {len(users)}"
-            if users:
-                line += f": {', '.join(users)}"
-            detail_lines.append(line)
-
-        embed.add_field(name=opt["label"], value="\n".join(detail_lines), inline=True)
+        embed.add_field(
+            name=opt["label"],
+            value=format_status_lines(ok_users, ng_users, maybe_users, SUMMARY_NAME_LIMIT),
+            inline=True,
+        )
 
     # 「結局いつに決まったのか」を残す（G3-4）。
     #
