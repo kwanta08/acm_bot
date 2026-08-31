@@ -1,190 +1,85 @@
-/* ダッシュボードのスタイル（自己ホスト。外部 CDN・外部フォントに依存しない）
-   Apple Liquid Glass 風: 半透明ガラス面 + 背景オーロラ + スペキュラハイライト */
+/* ダッシュボードの最小スタイル（自己ホスト。外部 CDN に依存しない） */
 :root {
-  color-scheme: light dark;
-
-  /* テキスト・意味色 */
-  --fg: #202021;
-  --muted: rgba(32, 32, 33, 0.6);
-  --accent: #007aff;
+  --bg: #ffffff;
+  --fg: #1f2328;
+  --muted: #656d76;
+  --border: #d8dee4;
+  --accent: #4a86e8;
   --accent-fg: #ffffff;
-  --danger: #d70015;
-
-  /* ガラス素材（透明度ラダー: 強い面 → 弱い面） */
-  --glass-strong: rgba(255, 255, 255, 0.72);   /* 表・チャートなど読む面 */
-  --glass: rgba(255, 255, 255, 0.5);           /* トップバー・チップ */
-  --glass-hover: rgba(255, 255, 255, 0.66);
-  --glass-subtle: rgba(255, 255, 255, 0.34);   /* 入力・非アクティブ */
-  --glass-blur: blur(20px) saturate(180%);
-  --glass-blur-deep: blur(40px) saturate(180%);
-
-  /* 縁の光: 内側ヘアライン + 上部スペキュラ + 外側の柔らかい影 */
-  --edge-light: rgba(255, 255, 255, 0.65);
-  --edge-dark: rgba(15, 23, 42, 0.08);
-  --specular: rgba(255, 255, 255, 0.5);
-  --glass-shadow: 0 10px 24px rgba(15, 23, 42, 0.08);
-  --glass-ring:
-    inset 0 0 0 0.5px var(--edge-dark),
-    inset 0 1px 0 var(--edge-light),
-    inset 0 0 18px rgba(255, 255, 255, 0.18),
-    var(--glass-shadow);
-
-  /* ストライプ・区切り（ガラスの上で読める濃度） */
-  --row-alt: rgba(15, 23, 42, 0.035);
-  --hairline: rgba(15, 23, 42, 0.09);
-
-  /* 背景オーロラ（ガラス越しに滲ませる色） */
-  --aurora-1: rgba(44, 173, 253, 0.55);   /* azure */
-  --aurora-2: rgba(124, 92, 255, 0.45);   /* violet */
-  --aurora-3: rgba(61, 205, 139, 0.4);    /* mint */
-  --aurora-4: rgba(252, 116, 221, 0.35);  /* pink */
-  --canvas: #eef1f6;
-
-  --ease-glass: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --row-alt: #f6f8fa;
+  --danger: #b42318;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --fg: #f2f2f5;
-    --muted: rgba(242, 242, 245, 0.62);
-    --accent: #0a84ff;
-    --danger: #ff6961;
-
-    --glass-strong: rgba(24, 26, 33, 0.78);
-    --glass: rgba(34, 34, 38, 0.55);
-    --glass-hover: rgba(46, 47, 53, 0.62);
-    --glass-subtle: rgba(28, 29, 35, 0.42);
-
-    --edge-light: rgba(255, 255, 255, 0.16);
-    --edge-dark: rgba(0, 0, 0, 0.4);
-    --specular: rgba(255, 255, 255, 0.12);
-    --glass-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
-
-    --row-alt: rgba(255, 255, 255, 0.045);
-    --hairline: rgba(255, 255, 255, 0.09);
-
-    --aurora-1: rgba(10, 132, 255, 0.35);
-    --aurora-2: rgba(94, 92, 230, 0.38);
-    --aurora-3: rgba(48, 168, 116, 0.28);
-    --aurora-4: rgba(191, 90, 242, 0.3);
-    --canvas: #131316;
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #9198a1;
+    --border: #30363d;
+    --accent: #4a86e8;
+    --accent-fg: #ffffff;
+    --row-alt: #161b22;
+    --danger: #ff7b72;
   }
 }
 
 * { box-sizing: border-box; }
 
-/* 背景のオーロラ層。ガラス面の backdrop-filter がここを滲ませる */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background:
-    radial-gradient(42vw 42vw at 12% 8%, var(--aurora-1), transparent 70%),
-    radial-gradient(38vw 38vw at 88% 12%, var(--aurora-2), transparent 70%),
-    radial-gradient(46vw 46vw at 82% 88%, var(--aurora-3), transparent 70%),
-    radial-gradient(36vw 36vw at 8% 82%, var(--aurora-4), transparent 70%),
-    var(--canvas);
-  animation: aurora-drift 36s ease-in-out infinite alternate;
-}
-
-@keyframes aurora-drift {
-  from { background-position: 0 0, 0 0, 0 0, 0 0, 0 0; }
-  to   { background-position: 3vw 2vh, -3vw 3vh, 2vw -3vh, -2vw -2vh, 0 0; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  body::before { animation: none; }
-  * { transition-duration: 0.01ms !important; }
-}
-
 body {
   margin: 0;
-  background: var(--canvas);
+  background: var(--bg);
   color: var(--fg);
   font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans",
     "Noto Sans JP", sans-serif;
   font-size: 15px;
   line-height: 1.6;
-  -webkit-font-smoothing: antialiased;
 }
 
-/* トップバー: 画面に浮くガラスのピル */
 .topbar {
-  position: sticky;
-  top: 0.75rem;
-  z-index: 10;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  margin: 0.75rem 1rem 0;
-  padding: 0.6rem 1.25rem;
-  border-radius: 22px;
-  background: var(--glass);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  box-shadow: var(--glass-ring);
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--border);
 }
 
-.topbar h1 { font-size: 1.05rem; margin: 0; letter-spacing: -0.01em; }
+.topbar h1 { font-size: 1.05rem; margin: 0; }
 
 .account { color: var(--muted); font-size: 0.9rem; }
 
 main { padding: 1.25rem; }
 
 .footer {
-  padding: 1rem 1.5rem 1.5rem;
+  padding: 1rem 1.25rem;
   color: var(--muted);
   font-size: 0.85rem;
+  border-top: 1px solid var(--border);
 }
 
 .loading, .empty { color: var(--muted); }
 
 .error {
   color: var(--danger);
-  border: 0.5px solid var(--danger);
-  border-radius: 14px;
+  border: 1px solid var(--danger);
+  border-radius: 6px;
   padding: 0.75rem 1rem;
-  background: var(--glass-subtle);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
 }
 
-/* ボタン: ガラスのピル。状態は透明度ラダーで表す */
 button, .button {
   font: inherit;
-  padding: 0.35rem 1rem;
-  border: none;
-  border-radius: 999px;
-  background: var(--glass-subtle);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  box-shadow:
-    inset 0 0 0 0.5px var(--edge-dark),
-    inset 0 1px 0 var(--edge-light);
+  padding: 0.35rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
   color: var(--fg);
   cursor: pointer;
-  transition: background-color 0.25s var(--ease-glass),
-    transform 0.25s var(--ease-glass);
 }
-
-button:hover, .button:hover { background: var(--glass-hover); }
-button:active, .button:active { transform: scale(0.97); }
 
 button.primary, .button.primary {
   background: var(--accent);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    0 6px 16px rgba(0, 122, 255, 0.28);
+  border-color: var(--accent);
   color: var(--accent-fg);
-}
-
-button.primary:hover, .button.primary:hover { filter: brightness(1.08); }
-
-:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }
 
 /* シートタブ（Google スプレッドシートのタブ相当。**表の上**に置く。
@@ -193,28 +88,25 @@ button.primary:hover, .button.primary:hover { filter: brightness(1.08); }
 .sheetbar {
   display: flex;
   align-items: stretch;
-  gap: 0.4rem;
+  gap: 0.25rem;
   margin-bottom: 0.9rem;
+  border-bottom: 2px solid var(--border);
   overflow-x: auto;               /* タブが多いときは横スクロール */
   scrollbar-width: thin;
-  padding: 0.15rem;               /* リングのクリップ回避 */
 }
 
 .sheet-tab {
   flex: 0 0 auto;                 /* タブを潰さず横に並べてスクロールさせる */
   max-width: 16rem;
-  padding: 0.35rem 1rem;
-  border: none;
-  border-radius: 999px;
-  background: var(--glass-subtle);
-  box-shadow: inset 0 0 0 0.5px var(--edge-dark);
+  padding: 0.35rem 0.85rem;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  background: var(--row-alt);
   color: var(--fg);
   cursor: pointer;
   font: inherit;
-  transition: background-color 0.25s var(--ease-glass);
 }
-
-.sheet-tab:hover { background: var(--glass-hover); }
 
 .sheet-tab .sheet-label {
   display: block;
@@ -224,12 +116,10 @@ button.primary:hover, .button.primary:hover { filter: brightness(1.08); }
   text-overflow: ellipsis;
 }
 
-/* 選択中のタブはアクセント色のガラス＋太字で明示する */
+/* 選択中のタブは太字＋背景色で明示する */
 .sheet-tab.active {
   background: var(--accent);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.35),
-    0 4px 12px rgba(0, 122, 255, 0.25);
+  border-color: var(--accent);
   color: var(--accent-fg);
 }
 
@@ -251,19 +141,12 @@ td.pivot-cell { white-space: normal; min-width: 9rem; }
 
 .pivot-names { white-space: pre-line; line-height: 1.7; }
 
-/* 表グリッド: ガラスのカードの中に閉じ込める（横スクロールは表の中だけ） */
-.grid-wrap {
-  overflow-x: auto;
-  border-radius: 16px;
-  background: var(--glass-strong);
-  -webkit-backdrop-filter: var(--glass-blur-deep);
-  backdrop-filter: var(--glass-blur-deep);
-  box-shadow: var(--glass-ring);
-}
+/* 表グリッド（横スクロールは表の中だけに閉じ込める） */
+.grid-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
 
 table.grid { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
 table.grid th, table.grid td {
-  border-bottom: 0.5px solid var(--hairline);
+  border-bottom: 1px solid var(--border);
   padding: 0.4rem 0.65rem;
   text-align: left;
   white-space: nowrap;
@@ -271,13 +154,10 @@ table.grid th, table.grid td {
 table.grid thead th {
   position: sticky;
   top: 0;
-  background: var(--glass-strong);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
+  background: var(--row-alt);
   z-index: 1;
 }
 table.grid tbody tr:nth-child(even) { background: var(--row-alt); }
-table.grid tbody tr:last-child td { border-bottom: none; }
 
 .toolbar {
   display: flex;
@@ -289,13 +169,10 @@ table.grid tbody tr:last-child td { border-bottom: none; }
 
 .toolbar select {
   font: inherit;
-  padding: 0.35rem 0.75rem;
-  border: none;
-  border-radius: 999px;
-  background: var(--glass-subtle);
-  box-shadow:
-    inset 0 0 0 0.5px var(--edge-dark),
-    inset 0 1px 0 var(--edge-light);
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
   color: var(--fg);
 }
 
@@ -308,11 +185,10 @@ td input {
   font: inherit;
   width: 100%;
   min-width: 8rem;
-  padding: 0.15rem 0.45rem;
-  border: none;
-  border-radius: 8px;
-  background: var(--glass-subtle);
-  box-shadow: inset 0 0 0 1px var(--accent);
+  padding: 0.15rem 0.3rem;
+  border: 1px solid var(--accent);
+  border-radius: 4px;
+  background: var(--bg);
   color: var(--fg);
 }
 
@@ -321,10 +197,7 @@ td input {
 .chart-wrap {
   overflow-x: auto;
   margin-bottom: 0.9rem;
-  padding: 0.75rem;
-  border-radius: 16px;
-  background: var(--glass-strong);
-  -webkit-backdrop-filter: var(--glass-blur-deep);
-  backdrop-filter: var(--glass-blur-deep);
-  box-shadow: var(--glass-ring);
+  padding: 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
 }
