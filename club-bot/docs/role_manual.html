@@ -1,0 +1,1734 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>権限レベル別 取扱説明書</title>
+<style>
+  /* Zen Maru Gothic。印刷/PDF 生成時はローカルにインストールされたものを使い、
+     ブラウザで開いたときだけ Google Fonts から取得する（local() を先に置く）。 */
+  @font-face {
+    font-family: 'Zen Maru Gothic'; font-style: normal; font-weight: 400; font-display: swap;
+    src: local('Zen Maru Gothic'), local('ZenMaruGothic-Regular'),
+         url(https://fonts.gstatic.com/s/zenmarugothic/v19/o-0SIpIxzW5b-RxT-6A8jWAtCp-k7Q.ttf) format('truetype');
+  }
+  @font-face {
+    font-family: 'Zen Maru Gothic'; font-style: normal; font-weight: 500; font-display: swap;
+    src: local('Zen Maru Gothic Medium'), local('ZenMaruGothic-Medium'),
+         url(https://fonts.gstatic.com/s/zenmarugothic/v19/o-0XIpIxzW5b-RxT-6A8jWAtCp-cGWtCPA.ttf) format('truetype');
+  }
+  @font-face {
+    font-family: 'Zen Maru Gothic'; font-style: normal; font-weight: 700; font-display: swap;
+    src: local('Zen Maru Gothic Bold'), local('ZenMaruGothic-Bold'),
+         url(https://fonts.gstatic.com/s/zenmarugothic/v19/o-0XIpIxzW5b-RxT-6A8jWAtCp-cUW1CPA.ttf) format('truetype');
+  }
+
+  @page { size: A4; margin: 15mm 14mm 16mm 14mm; }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --ink:      #23303a;
+    --ink-soft: #5d7481;
+    --line:     #d5e0e5;
+    --base:     #0b4f6c;
+    --accent:   #048a81;
+    --l1:       #2f9e6b;
+    --l2:       #2f7fd1;
+    --l3:       #e08b1e;
+    --l4:       #8250c4;
+  }
+
+  body {
+    font-family: 'Zen Maru Gothic', 'Noto Sans JP', sans-serif;
+    font-size: 10.2pt;
+    line-height: 1.85;
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page { page-break-after: always; }
+  /* ページ先頭要素の上マージンは余白として無駄なので落とす */
+  .page > *:first-child { margin-top: 0; }
+  .page:last-child { page-break-after: auto; }
+
+  /* ---------- 表紙 ---------- */
+  .cover-wrap { text-align: center; padding-top: 1mm; }
+  .cover-badge {
+    display: inline-block; font-size: 9pt; letter-spacing: 3px;
+    color: var(--accent); border: 1.5px solid var(--accent);
+    border-radius: 999px; padding: 3px 16px; margin-bottom: 14px;
+  }
+  .cover-wrap h1 {
+    font-size: 24pt; font-weight: 700; line-height: 1.4;
+    color: var(--base); letter-spacing: 1px;
+  }
+  .cover-wrap .lead {
+    font-size: 11.5pt; color: var(--ink-soft); margin-top: 10px; line-height: 1.8;
+  }
+  .cover-rule {
+    width: 60px; height: 4px; border-radius: 3px;
+    background: var(--accent); margin: 14px auto 16px;
+  }
+
+  /* ---------- 見出し ---------- */
+  h2 {
+    font-size: 15pt; font-weight: 700; color: var(--base);
+    margin: 22px 0 12px; padding: 5px 0 5px 13px;
+    border-left: 7px solid var(--accent); border-radius: 3px;
+    page-break-after: avoid;
+  }
+  h3 {
+    font-size: 11.8pt; font-weight: 700; color: var(--base);
+    margin: 17px 0 7px; page-break-after: avoid;
+  }
+  h3::before { content: "◆ "; color: var(--accent); font-size: 9pt; }
+  h4 {
+    font-size: 10.5pt; font-weight: 700; color: var(--ink);
+    margin: 12px 0 4px; page-break-after: avoid;
+  }
+  p { margin: 7px 0; }
+  ul, ol { margin: 7px 0 7px 20px; }
+  li { margin: 3px 0; }
+  strong { font-weight: 700; color: var(--base); }
+
+  /* ---------- 章扉 ---------- */
+  .chapter-head {
+    border-radius: 12px; padding: 20px 24px; margin-bottom: 16px; color: #fff;
+  }
+  .chapter-head .lv { font-size: 9.5pt; letter-spacing: 2.5px; opacity: .9; }
+  .chapter-head h1 { font-size: 22pt; font-weight: 700; line-height: 1.4; margin: 2px 0 4px; }
+  .chapter-head .who { font-size: 10.5pt; opacity: .95; line-height: 1.75; }
+  .lv1 { background: linear-gradient(120deg, #2f9e6b 0%, #46b487 100%); }
+  .lv2 { background: linear-gradient(120deg, #2f7fd1 0%, #4f9ee0 100%); }
+  .lv3 { background: linear-gradient(120deg, #d97f14 0%, #eda23f 100%); }
+  .lv4 { background: linear-gradient(120deg, #7444b8 0%, #9a6ed4 100%); }
+  .basic-head { background: linear-gradient(120deg, #0b4f6c 0%, #048a81 100%); }
+
+  /* ---------- コマンド表記 ---------- */
+  code {
+    font-family: 'Zen Maru Gothic', monospace; font-weight: 500;
+    background: #eef5f7; border: 1px solid #d3e2e6; border-radius: 4px;
+    padding: 0 5px; font-size: 9.5pt; color: var(--base); white-space: nowrap;
+  }
+  .cmdblock {
+    font-family: 'Zen Maru Gothic', monospace;
+    background: #f3f8f9; border: 1px solid #d3e2e6; border-left: 5px solid var(--accent);
+    border-radius: 7px; padding: 8px 14px; margin: 8px 0;
+    font-size: 9.8pt; white-space: pre-wrap; line-height: 1.85;
+    page-break-inside: avoid;
+  }
+  .cmdblock .note { color: var(--ink-soft); }
+
+  /* ---------- 表 ---------- */
+  table {
+    width: 100%; border-collapse: collapse; margin: 9px 0 13px;
+    font-size: 9.4pt; page-break-inside: avoid;
+  }
+  th, td { border: 1px solid var(--line); padding: 4px 8px; text-align: left; vertical-align: top; line-height: 1.7; }
+  th { background: var(--base); color: #fff; font-weight: 500; }
+  tr:nth-child(even) td { background: #f5f9fa; }
+  td code { white-space: nowrap; }
+
+  /* ---------- 注意書き ---------- */
+  .box {
+    border-radius: 8px; padding: 10px 14px; margin: 10px 0;
+    font-size: 9.6pt; page-break-inside: avoid; line-height: 1.8;
+  }
+  .box .t { font-weight: 700; display: block; margin-bottom: 2px; }
+  .box.tip  { background: #eef8f3; border: 1px solid #b6e0cc; }
+  .box.tip .t { color: #1e7a51; }
+  .box.warn { background: #fff6ec; border: 1px solid #f2d2a8; }
+  .box.warn .t { color: #b76c0d; }
+  .box.note { background: #eef4fa; border: 1px solid #c2d8ef; }
+  .box.note .t { color: #2467ab; }
+
+  /* ---------- 図 ---------- */
+  .figure { margin: 12px 0 15px; page-break-inside: avoid; }
+  .figure svg { width: 100%; height: auto; display: block; }
+  .figcap {
+    text-align: center; font-size: 8.8pt; color: var(--ink-soft); margin-top: 5px;
+  }
+
+  /* ---------- バッジ ---------- */
+  .badge {
+    display: inline-block; border-radius: 999px; padding: 0 9px;
+    font-size: 8.4pt; font-weight: 700; color: #fff; white-space: nowrap;
+    line-height: 1.75;
+  }
+  .b1 { background: var(--l1); } .b2 { background: var(--l2); }
+  .b3 { background: var(--l3); } .b4 { background: var(--l4); }
+
+  /* ---------- 目次 ---------- */
+  .toc { border: 1px solid var(--line); border-radius: 9px; padding: 12px 18px; margin-top: 10px; }
+  .toc ol { margin-left: 18px; }
+  .toc li { margin: 4px 0; font-size: 9.8pt; }
+  .toc .sub { color: var(--ink-soft); font-size: 9.2pt; }
+
+  .footer-note {
+    margin-top: 14px; padding-top: 8px; border-top: 1px solid var(--line);
+    font-size: 8.6pt; color: var(--ink-soft); text-align: center; line-height: 1.75;
+  }
+</style>
+</head>
+<body>
+
+<!-- ============================= 表紙 ============================= -->
+<div class="page">
+  <div class="cover-wrap">
+    <span class="cover-badge">DISCORD BOT MANUAL</span>
+    <h1>権限レベル別<br>取扱説明書</h1>
+    <div class="cover-rule"></div>
+    <p class="lead">
+      鳥人間サークル 統合運営 Discord Bot<br>
+      <strong>Discord をはじめて使う人</strong>のために、図で説明します。
+    </p>
+  </div>
+
+  <div class="figure" style="margin-top: 8px;">
+    <svg viewBox="0 0 700 340" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <defs>
+        <marker id="arrUp" markerWidth="9" markerHeight="9" refX="8.5" refY="4.5" orient="auto">
+          <path d="M0 0 L9 4.5 L0 9 Z" fill="#5d7481"/>
+        </marker>
+      </defs>
+
+      <!-- ピラミッド 4段（下ほど人数が多く、上ほどできることが多い） -->
+      <path d="M240 30 L285 95 L195 95 Z"                fill="#8250c4"/>
+      <path d="M195 95 L285 95 L330 160 L150 160 Z"      fill="#e08b1e"/>
+      <path d="M150 160 L330 160 L375 225 L105 225 Z"    fill="#2f7fd1"/>
+      <path d="M105 225 L375 225 L420 290 L60 290 Z"     fill="#2f9e6b"/>
+
+      <!-- 段の区切りを白線で -->
+      <g stroke="#ffffff" stroke-width="2.5">
+        <line x1="195" y1="95"  x2="285" y2="95"/>
+        <line x1="150" y1="160" x2="330" y2="160"/>
+        <line x1="105" y1="225" x2="375" y2="225"/>
+      </g>
+
+      <!-- 段内のレベル表記 -->
+      <g fill="#ffffff" font-weight="700" text-anchor="middle">
+        <text x="240" y="82"  font-size="15">L4</text>
+        <text x="240" y="146" font-size="17">L3</text>
+        <text x="240" y="211" font-size="19">L2</text>
+        <text x="240" y="276" font-size="21">L1</text>
+      </g>
+
+      <!-- 右側のラベル -->
+      <g font-size="14" font-weight="700">
+        <text x="452" y="74"  fill="#8250c4">Bot管理者</text>
+        <text x="452" y="139" fill="#e08b1e">幹部</text>
+        <text x="452" y="204" fill="#2f7fd1">班長</text>
+        <text x="452" y="269" fill="#2f9e6b">一般メンバー</text>
+      </g>
+      <g font-size="10.5" fill="#5d7481">
+        <text x="452" y="91">サーバーを作った人・設定する人</text>
+        <text x="452" y="156">代表・会計など、全体を見る人</text>
+        <text x="452" y="221">班をまとめる人</text>
+        <text x="452" y="286">部員全員。何も設定しなくてもこの段</text>
+      </g>
+
+      <!-- 引き出し線 -->
+      <g stroke="#c2ccd2" stroke-width="1" stroke-dasharray="3 3">
+        <line x1="288" y1="68" x2="446" y2="68"/>
+        <line x1="333" y1="133" x2="446" y2="133"/>
+        <line x1="378" y1="198" x2="446" y2="198"/>
+        <line x1="423" y1="263" x2="446" y2="263"/>
+      </g>
+
+      <!-- 左の矢印「できることが増える」 -->
+      <line x1="34" y1="292" x2="34" y2="38" stroke="#5d7481" stroke-width="1.6"
+            marker-end="url(#arrUp)"/>
+      <text x="26" y="170" font-size="11" fill="#5d7481" font-weight="700"
+            text-anchor="middle" transform="rotate(-90 26 170)">できることが増える</text>
+
+      <!-- 下の注記 -->
+      <text x="350" y="322" font-size="11.5" fill="#23303a" text-anchor="middle">
+        上の段は、下の段のことが<tspan font-weight="700">すべてできます</tspan>。
+        （班長は一般メンバーの操作も全部できる）
+      </text>
+    </svg>
+    <div class="figcap">図0-1　4つの権限レベル。自分がどの段かは、サークルの管理者が決めています。</div>
+  </div>
+
+  <div class="toc">
+    <strong style="font-size:11pt;">この説明書の読み方</strong>
+    <p style="font-size:9.6pt; margin:5px 0 8px;">
+      まず「第0章 Discord の基本」を読んでください。そのあと、
+      <strong>自分の段の章だけ</strong>読めば使えます。上の段の人は、下の段の章も自分の守備範囲です。
+    </p>
+    <ol>
+      <li><strong>第0章　Discord の基本</strong><span class="sub">　― コマンドって何？ 押し方・見え方（全員）</span></li>
+      <li><strong>第1章　一般メンバー</strong> <span class="badge b1">L1</span><span class="sub">　― 出欠に答える・桁巻きを記録する</span></li>
+      <li><strong>第2章　班長</strong> <span class="badge b2">L2</span><span class="sub">　― 日程を決める・タスクと進捗を回す</span></li>
+      <li><strong>第3章　幹部</strong> <span class="badge b3">L3</span><span class="sub">　― 名簿を整える・ログを確認する</span></li>
+      <li><strong>第4章　Bot管理者</strong> <span class="badge b4">L4</span><span class="sub">　― 最初の設定・年度替わり・データ管理</span></li>
+      <li><strong>付録</strong><span class="sub">　― 自動で届く通知・困ったとき・全コマンド早見表</span></li>
+    </ol>
+  </div>
+
+  <div class="footer-note">
+    このBotは、サークルごとに設定が独立しています。班の名前・チャンネル・ロールは<br>
+    あなたのサークルで設定されたものが表示されます。
+  </div>
+</div>
+
+<!-- ============================= 第0章 ============================= -->
+<div class="page">
+  <div class="chapter-head basic-head">
+    <div class="lv">CHAPTER 0 — FOR EVERYONE</div>
+    <h1>Discord の基本</h1>
+    <div class="who">まずここだけ読んでください。ここが分かれば、あとは自分の段の章だけで足ります。</div>
+  </div>
+
+  <h2>0-1　この Bot は「コマンド」で動かします</h2>
+  <p>
+    Discord の<strong>いちばん下にある入力欄</strong>に <code>/</code>（半角のスラッシュ）を打つと、
+    使えるコマンドの一覧が出てきます。そこから選んで Enter を押すだけです。
+    <strong>覚えて打ち込む必要はありません。</strong>一覧から選べます。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 468" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <defs>
+        <marker id="arrDn" markerWidth="9" markerHeight="9" refX="8.5" refY="4.5" orient="auto">
+          <path d="M0 0 L9 4.5 L0 9 Z" fill="#9fb0b8"/>
+        </marker>
+      </defs>
+
+      <!-- ステップ1 -->
+      <circle cx="32" cy="60" r="17" fill="#048a81"/>
+      <text x="32" y="66" font-size="16" font-weight="700" fill="#fff" text-anchor="middle">1</text>
+      <rect x="70" y="14" width="620" height="94" rx="9" fill="#ffffff" stroke="#d5e0e5"/>
+      <text x="88" y="38" font-size="12" font-weight="700" fill="#23303a">入力欄に半角の「/」を打つ</text>
+      <text x="88" y="57" font-size="10" fill="#5d7481">画面のいちばん下、いつもメッセージを書くところです。</text>
+      <rect x="88" y="66" width="500" height="30" rx="6" fill="#ebedef" stroke="#dbdee1"/>
+      <text x="102" y="86" font-size="14" font-weight="700" fill="#23303a">/</text>
+      <rect x="110" y="72" width="1.8" height="18" fill="#23303a"/>
+      <text x="126" y="86" font-size="11" fill="#9aa3ab">メッセージを送信</text>
+      <text x="604" y="86" font-size="9.5" fill="#5d7481">← ここ</text>
+      <line x1="380" y1="108" x2="380" y2="132" stroke="#9fb0b8" stroke-width="1.6" marker-end="url(#arrDn)"/>
+
+      <!-- ステップ2 -->
+      <circle cx="32" cy="196" r="17" fill="#048a81"/>
+      <text x="32" y="202" font-size="16" font-weight="700" fill="#fff" text-anchor="middle">2</text>
+      <rect x="70" y="140" width="620" height="128" rx="9" fill="#ffffff" stroke="#d5e0e5"/>
+      <text x="88" y="164" font-size="12" font-weight="700" fill="#23303a">出てきた一覧から、やりたいことを選ぶ</text>
+      <text x="88" y="183" font-size="10" fill="#5d7481">右側に日本語の説明が出ます。矢印キーか、クリックで選べます。</text>
+      <rect x="88" y="192" width="500" height="66" rx="6" fill="#ffffff" stroke="#dbdee1"/>
+      <rect x="89" y="193" width="498" height="22" fill="#e8f2fb"/>
+      <text x="100" y="208" font-size="10.5" font-weight="700" fill="#2f7fd1">/layer start</text>
+      <text x="215" y="208" font-size="10" fill="#5d7481">積層開始を記録します</text>
+      <text x="100" y="230" font-size="10.5" font-weight="700" fill="#23303a">/layer end</text>
+      <text x="215" y="230" font-size="10" fill="#5d7481">進行中の積層を終了し、記録を保存します</text>
+      <text x="100" y="251" font-size="10.5" font-weight="700" fill="#23303a">/layer status</text>
+      <text x="215" y="251" font-size="10" fill="#5d7481">現在進行中の作業一覧を表示します</text>
+      <text x="600" y="212" font-size="9.5" fill="#5d7481">選択中</text>
+      <line x1="380" y1="268" x2="380" y2="292" stroke="#9fb0b8" stroke-width="1.6" marker-end="url(#arrDn)"/>
+
+      <!-- ステップ3 -->
+      <circle cx="32" cy="368" r="17" fill="#048a81"/>
+      <text x="32" y="374" font-size="16" font-weight="700" fill="#fff" text-anchor="middle">3</text>
+      <rect x="70" y="300" width="620" height="152" rx="9" fill="#ffffff" stroke="#d5e0e5"/>
+      <text x="88" y="324" font-size="12" font-weight="700" fill="#23303a">空欄（オプション）を埋めて Enter</text>
+      <text x="88" y="343" font-size="10" fill="#5d7481">空欄も多くは一覧から選べます。手で打つのは数字くらいです。</text>
+      <rect x="88" y="352" width="500" height="32" rx="6" fill="#ebedef" stroke="#dbdee1"/>
+      <rect x="97" y="359" width="86" height="18" rx="4" fill="#2f7fd1"/>
+      <text x="140" y="372" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">/layer start</text>
+      <text x="194" y="372" font-size="10" font-weight="700" fill="#5d7481">桁名:</text>
+      <rect x="228" y="359" width="74" height="18" rx="4" fill="#dfe8ea"/>
+      <text x="265" y="372" font-size="10" fill="#23303a" text-anchor="middle">主桁</text>
+      <text x="313" y="372" font-size="10" font-weight="700" fill="#5d7481">層番号:</text>
+      <rect x="358" y="359" width="40" height="18" rx="4" fill="#dfe8ea"/>
+      <text x="378" y="372" font-size="10" fill="#23303a" text-anchor="middle">3</text>
+      <rect x="516" y="356" width="62" height="24" rx="5" fill="#ffffff" stroke="#9fb0b8"/>
+      <text x="547" y="372" font-size="10" font-weight="700" fill="#5d7481" text-anchor="middle">Enter</text>
+      <!-- Bot の返事 -->
+      <rect x="88" y="394" width="500" height="44" rx="6" fill="#f3f8f9" stroke="#048a81"/>
+      <circle cx="108" cy="416" r="11" fill="#048a81"/>
+      <text x="108" y="420" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">B</text>
+      <text x="128" y="412" font-size="10.5" font-weight="700" fill="#0b4f6c">積層を開始しました</text>
+      <text x="128" y="429" font-size="9.5" fill="#5d7481">主桁 / 3層目 — 終わったら /layer end を押してください</text>
+      <text x="604" y="418" font-size="9.5" fill="#5d7481">Bot の返事</text>
+    </svg>
+    <div class="figcap">図0-2　スラッシュコマンドの3ステップ。打ち間違いが起きないよう、ほとんどの入力は一覧から選べます。</div>
+  </div>
+
+  <div class="box tip">
+    <span class="t">どのコマンドがあるか分からなくなったら</span>
+    <code>/help</code> と打つと、カテゴリから探せます。
+    <strong>自分が使えないコマンドには鍵マークが付く</strong>ので、
+    「これは自分には無理なやつだ」とすぐ分かります。
+  </div>
+</div>
+
+<div class="page">
+  <h2>0-2　Bot の返事は「自分にだけ見える」ことが多い</h2>
+  <p>
+    コマンドの返事の多くは、<strong>打った本人にしか見えません</strong>。
+    チャンネルが Bot の返事で埋まらないようにするためです。
+    「あなたにのみ表示されています」と小さく書いてあれば、それは自分専用の表示です。
+    <strong>他の人には見えていないので、共有したいときは自分でコピーして貼ってください。</strong>
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 208" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <!-- 左：みんなに見える -->
+      <rect x="0" y="26" width="336" height="170" rx="9" fill="#ffffff" stroke="#d5e0e5"/>
+      <text x="14" y="18" font-size="11.5" font-weight="700" fill="#2f9e6b">みんなに見える返事</text>
+      <rect x="14" y="40" width="308" height="52" rx="6" fill="#f3f8f9" stroke="#048a81"/>
+      <circle cx="34" cy="66" r="11" fill="#048a81"/>
+      <text x="34" y="70" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">B</text>
+      <text x="54" y="61" font-size="10.5" font-weight="700" fill="#0b4f6c">日程調整をつくりました</text>
+      <text x="54" y="79" font-size="9.5" fill="#5d7481">7/3(金) 19:00 — ✅ ❓ ❌ で答えてください</text>
+      <!-- 見ている人アイコン -->
+      <g>
+        <circle cx="40" cy="122" r="13" fill="#cfe3d9"/><circle cx="40" cy="118" r="4.6" fill="#2f9e6b"/>
+        <path d="M32 130 a8 8 0 0 1 16 0 z" fill="#2f9e6b"/>
+        <circle cx="76" cy="122" r="13" fill="#cfe3d9"/><circle cx="76" cy="118" r="4.6" fill="#2f9e6b"/>
+        <path d="M68 130 a8 8 0 0 1 16 0 z" fill="#2f9e6b"/>
+        <circle cx="112" cy="122" r="13" fill="#cfe3d9"/><circle cx="112" cy="118" r="4.6" fill="#2f9e6b"/>
+        <path d="M104 130 a8 8 0 0 1 16 0 z" fill="#2f9e6b"/>
+        <circle cx="148" cy="122" r="13" fill="#cfe3d9"/><circle cx="148" cy="118" r="4.6" fill="#2f9e6b"/>
+        <path d="M140 130 a8 8 0 0 1 16 0 z" fill="#2f9e6b"/>
+      </g>
+      <text x="172" y="127" font-size="10" fill="#5d7481">…チャンネルの全員が読めます</text>
+      <text x="14" y="160" font-size="9.8" fill="#23303a">
+        <tspan font-weight="700">例：</tspan>日程調整の投票、確定した日程のお知らせ、
+      </text>
+      <text x="14" y="178" font-size="9.8" fill="#23303a">　　在庫が減ったときの告知、毎朝の通知</text>
+
+      <!-- 右：自分だけ -->
+      <rect x="364" y="26" width="336" height="170" rx="9" fill="#ffffff" stroke="#d5e0e5"/>
+      <text x="378" y="18" font-size="11.5" font-weight="700" fill="#2f7fd1">自分にだけ見える返事</text>
+      <rect x="378" y="40" width="308" height="60" rx="6" fill="#f4f7fb" stroke="#2f7fd1"/>
+      <circle cx="398" cy="64" r="11" fill="#2f7fd1"/>
+      <text x="398" y="68" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">B</text>
+      <text x="418" y="59" font-size="10.5" font-weight="700" fill="#2467ab">タスク一覧（3件）</text>
+      <text x="418" y="76" font-size="9.5" fill="#5d7481">リブ切り出し / 桁受け加工 / 発注書の確認</text>
+      <text x="390" y="93" font-size="8.6" fill="#9aa3ab">🚫 あなたにのみ表示されています</text>
+      <g>
+        <circle cx="404" cy="122" r="13" fill="#d7e5f5"/><circle cx="404" cy="118" r="4.6" fill="#2f7fd1"/>
+        <path d="M396 130 a8 8 0 0 1 16 0 z" fill="#2f7fd1"/>
+        <g opacity="0.32">
+          <circle cx="440" cy="122" r="13" fill="#dfe3e6"/><circle cx="440" cy="118" r="4.6" fill="#9aa3ab"/>
+          <path d="M432 130 a8 8 0 0 1 16 0 z" fill="#9aa3ab"/>
+          <circle cx="476" cy="122" r="13" fill="#dfe3e6"/><circle cx="476" cy="118" r="4.6" fill="#9aa3ab"/>
+          <path d="M468 130 a8 8 0 0 1 16 0 z" fill="#9aa3ab"/>
+          <circle cx="512" cy="122" r="13" fill="#dfe3e6"/><circle cx="512" cy="118" r="4.6" fill="#9aa3ab"/>
+          <path d="M504 130 a8 8 0 0 1 16 0 z" fill="#9aa3ab"/>
+        </g>
+        <line x1="428" y1="110" x2="524" y2="134" stroke="#c8ced2" stroke-width="1.4"/>
+      </g>
+      <text x="536" y="127" font-size="10" fill="#5d7481">他の人は読めません</text>
+      <text x="378" y="160" font-size="9.8" fill="#23303a">
+        <tspan font-weight="700">例：</tspan>タスク一覧、<tspan font-family="monospace">/me</tspan>、進捗の表示、
+      </text>
+      <text x="378" y="178" font-size="9.8" fill="#23303a">　　設定の確認、権限が足りないときの案内</text>
+    </svg>
+    <div class="figcap">図0-3　返事の見え方は2種類。ほとんどのコマンドは右（自分だけ）です。</div>
+  </div>
+
+  <h2>0-3　出欠は「ボタンを押す」だけ。コマンドは要りません</h2>
+  <p>
+    日程調整の投票は、<strong>コマンドを打つ必要がありません。</strong>
+    投稿されたメッセージの下にある絵文字を押すだけです。候補日ごとに1つのメッセージが投稿されます。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 190" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <rect x="0" y="6" width="700" height="176" rx="9" fill="#ffffff" stroke="#d5e0e5"/>
+      <!-- メッセージ -->
+      <rect x="20" y="20" width="450" height="56" rx="7" fill="#f3f8f9" stroke="#048a81"/>
+      <circle cx="42" cy="48" r="12" fill="#048a81"/>
+      <text x="42" y="52" font-size="10.5" font-weight="700" fill="#fff" text-anchor="middle">B</text>
+      <text x="64" y="43" font-size="11" font-weight="700" fill="#0b4f6c">候補① 7月3日(金) 19:00</text>
+      <text x="64" y="62" font-size="9.6" fill="#5d7481">参加できるかを、下の絵文字から1つ押してください</text>
+
+      <!-- リアクションボタン -->
+      <g>
+        <rect x="20" y="88" width="66" height="30" rx="8" fill="#e8f2fb" stroke="#2f7fd1" stroke-width="1.6"/>
+        <text x="40" y="109" font-size="14" text-anchor="middle">✅</text>
+        <text x="66" y="108" font-size="11" font-weight="700" fill="#2f7fd1" text-anchor="middle">4</text>
+
+        <rect x="96" y="88" width="66" height="30" rx="8" fill="#f6f7f8" stroke="#dbdee1"/>
+        <text x="116" y="109" font-size="14" text-anchor="middle">❓</text>
+        <text x="142" y="108" font-size="11" fill="#5d7481" text-anchor="middle">1</text>
+
+        <rect x="172" y="88" width="66" height="30" rx="8" fill="#f6f7f8" stroke="#dbdee1"/>
+        <text x="192" y="109" font-size="14" text-anchor="middle">❌</text>
+        <text x="218" y="108" font-size="11" fill="#5d7481" text-anchor="middle">2</text>
+      </g>
+      <text x="20" y="139" font-size="9.6" fill="#5d7481">
+        青く光っているのが<tspan font-weight="700" fill="#2f7fd1">自分が押したもの</tspan>。数字は人数です。
+      </text>
+      <text x="20" y="160" font-size="9.6" fill="#5d7481">
+        押し直すと前のものは<tspan font-weight="700">自動で外れます</tspan>（1つの候補につき1つだけ）。
+      </text>
+
+      <!-- 意味の凡例 -->
+      <line x1="290" y1="86" x2="290" y2="168" stroke="#e3eaed" stroke-width="1.4"/>
+      <text x="312" y="100" font-size="14">✅</text><text x="338" y="100" font-size="10.5" fill="#23303a">参加できる</text>
+      <text x="312" y="126" font-size="14">❓</text><text x="338" y="126" font-size="10.5" fill="#23303a">まだ分からない</text>
+      <text x="312" y="152" font-size="14">❌</text><text x="338" y="152" font-size="10.5" fill="#23303a">参加できない</text>
+
+      <line x1="470" y1="86" x2="470" y2="168" stroke="#e3eaed" stroke-width="1.4"/>
+      <text x="492" y="100" font-size="10.5" font-weight="700" fill="#b76c0d">答えないと…</text>
+      <text x="492" y="122" font-size="9.6" fill="#5d7481">締切の1時間前に、未回答の人へ</text>
+      <text x="492" y="140" font-size="9.6" fill="#5d7481">Bot から DM が届きます。</text>
+      <text x="492" y="160" font-size="9.6" fill="#5d7481">早めに ❓ でもいいので押しましょう。</text>
+    </svg>
+    <div class="figcap">図0-4　出欠の答え方。絵文字はサークルごとに変更されている場合があります。</div>
+  </div>
+
+  <div class="box note">
+    <span class="t">絵文字が ✅❓❌ と違うことがあります</span>
+    管理者がサークル独自の絵文字に変えられるためです。意味の並び順は同じで、
+    左から「参加できる・分からない・できない」です。
+  </div>
+</div>
+
+<div class="page">
+  <h2>0-4　自分がどの段かを調べる</h2>
+  <p>
+    権限は<strong>「ロール」</strong>で決まります。ロールとは、Discord で名前に付く肩書きのようなものです。
+    自分に何が付いているかは、<strong>メンバー一覧から自分の名前をクリック</strong>すると見られます。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 336" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <defs>
+        <marker id="aRt" markerWidth="9" markerHeight="9" refX="8.5" refY="4.5" orient="auto">
+          <path d="M0 0 L9 4.5 L0 9 Z" fill="#9fb0b8"/>
+        </marker>
+        <marker id="aDn2" markerWidth="9" markerHeight="9" refX="8.5" refY="4.5" orient="auto">
+          <path d="M0 0 L9 4.5 L0 9 Z" fill="#9fb0b8"/>
+        </marker>
+      </defs>
+
+      <!-- Q1 -->
+      <rect x="20" y="14" width="300" height="52" rx="9" fill="#ffffff" stroke="#9fb0b8" stroke-width="1.5"/>
+      <text x="36" y="36" font-size="10.6" fill="#23303a">サーバーを作った本人、または</text>
+      <text x="36" y="54" font-size="10.6" fill="#23303a">サーバーの設定を変えられる？</text>
+      <line x1="320" y1="40" x2="424" y2="40" stroke="#9fb0b8" stroke-width="1.5" marker-end="url(#aRt)"/>
+      <text x="360" y="32" font-size="9.4" font-weight="700" fill="#5d7481">はい</text>
+      <rect x="430" y="18" width="250" height="44" rx="9" fill="#8250c4"/>
+      <text x="452" y="46" font-size="13" font-weight="700" fill="#fff">L4　Bot管理者　→ 第4章</text>
+      <line x1="170" y1="66" x2="170" y2="94" stroke="#9fb0b8" stroke-width="1.5" marker-end="url(#aDn2)"/>
+      <text x="182" y="86" font-size="9.4" font-weight="700" fill="#5d7481">いいえ</text>
+
+      <!-- Q2 -->
+      <rect x="20" y="100" width="300" height="52" rx="9" fill="#ffffff" stroke="#9fb0b8" stroke-width="1.5"/>
+      <text x="36" y="122" font-size="10.6" fill="#23303a">「幹部」にあたるロールが</text>
+      <text x="36" y="140" font-size="10.6" fill="#23303a">自分の名前に付いている？</text>
+      <line x1="320" y1="126" x2="424" y2="126" stroke="#9fb0b8" stroke-width="1.5" marker-end="url(#aRt)"/>
+      <text x="360" y="118" font-size="9.4" font-weight="700" fill="#5d7481">はい</text>
+      <rect x="430" y="104" width="250" height="44" rx="9" fill="#e08b1e"/>
+      <text x="452" y="132" font-size="13" font-weight="700" fill="#fff">L3　幹部　→ 第3章</text>
+      <line x1="170" y1="152" x2="170" y2="180" stroke="#9fb0b8" stroke-width="1.5" marker-end="url(#aDn2)"/>
+      <text x="182" y="172" font-size="9.4" font-weight="700" fill="#5d7481">いいえ</text>
+
+      <!-- Q3 -->
+      <rect x="20" y="186" width="300" height="52" rx="9" fill="#ffffff" stroke="#9fb0b8" stroke-width="1.5"/>
+      <text x="36" y="208" font-size="10.6" fill="#23303a">「班長」にあたるロールが</text>
+      <text x="36" y="226" font-size="10.6" fill="#23303a">自分の名前に付いている？</text>
+      <line x1="320" y1="212" x2="424" y2="212" stroke="#9fb0b8" stroke-width="1.5" marker-end="url(#aRt)"/>
+      <text x="360" y="204" font-size="9.4" font-weight="700" fill="#5d7481">はい</text>
+      <rect x="430" y="190" width="250" height="44" rx="9" fill="#2f7fd1"/>
+      <text x="452" y="218" font-size="13" font-weight="700" fill="#fff">L2　班長　→ 第2章</text>
+      <line x1="170" y1="238" x2="170" y2="266" stroke="#9fb0b8" stroke-width="1.5" marker-end="url(#aDn2)"/>
+      <text x="182" y="258" font-size="9.4" font-weight="700" fill="#5d7481">いいえ</text>
+
+      <!-- L1 -->
+      <rect x="20" y="272" width="300" height="46" rx="9" fill="#2f9e6b"/>
+      <text x="44" y="301" font-size="13" font-weight="700" fill="#fff">L1　一般メンバー　→ 第1章</text>
+      <text x="352" y="292" font-size="9.8" fill="#5d7481">部員は全員ここから始まります。</text>
+      <text x="352" y="310" font-size="9.8" fill="#5d7481">設定は要りません。</text>
+    </svg>
+    <div class="figcap">図0-5　自分の段の調べ方。ロールの名前はサークルごとに違うので、迷ったら幹部か管理者に聞いてください。</div>
+  </div>
+
+  <h2>0-5　「権限が足りません」と言われたら</h2>
+  <p>
+    自分の段より上のコマンドを実行すると、Bot が丁寧に断ります。
+    <strong>壊れたわけでも、あなたが何か間違えたわけでもありません。</strong>
+    このとき Bot は<strong>「誰に頼めばいいか」まで教えてくれる</strong>ので、その人にお願いしてください。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 132" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <rect x="60" y="10" width="580" height="112" rx="9" fill="#fdf4f4" stroke="#e0a3a3" stroke-width="1.5"/>
+      <circle cx="88" cy="40" r="12" fill="#c1554f"/>
+      <text x="88" y="45" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">!</text>
+      <text x="110" y="45" font-size="11.5" font-weight="700" fill="#a83f3a">実行できませんでした</text>
+      <text x="110" y="68" font-size="10.4" fill="#23303a">この操作は<tspan font-weight="700">班長以上</tspan>が実行できます。あなたは一般メンバーです。</text>
+      <text x="110" y="90" font-size="10.4" fill="#23303a">依頼先:</text>
+      <rect x="164" y="78" width="72" height="17" rx="4" fill="#dde7f5"/>
+      <text x="200" y="90" font-size="9.6" font-weight="700" fill="#2f7fd1" text-anchor="middle">@班長</text>
+      <rect x="242" y="78" width="66" height="17" rx="4" fill="#f0e4fa"/>
+      <text x="275" y="90" font-size="9.6" font-weight="700" fill="#8250c4" text-anchor="middle">@幹部</text>
+      <text x="110" y="112" font-size="8.8" fill="#9aa3ab">🚫 あなたにのみ表示されています</text>
+      <text x="392" y="90" font-size="9.6" fill="#5d7481">← この人たちに頼めば実行してもらえます</text>
+    </svg>
+    <div class="figcap">図0-6　権限が足りないときの表示。表示されるロール名はサークルの設定によって変わります。</div>
+  </div>
+
+  <div class="box warn">
+    <span class="t">コマンドは「サーバーの中」で使ってください</span>
+    Bot との1対1の DM ではコマンドは使えません。どのサークルの話か Bot が判断できないためです。
+    通知の DM は届きますが、<strong>操作はサーバーのチャンネルから</strong>行ってください。
+  </div>
+</div>
+
+<!-- ============================= 第1章 L1 ============================= -->
+<div class="page">
+  <div class="chapter-head lv1">
+    <div class="lv">CHAPTER 1 — LEVEL 1</div>
+    <h1>一般メンバー</h1>
+    <div class="who">部員は全員ここです。設定は要りません。<strong>まずは3つだけ覚えれば十分です。</strong></div>
+  </div>
+
+  <h2>1-1　最初に覚える3つ</h2>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 158" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <g>
+        <rect x="2" y="10" width="222" height="138" rx="10" fill="#f2faf6" stroke="#2f9e6b" stroke-width="1.6"/>
+        <circle cx="113" cy="44" r="20" fill="#2f9e6b"/>
+        <text x="113" y="51" font-size="17" text-anchor="middle">✅</text>
+        <text x="113" y="86" font-size="12.5" font-weight="700" fill="#1e7a51" text-anchor="middle">出欠に答える</text>
+        <text x="113" y="108" font-size="10" fill="#5d7481" text-anchor="middle">投票メッセージの絵文字を押す</text>
+        <text x="113" y="132" font-size="10.5" font-weight="700" fill="#23303a" text-anchor="middle">コマンド不要</text>
+      </g>
+      <g>
+        <rect x="239" y="10" width="222" height="138" rx="10" fill="#f2faf6" stroke="#2f9e6b" stroke-width="1.6"/>
+        <circle cx="350" cy="44" r="20" fill="#2f9e6b"/>
+        <text x="350" y="51" font-size="17" text-anchor="middle">🧵</text>
+        <text x="350" y="86" font-size="12.5" font-weight="700" fill="#1e7a51" text-anchor="middle">桁巻きを記録する</text>
+        <text x="350" y="108" font-size="10" fill="#5d7481" text-anchor="middle">始めるときと終わるときに1回ずつ</text>
+        <rect x="262" y="118" width="80" height="19" rx="4" fill="#dff0e8"/>
+        <text x="302" y="132" font-size="9.6" font-weight="700" fill="#1e7a51" text-anchor="middle">/layer start</text>
+        <rect x="358" y="118" width="76" height="19" rx="4" fill="#dff0e8"/>
+        <text x="396" y="132" font-size="9.6" font-weight="700" fill="#1e7a51" text-anchor="middle">/layer end</text>
+      </g>
+      <g>
+        <rect x="476" y="10" width="222" height="138" rx="10" fill="#f2faf6" stroke="#2f9e6b" stroke-width="1.6"/>
+        <circle cx="587" cy="44" r="20" fill="#2f9e6b"/>
+        <text x="587" y="51" font-size="17" text-anchor="middle">📋</text>
+        <text x="587" y="86" font-size="12.5" font-weight="700" fill="#1e7a51" text-anchor="middle">タスクを見る</text>
+        <text x="587" y="108" font-size="10" fill="#5d7481" text-anchor="middle">やることの一覧を確認する</text>
+        <rect x="547" y="118" width="80" height="19" rx="4" fill="#dff0e8"/>
+        <text x="587" y="132" font-size="9.6" font-weight="700" fill="#1e7a51" text-anchor="middle">/task list</text>
+      </g>
+    </svg>
+    <div class="figcap">図1-1　一般メンバーが最初に覚える3つ。残りは必要になったときで構いません。</div>
+  </div>
+
+  <h2>1-2　桁巻きを記録する</h2>
+  <p>
+    積層作業を<strong>始めるときと終わるときに1回ずつ</strong>押します。
+    間の時間は Bot が数えているので、時計を見る必要はありません。
+    桁名はメニューから選ぶので、打ち間違いも起きません。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 268" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <defs>
+        <marker id="aFlow" markerWidth="9" markerHeight="9" refX="8.5" refY="4.5" orient="auto">
+          <path d="M0 0 L9 4.5 L0 9 Z" fill="#2f9e6b"/>
+        </marker>
+        <marker id="aWarn" markerWidth="9" markerHeight="9" refX="8.5" refY="4.5" orient="auto">
+          <path d="M0 0 L9 4.5 L0 9 Z" fill="#d9962e"/>
+        </marker>
+      </defs>
+
+      <!-- 正常フロー -->
+      <rect x="8" y="26" width="150" height="60" rx="9" fill="#2f9e6b"/>
+      <text x="83" y="50" font-size="11.5" font-weight="700" fill="#fff" text-anchor="middle">/layer start</text>
+      <text x="83" y="70" font-size="9.6" fill="#dff0e8" text-anchor="middle">桁名と層番号を選ぶ</text>
+      <line x1="158" y1="56" x2="192" y2="56" stroke="#2f9e6b" stroke-width="1.8" marker-end="url(#aFlow)"/>
+
+      <rect x="196" y="26" width="184" height="60" rx="9" fill="#f2faf6" stroke="#2f9e6b" stroke-width="1.6"/>
+      <text x="288" y="50" font-size="11.5" font-weight="700" fill="#1e7a51" text-anchor="middle">作業する</text>
+      <text x="288" y="70" font-size="9.6" fill="#5d7481" text-anchor="middle">Bot が時間を計っています</text>
+      <line x1="380" y1="56" x2="414" y2="56" stroke="#2f9e6b" stroke-width="1.8" marker-end="url(#aFlow)"/>
+
+      <rect x="418" y="26" width="150" height="60" rx="9" fill="#2f9e6b"/>
+      <text x="493" y="50" font-size="11.5" font-weight="700" fill="#fff" text-anchor="middle">/layer end</text>
+      <text x="493" y="70" font-size="9.6" fill="#dff0e8" text-anchor="middle">押すだけ（引数なし）</text>
+      <line x1="568" y1="56" x2="602" y2="56" stroke="#2f9e6b" stroke-width="1.8" marker-end="url(#aFlow)"/>
+
+      <rect x="606" y="32" width="88" height="48" rx="9" fill="#dff0e8" stroke="#2f9e6b"/>
+      <text x="650" y="52" font-size="10.5" font-weight="700" fill="#1e7a51" text-anchor="middle">記録完了</text>
+      <text x="650" y="69" font-size="9" fill="#5d7481" text-anchor="middle">進捗にも反映</text>
+
+      <!-- 押し忘れルート -->
+      <line x1="288" y1="86" x2="288" y2="122" stroke="#d9962e" stroke-width="1.8"
+            stroke-dasharray="5 4" marker-end="url(#aWarn)"/>
+      <text x="300" y="110" font-size="10" font-weight="700" fill="#b76c0d">/layer end を押し忘れると…</text>
+
+      <rect x="8" y="128" width="686" height="104" rx="9" fill="#fff8ef" stroke="#f0cfa0" stroke-width="1.5"/>
+      <!-- タイムライン -->
+      <line x1="46" y1="176" x2="656" y2="176" stroke="#e2c295" stroke-width="2.5"/>
+      <circle cx="46"  cy="176" r="7" fill="#d9962e"/>
+      <circle cx="326" cy="176" r="7" fill="#d9962e"/>
+      <circle cx="620" cy="176" r="7" fill="#c1554f"/>
+      <text x="46"  y="156" font-size="10" font-weight="700" fill="#b76c0d" text-anchor="middle">開始</text>
+      <text x="326" y="156" font-size="10" font-weight="700" fill="#b76c0d" text-anchor="middle">4時間後</text>
+      <text x="620" y="156" font-size="10" font-weight="700" fill="#a83f3a" text-anchor="middle">12時間後</text>
+      <text x="326" y="196" font-size="9.6" fill="#5d7481" text-anchor="middle">「まだ作業中ですか？」と</text>
+      <text x="326" y="211" font-size="9.6" fill="#5d7481" text-anchor="middle">Bot から DM が1回だけ届く</text>
+      <text x="620" y="196" font-size="9.6" fill="#5d7481" text-anchor="middle">自動で取り消し</text>
+      <text x="620" y="211" font-size="9.6" font-weight="700" fill="#a83f3a" text-anchor="middle">記録は残りません</text>
+      <text x="46" y="198" font-size="9" fill="#9aa3ab">※ この時間は</text>
+      <text x="46" y="211" font-size="9" fill="#9aa3ab">　サークルごとに</text>
+      <text x="46" y="224" font-size="9" fill="#9aa3ab">　変更できます</text>
+
+      <text x="8" y="252" font-size="10" fill="#5d7481">
+        打ち間違えて始めてしまったときは <tspan font-weight="700" fill="#23303a">/layer cancel</tspan>。
+        記録を残さずに取り消せます（<tspan font-weight="700" fill="#23303a">/layer end</tspan> と間違えないよう注意）。
+      </text>
+    </svg>
+    <div class="figcap">図1-2　桁巻き記録の流れ。押し忘れても自動で片づきますが、記録が消えるので end は忘れずに。</div>
+  </div>
+
+  <div class="box warn">
+    <span class="t">/layer end を押し忘れると、記録が消えます</span>
+    12時間そのままだと自動で取り消され、その日の作業が<strong>まったく残りません</strong>。
+    作業が終わったら、片づけの前に <code>/layer end</code> を押す習慣をつけてください。
+    いま自分が記録中かどうかは <code>/layer status</code> で確認できます。
+  </div>
+</div>
+
+<div class="page">
+  <h2>1-3　機体の進捗を見る</h2>
+  <p>
+    <code>/progress view</code> で、機体全体からパーツ・部品へと<strong>ボタンで掘り下げて</strong>いけます。
+    どこまで進んでいるかがバーで見えるので、自分の班以外の様子も分かります。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 216" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <rect x="0" y="6" width="700" height="204" rx="9" fill="#ffffff" stroke="#d5e0e5"/>
+      <text x="20" y="30" font-size="11.5" font-weight="700" fill="#0b4f6c">機体の進捗</text>
+
+      <!-- ツリーの縦線 -->
+      <g stroke="#c8d5da" stroke-width="1.3" fill="none">
+        <path d="M34 52 L34 176"/>
+        <path d="M34 66 L52 66"/>
+        <path d="M56 78 L56 138"/>
+        <path d="M56 100 L74 100"/>
+        <path d="M56 132 L74 132"/>
+        <path d="M34 170 L52 170"/>
+      </g>
+
+      <!-- 行 -->
+      <g font-size="11">
+        <text x="20" y="52" font-weight="700" fill="#23303a">機体 2026</text>
+        <text x="58" y="70" font-weight="700" fill="#23303a">主翼</text>
+        <text x="80" y="104" fill="#5d7481">第1リブ</text>
+        <text x="80" y="136" fill="#5d7481">主桁</text>
+        <text x="58" y="174" font-weight="700" fill="#23303a">尾翼</text>
+      </g>
+
+      <!-- バー -->
+      <g>
+        <rect x="360" y="42" width="240" height="13" rx="6.5" fill="#e6edf0"/>
+        <rect x="360" y="42" width="149" height="13" rx="6.5" fill="#2f9e6b"/>
+        <text x="614" y="53" font-size="10.5" font-weight="700" fill="#1e7a51">62%</text>
+
+        <rect x="360" y="60" width="240" height="13" rx="6.5" fill="#e6edf0"/>
+        <rect x="360" y="60" width="187" height="13" rx="6.5" fill="#46b487"/>
+        <text x="614" y="71" font-size="10.5" font-weight="700" fill="#1e7a51">78%</text>
+
+        <rect x="360" y="94" width="240" height="13" rx="6.5" fill="#e6edf0"/>
+        <rect x="360" y="94" width="240" height="13" rx="6.5" fill="#46b487"/>
+        <text x="614" y="105" font-size="10.5" font-weight="700" fill="#1e7a51">100%</text>
+
+        <rect x="360" y="126" width="240" height="13" rx="6.5" fill="#e6edf0"/>
+        <rect x="360" y="126" width="144" height="13" rx="6.5" fill="#46b487"/>
+        <text x="614" y="137" font-size="10.5" font-weight="700" fill="#1e7a51">60%</text>
+
+        <rect x="360" y="164" width="240" height="13" rx="6.5" fill="#e6edf0"/>
+        <rect x="360" y="164" width="72" height="13" rx="6.5" fill="#e08b1e"/>
+        <text x="614" y="175" font-size="10.5" font-weight="700" fill="#b76c0d">30%</text>
+      </g>
+
+      <line x1="20" y1="188" x2="680" y2="188" stroke="#e6edf0"/>
+      <text x="20" y="204" font-size="9.6" fill="#5d7481">
+        下の階層は<tspan font-weight="700" fill="#23303a">ボタンで開けます</tspan>。
+        深さに制限はないので、サークルによって階層の数は違います。
+      </text>
+    </svg>
+    <div class="figcap">図1-3　<code>/progress view</code> の表示イメージ。名前や階層はサークルごとに違います。</div>
+  </div>
+
+  <h2>1-4　自分の状況をまとめて見る</h2>
+  <p>
+    <code>/me</code> は、<strong>自分がいま抱えているもの</strong>を1画面にまとめます。
+    週のはじめにこれを見ておくと、答え忘れが防げます。表示は自分にだけ見えます。
+  </p>
+  <div class="cmdblock">/me
+<span class="note">├ まだ答えていない日程調整　　→ 押し忘れている投票が分かる
+├ 今月の積層時間・層数　　　→ 自分がどれだけ巻いたか
+└ 担当になっている進捗ノード → 自分が受け持っている部品</span></div>
+  <div class="box note">
+    <span class="t">タスクは <code>/me</code> に出ません</span>
+    タスクの正本は Todoist 側にあり、「どの Discord ユーザーが担当か」という情報を持っていないためです。
+    タスクは <code>/task list</code> や <code>/task team</code> で確認してください。
+  </div>
+
+</div>
+
+<div class="page">
+  <h2>1-5　一般メンバーが使えるコマンド一覧</h2>
+  <p>
+    ここにあるものは<strong>全員が使えます</strong>。困ったら <code>/help</code> から探せます。
+  </p>
+
+  <table>
+    <tr><th style="width:31%;">コマンド</th><th>何ができるか</th></tr>
+    <tr><td colspan="2" style="background:#eef8f3; font-weight:700; color:#1e7a51;">日程・出欠</td></tr>
+    <tr><td><code>/schedule list</code></td><td>いま募集中の日程調整の一覧</td></tr>
+    <tr><td><code>/schedule status</code></td><td>ある投票の詳細（誰が何と答えたか）</td></tr>
+    <tr><td><code>/schedule list-closed</code></td><td>締め切り済みの日程調整の一覧</td></tr>
+    <tr><td colspan="2" style="background:#eef8f3; font-weight:700; color:#1e7a51;">桁巻き</td></tr>
+    <tr><td><code>/layer start</code></td><td>積層作業の開始を記録する</td></tr>
+    <tr><td><code>/layer end</code></td><td>作業を終えて記録を保存する</td></tr>
+    <tr><td><code>/layer cancel</code></td><td>進行中の記録を、残さずに取り消す</td></tr>
+    <tr><td><code>/layer status</code></td><td>いま誰が作業中かの一覧</td></tr>
+    <tr><td><code>/layer stats</code></td><td>桁別・作業者別の集計（層数・時間・平均）</td></tr>
+    <tr><td><code>/layer keta-list</code></td><td>登録されている桁名の一覧</td></tr>
+    <tr><td colspan="2" style="background:#eef8f3; font-weight:700; color:#1e7a51;">タスク　<span style="font-weight:400; color:#5d7481;">※ Todoist を連携しているサークルのみ</span></td></tr>
+    <tr><td><code>/task list</code></td><td>未完了タスクの一覧</td></tr>
+    <tr><td><code>/task add</code></td><td>タスクを追加する</td></tr>
+    <tr><td><code>/task done</code></td><td>タスクを完了にする</td></tr>
+    <tr><td><code>/task priority</code></td><td>優先度を変える（1〜4）</td></tr>
+    <tr><td><code>/task overdue</code></td><td>期限が過ぎているタスクの一覧</td></tr>
+    <tr><td><code>/task team</code></td><td>班に紐付いたタスクの一覧</td></tr>
+    <tr><td><code>/today task</code> / <code>/today id</code></td><td>「今日やること」の印を付ける</td></tr>
+  </table>
+</div>
+
+<div class="page">
+  <h2>1-5　一般メンバーが使えるコマンド一覧（続き）</h2>
+
+  <table>
+    <tr><th style="width:31%;">コマンド</th><th>何ができるか</th></tr>
+    <tr><td colspan="2" style="background:#eef8f3; font-weight:700; color:#1e7a51;">機体の進捗・重量</td></tr>
+    <tr><td><code>/progress view</code></td><td>進捗を掘り下げて見る</td></tr>
+    <tr><td><code>/progress history</code></td><td>進捗の推移と直近7日の伸び</td></tr>
+    <tr><td><code>/weight view</code> / <code>/weight top</code></td><td>重量の集計 / 目標を超えている順に並べる</td></tr>
+    <tr><td><code>/milestone list</code> / <code>/countdown</code></td><td>節目の一覧 / 大会までの残り日数と遅れ具合</td></tr>
+    <tr><td colspan="2" style="background:#eef8f3; font-weight:700; color:#1e7a51;">在庫・自分・その他</td></tr>
+    <tr><td><code>/stock list</code></td><td>資材の在庫一覧（足りないものが強調される）</td></tr>
+    <tr><td><code>/stock use</code></td><td>資材を使ったことを記録する</td></tr>
+    <tr><td><code>/me</code></td><td>自分の未回答・積層・担当をまとめて表示</td></tr>
+    <tr><td><code>/member profile</code></td><td>自分（や他の人）の所属班を見る</td></tr>
+    <tr><td><code>/season list</code></td><td>年度の一覧と現役／卒業の人数</td></tr>
+    <tr><td><code>/help</code></td><td>コマンドを探す</td></tr>
+    <tr><td><code>/ping</code> / <code>/health</code></td><td>Bot が生きているかの確認</td></tr>
+    <tr><td><code>/setup-status</code></td><td>サークルの初期設定で、まだ終わっていない項目</td></tr>
+  </table>
+
+  <div class="box tip">
+    <span class="t">資材を使ったら <code>/stock use</code> を</span>
+    残りが少なくなると Bot が自動で知らせてくれます。
+    <strong>記録しないと減ったことに誰も気づけない</strong>ので、使ったその場で押すのがおすすめです。
+  </div>
+</div>
+
+<!-- ============================= 第2章 L2 ============================= -->
+<div class="page">
+  <div class="chapter-head lv2">
+    <div class="lv">CHAPTER 2 — LEVEL 2</div>
+    <h1>班長</h1>
+    <div class="who">
+      担当は<strong>「班の日程とタスクを回すこと」</strong>と<strong>「機体の進捗を最新に保つこと」</strong>。<br>
+      第1章の操作もすべて使えます。
+    </div>
+  </div>
+
+  <h2>2-1　日程調整の一生</h2>
+  <p>
+    日程調整は<strong>作ったあと、ほとんど自動で進みます。</strong>
+    班長がやるのは最初の <code>/schedule create</code> と、最後の <code>/schedule confirm</code> の2回だけです。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 348" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <!-- 縦のレール -->
+      <line x1="58" y1="28" x2="58" y2="322" stroke="#cfdde8" stroke-width="3"/>
+
+      <!-- 1 -->
+      <circle cx="58" cy="34" r="10" fill="#2f7fd1"/>
+      <text x="58" y="38" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">1</text>
+      <text x="84" y="30" font-size="11.5" font-weight="700" fill="#23303a">/schedule create で候補日を出す</text>
+      <text x="84" y="48" font-size="9.8" fill="#5d7481">候補の日時を「 ; 」で区切って並べる。候補ごとに投票メッセージが投稿されます。</text>
+      <rect x="586" y="20" width="60" height="19" rx="9.5" fill="#2f7fd1"/>
+      <text x="616" y="34" font-size="9.6" font-weight="700" fill="#fff" text-anchor="middle">班長</text>
+
+      <!-- 2 -->
+      <circle cx="58" cy="92" r="10" fill="#9fb0b8"/>
+      <text x="58" y="96" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">2</text>
+      <text x="84" y="88" font-size="11.5" font-weight="700" fill="#23303a">部員が絵文字で答える</text>
+      <text x="84" y="106" font-size="9.8" fill="#5d7481">✅ 参加 / ❓ 未定 / ❌ 不参加 を押すだけ。コマンドは要りません。</text>
+      <rect x="586" y="78" width="60" height="19" rx="9.5" fill="#9fb0b8"/>
+      <text x="616" y="92" font-size="9.6" font-weight="700" fill="#fff" text-anchor="middle">部員</text>
+
+      <!-- 3 -->
+      <circle cx="58" cy="150" r="10" fill="#48a884"/>
+      <text x="58" y="154" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">3</text>
+      <text x="84" y="146" font-size="11.5" font-weight="700" fill="#23303a">締切1時間前 — 未回答の人へ自動でDM</text>
+      <text x="84" y="164" font-size="9.8" fill="#5d7481">DM が届かない人には、チャンネルでメンションします。催促は要りません。</text>
+      <rect x="586" y="136" width="60" height="19" rx="9.5" fill="#48a884"/>
+      <text x="616" y="150" font-size="9.6" font-weight="700" fill="#fff" text-anchor="middle">自動</text>
+
+      <!-- 4 -->
+      <circle cx="58" cy="208" r="10" fill="#48a884"/>
+      <text x="58" y="212" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">4</text>
+      <text x="84" y="204" font-size="11.5" font-weight="700" fill="#23303a">締切 — 自動で締め切り、結果を投稿</text>
+      <text x="84" y="222" font-size="9.8" fill="#5d7481">早く締めたいときは /schedule close、延ばしたいときは /schedule edit-deadline。</text>
+      <rect x="586" y="194" width="60" height="19" rx="9.5" fill="#48a884"/>
+      <text x="616" y="208" font-size="9.6" font-weight="700" fill="#fff" text-anchor="middle">自動</text>
+
+      <!-- 5 -->
+      <circle cx="58" cy="266" r="10" fill="#2f7fd1"/>
+      <text x="58" y="270" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">5</text>
+      <text x="84" y="262" font-size="11.5" font-weight="700" fill="#23303a">/schedule confirm で決まった日を登録</text>
+      <text x="84" y="280" font-size="9.8" fill="#5d7481">対象のロールへお知らせが飛びます。ここを忘れるとリマインドが出ません。</text>
+      <rect x="586" y="252" width="60" height="19" rx="9.5" fill="#2f7fd1"/>
+      <text x="616" y="266" font-size="9.6" font-weight="700" fill="#fff" text-anchor="middle">班長</text>
+
+      <!-- 6 -->
+      <circle cx="58" cy="316" r="10" fill="#48a884"/>
+      <text x="58" y="320" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">6</text>
+      <text x="84" y="312" font-size="11.5" font-weight="700" fill="#23303a">前日 20:00 と当日 8:30 に自動リマインド</text>
+      <text x="84" y="330" font-size="9.8" fill="#5d7481">確定した予定がある日だけ届きます。無い日は何も送りません。</text>
+      <rect x="586" y="302" width="60" height="19" rx="9.5" fill="#48a884"/>
+      <text x="616" y="316" font-size="9.6" font-weight="700" fill="#fff" text-anchor="middle">自動</text>
+    </svg>
+    <div class="figcap">図2-1　日程調整の流れ。青が班長の操作、緑は Bot が勝手にやってくれる部分です。</div>
+  </div>
+
+  <div class="cmdblock">/schedule create
+<span class="note">  タイトル: 6月度 定例ミーティング
+  候補日時: 2026-07-03 19:00 ; 2026-07-04 19:00 ; 2026-07-05 13:00
+            ↑ セミコロン「 ; 」で区切って、いくつでも並べられます
+  締切:     2026-07-01 23:59</span></div>
+
+  <div class="box warn">
+    <span class="t">確定の登録（<code>/schedule confirm</code>）を忘れないでください</span>
+    投票が締め切られただけでは、<strong>前日・当日のリマインドは飛びません</strong>。
+    日が決まったら必ず <code>/schedule confirm</code> まで進めてください。
+    間違えたときは <code>/schedule unconfirm</code> で取り消せます（取り消しもお知らせされます）。
+  </div>
+</div>
+
+<div class="page">
+  <h2>2-2　機体の進捗を更新する</h2>
+  <p>
+    進捗は<strong>ツリー（木）の形</strong>で管理します。機体 → パーツ → 部品…と、必要なだけ細かくできます。
+    <code>/progress add</code> で足し、<code>/progress edit</code> で直します。
+    親を指定しなければ、いちばん上（＝機体そのもの）になります。
+  </p>
+  <div class="cmdblock">/progress add<span class="note">   名前: 第2リブ　親: 主翼　担当: 翼班　進捗率: 0</span>
+/progress edit<span class="note">  ノード: 第2リブ　進捗率: 40</span>
+/progress remove<span class="note"> ノード: 第2リブ　← 配下ごと消えるので注意</span></div>
+
+  <h3>桁巻きの記録から、進捗率を自動で計算させる</h3>
+  <p>
+    桁は <code>/progress spar-link</code> で「桁名」と「目標の層数」を進捗ノードに結びつけられます。
+    そうすると、<strong>部員が <code>/layer end</code> を押すだけで進捗率が勝手に上がります。</strong>
+    班長が手で数字を入れ直す必要はありません。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 196" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <defs>
+        <marker id="aLink" markerWidth="9" markerHeight="9" refX="8.5" refY="4.5" orient="auto">
+          <path d="M0 0 L9 4.5 L0 9 Z" fill="#2f7fd1"/>
+        </marker>
+      </defs>
+
+      <!-- 左：桁巻きの記録 -->
+      <rect x="6" y="14" width="230" height="168" rx="9" fill="#f2faf6" stroke="#2f9e6b" stroke-width="1.5"/>
+      <text x="121" y="38" font-size="11" font-weight="700" fill="#1e7a51" text-anchor="middle">部員が記録した積層</text>
+      <text x="121" y="55" font-size="9.4" fill="#5d7481" text-anchor="middle">/layer start → /layer end</text>
+      <!-- 10層のスタック -->
+      <g>
+        <rect x="70" y="151.0" width="102" height="8" rx="2" fill="#2f9e6b"/>
+        <rect x="70" y="141.5" width="102" height="8" rx="2" fill="#2f9e6b"/>
+        <rect x="70" y="132.0" width="102" height="8" rx="2" fill="#2f9e6b"/>
+        <rect x="70" y="122.5" width="102" height="8" rx="2" fill="#dfe8ea"/>
+        <rect x="70" y="113.0" width="102" height="8" rx="2" fill="#dfe8ea"/>
+        <rect x="70" y="103.5" width="102" height="8" rx="2" fill="#dfe8ea"/>
+        <rect x="70" y="94.0"  width="102" height="8" rx="2" fill="#dfe8ea"/>
+        <rect x="70" y="84.5"  width="102" height="8" rx="2" fill="#dfe8ea"/>
+        <rect x="70" y="75.0"  width="102" height="8" rx="2" fill="#dfe8ea"/>
+        <rect x="70" y="65.5"  width="102" height="8" rx="2" fill="#dfe8ea"/>
+      </g>
+      <text x="180" y="158" font-size="9.4" fill="#1e7a51" font-weight="700">3層</text>
+      <text x="180" y="72"  font-size="9.4" fill="#9aa3ab">10層</text>
+      <text x="121" y="176" font-size="10" font-weight="700" fill="#23303a" text-anchor="middle">主桁　3層 / 目標10層</text>
+
+      <!-- 中央：紐付け -->
+      <line x1="242" y1="98" x2="424" y2="98" stroke="#2f7fd1" stroke-width="2" marker-end="url(#aLink)"/>
+      <rect x="258" y="74" width="152" height="22" rx="11" fill="#2f7fd1"/>
+      <text x="334" y="89" font-size="9.8" font-weight="700" fill="#fff" text-anchor="middle">/progress spar-link</text>
+      <text x="334" y="118" font-size="9.4" fill="#5d7481" text-anchor="middle">1回つないでおけば</text>
+      <text x="334" y="133" font-size="9.4" fill="#5d7481" text-anchor="middle">あとは自動</text>
+
+      <!-- 右：進捗ノード -->
+      <rect x="430" y="14" width="264" height="168" rx="9" fill="#f4f7fb" stroke="#2f7fd1" stroke-width="1.5"/>
+      <text x="562" y="38" font-size="11" font-weight="700" fill="#2467ab" text-anchor="middle">進捗ノード「主桁」</text>
+      <text x="562" y="55" font-size="9.4" fill="#5d7481" text-anchor="middle">/progress view に出てくる数字</text>
+      <rect x="458" y="88" width="208" height="20" rx="10" fill="#e6edf0"/>
+      <rect x="458" y="88" width="62" height="20" rx="10" fill="#2f7fd1"/>
+      <text x="562" y="130" font-size="20" font-weight="700" fill="#2f7fd1" text-anchor="middle">30%</text>
+      <text x="562" y="154" font-size="9.6" fill="#5d7481" text-anchor="middle">3層 ÷ 10層 = 30%</text>
+      <text x="562" y="172" font-size="9.6" font-weight="700" fill="#23303a" text-anchor="middle">手入力しなくても更新されます</text>
+    </svg>
+    <div class="figcap">図2-2　桁巻きの記録と進捗ノードをつなぐと、進捗率が自動計算されます。</div>
+  </div>
+
+  <div class="box note">
+    <span class="t">手で進捗率を入れると、自動計算が止まります</span>
+    <code>/progress edit</code> で進捗率を直接入れると、そのノードは「手入力」に切り替わります。
+    桁巻きから自動で更新させたいノードには、数字を手で入れないでください。
+  </div>
+
+</div>
+
+<div class="page">
+  <h2>2-3　班長が使えるコマンド一覧</h2>
+  <p>第1章のものに加えて、次が使えるようになります。</p>
+
+  <table>
+    <tr><th style="width:34%;">コマンド</th><th>何ができるか</th></tr>
+    <tr><td colspan="2" style="background:#eef4fa; font-weight:700; color:#2467ab;">日程調整</td></tr>
+    <tr><td><code>/schedule create</code></td><td>日程調整をつくる</td></tr>
+    <tr><td><code>/schedule confirm</code></td><td>決まった日程を登録して告知する</td></tr>
+    <tr><td><code>/schedule unconfirm</code></td><td>確定を取り消す</td></tr>
+    <tr><td><code>/schedule close</code></td><td>締切を待たずに手で締める</td></tr>
+    <tr><td><code>/schedule remind</code></td><td>未回答の人へもう一度催促する</td></tr>
+    <tr><td><code>/schedule edit-deadline</code></td><td>募集中の締切を変更する</td></tr>
+    <tr><td colspan="2" style="background:#eef4fa; font-weight:700; color:#2467ab;">機体の進捗・重量・節目</td></tr>
+    <tr><td><code>/progress add</code> / <code>edit</code> / <code>remove</code></td><td>ノードの追加・変更・削除</td></tr>
+    <tr><td><code>/progress spar-link</code></td><td>桁名と目標層数をノードに紐付ける（自動計算）</td></tr>
+    <tr><td><code>/progress setup</code></td><td>Todoist のプロジェクトを進捗ツリーに紐付ける</td></tr>
+    <tr><td><code>/weight set</code></td><td>ノードの実測重量（と目標）を記録する</td></tr>
+    <tr><td><code>/milestone add</code> / <code>remove</code></td><td>期限（節目）の設定・削除</td></tr>
+  </table>
+</div>
+
+<div class="page">
+  <h2>2-3　班長が使えるコマンド一覧（続き）</h2>
+
+  <table>
+    <tr><th style="width:34%;">コマンド</th><th>何ができるか</th></tr>
+    <tr><td colspan="2" style="background:#eef4fa; font-weight:700; color:#2467ab;">タスク</td></tr>
+    <tr><td><code>/task delete</code></td><td>タスクを削除する</td></tr>
+    <tr><td><code>/task sections</code></td><td>Todoist のセクションと班の紐付け状況を見る</td></tr>
+    <tr><td><code>/task push</code></td><td>班ごとのタスクを各班チャンネルへ手動で流す</td></tr>
+    <tr><td colspan="2" style="background:#eef4fa; font-weight:700; color:#2467ab;">メンバー・班</td></tr>
+    <tr><td><code>/member register</code></td><td>メンバーを登録する</td></tr>
+    <tr><td><code>/member assign-team</code></td><td>主に所属する班を設定する</td></tr>
+    <tr><td><code>/member assign-sub-team</code></td><td>副所属の班を追加・削除する</td></tr>
+    <tr><td><code>/member support</code></td><td>手伝える人を班をまたいで探す</td></tr>
+    <tr><td colspan="2" style="background:#eef4fa; font-weight:700; color:#2467ab;">在庫・桁名・レポート</td></tr>
+    <tr><td><code>/stock add</code></td><td>品目を登録する・入庫を記録する</td></tr>
+    <tr><td><code>/stock set-threshold</code></td><td>「これを下回ったら知らせて」の数を決める</td></tr>
+    <tr><td><code>/stock remove</code></td><td>品目を使わなくする（履歴は残る）</td></tr>
+    <tr><td><code>/layer keta-add</code> / <code>keta-remove</code></td><td>桁名を登録する・使わなくする</td></tr>
+    <tr><td><code>/report weekly</code></td><td>今週のまとめ（<code>public:true</code> でチャンネルへ公開）</td></tr>
+    <tr><td><code>/report attendance-rate</code></td><td>投票ごとの出欠率</td></tr>
+    <tr><td><code>/report member-attendance</code></td><td>メンバー別の回答率・連続未回答数</td></tr>
+    <tr><td><code>/report export-tasks</code></td><td>タスク一覧を CSV で書き出す</td></tr>
+  </table>
+
+  <div class="box tip">
+    <span class="t">在庫の「閾値」を決めておくと、発注忘れが減ります</span>
+    <code>/stock set-threshold</code> で数を決めると、下回ったその場で1回告知され、
+    下回ったままなら毎朝の通知にも出ます。<strong>閾値を決めていない品目は、在庫0でも何も言いません。</strong>
+  </div>
+</div>
+
+<!-- ============================= 第3章 L3 ============================= -->
+<div class="page">
+  <div class="chapter-head lv3">
+    <div class="lv">CHAPTER 3 — LEVEL 3</div>
+    <h1>幹部</h1>
+    <div class="who">
+      担当は<strong>「名簿を整えること」</strong>と<strong>「うまく動いていないときに確かめること」</strong>。<br>
+      第1章・第2章の操作もすべて使えます。
+    </div>
+  </div>
+
+  <h2>3-1　通知が届く道すじをつくる</h2>
+  <p>
+    タスクを「班ごとのチャンネル」へ自動で流すには、<strong>3つをつなぐ</strong>必要があります。
+    どれか1つでも欠けると通知は届きません。うまく届かないときは、この図のどこが切れているかを確かめてください。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 232" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <!-- 見出し -->
+      <text x="106" y="20" font-size="10.6" font-weight="700" fill="#5d7481" text-anchor="middle">① Todoist のセクション</text>
+      <text x="350" y="20" font-size="10.6" font-weight="700" fill="#5d7481" text-anchor="middle">② 班</text>
+      <text x="594" y="20" font-size="10.6" font-weight="700" fill="#5d7481" text-anchor="middle">③ Discord のチャンネル</text>
+
+      <!-- 列1 -->
+      <g>
+        <rect x="16" y="34" width="180" height="34" rx="7" fill="#fdf4e8" stroke="#e0a94e"/>
+        <text x="106" y="56" font-size="10.6" fill="#23303a" text-anchor="middle">主翼セクション</text>
+        <rect x="16" y="82" width="180" height="34" rx="7" fill="#fdf4e8" stroke="#e0a94e"/>
+        <text x="106" y="104" font-size="10.6" fill="#23303a" text-anchor="middle">尾翼セクション</text>
+        <rect x="16" y="130" width="180" height="34" rx="7" fill="#fdf4e8" stroke="#e0a94e"/>
+        <text x="106" y="152" font-size="10.6" fill="#23303a" text-anchor="middle">電装セクション</text>
+      </g>
+      <!-- 列2 -->
+      <g>
+        <rect x="264" y="34" width="172" height="34" rx="7" fill="#fdf4e8" stroke="#e0a94e"/>
+        <text x="350" y="56" font-size="10.6" fill="#23303a" text-anchor="middle">主翼班</text>
+        <rect x="264" y="82" width="172" height="34" rx="7" fill="#fdf4e8" stroke="#e0a94e"/>
+        <text x="350" y="104" font-size="10.6" fill="#23303a" text-anchor="middle">尾翼班</text>
+        <rect x="264" y="130" width="172" height="34" rx="7" fill="#fdf4e8" stroke="#e0a94e"/>
+        <text x="350" y="152" font-size="10.6" fill="#23303a" text-anchor="middle">電装班</text>
+      </g>
+      <!-- 列3 -->
+      <g>
+        <rect x="504" y="34" width="180" height="34" rx="7" fill="#fdf4e8" stroke="#e0a94e"/>
+        <text x="594" y="56" font-size="10.6" fill="#23303a" text-anchor="middle"># 主翼班-連絡</text>
+        <rect x="504" y="82" width="180" height="34" rx="7" fill="#fdf4e8" stroke="#e0a94e"/>
+        <text x="594" y="104" font-size="10.6" fill="#23303a" text-anchor="middle"># 尾翼班-連絡</text>
+        <rect x="504" y="130" width="180" height="34" rx="7" fill="#fdf4e8" stroke="#e0a94e"/>
+        <text x="594" y="152" font-size="10.6" fill="#23303a" text-anchor="middle"># 電装班-連絡</text>
+      </g>
+
+      <!-- 接続線 -->
+      <g stroke="#d9962e" stroke-width="1.8">
+        <line x1="196" y1="51"  x2="264" y2="51"/>
+        <line x1="196" y1="99"  x2="264" y2="99"/>
+        <line x1="196" y1="147" x2="264" y2="147"/>
+        <line x1="436" y1="51"  x2="504" y2="51"/>
+        <line x1="436" y1="99"  x2="504" y2="99"/>
+        <line x1="436" y1="147" x2="504" y2="147"/>
+      </g>
+
+      <!-- 使うコマンド -->
+      <rect x="176" y="176" width="150" height="22" rx="11" fill="#e08b1e"/>
+      <text x="251" y="191" font-size="9.6" font-weight="700" fill="#fff" text-anchor="middle">/task link-section</text>
+      <text x="251" y="212" font-size="9.2" fill="#5d7481" text-anchor="middle">幹部がつなぐ</text>
+      <line x1="230" y1="160" x2="230" y2="176" stroke="#e0a94e" stroke-width="1.4" stroke-dasharray="3 3"/>
+
+      <rect x="414" y="176" width="156" height="22" rx="11" fill="#e08b1e"/>
+      <text x="492" y="191" font-size="9.6" font-weight="700" fill="#fff" text-anchor="middle">/member set-channel</text>
+      <text x="492" y="212" font-size="9.2" fill="#5d7481" text-anchor="middle">幹部がつなぐ</text>
+      <line x1="470" y1="160" x2="470" y2="176" stroke="#e0a94e" stroke-width="1.4" stroke-dasharray="3 3"/>
+
+      <text x="16" y="228" font-size="9.4" fill="#5d7481">
+        つながっているかは <tspan font-weight="700" fill="#23303a">/task sections</tspan> で一覧できます。
+      </text>
+    </svg>
+    <div class="figcap">図3-1　毎朝 8:30 のタスク通知が班チャンネルへ届くまでの道すじ。</div>
+  </div>
+
+  <h2>3-2　日程調整を消す・戻す</h2>
+  <p>
+    間違えて作った投票は <code>/schedule delete</code> で消せます。ただし
+    <strong>「誰が何と答えたか」は消えません。</strong>
+    あとから集計を見たくなったら <code>/schedule restore</code> で戻せます。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 178" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <defs>
+        <marker id="aDel" markerWidth="9" markerHeight="9" refX="8.5" refY="4.5" orient="auto">
+          <path d="M0 0 L9 4.5 L0 9 Z" fill="#9fb0b8"/>
+        </marker>
+      </defs>
+
+      <!-- 実行前 -->
+      <rect x="6" y="26" width="196" height="126" rx="9" fill="#ffffff" stroke="#d5e0e5"/>
+      <text x="104" y="18" font-size="10.6" font-weight="700" fill="#5d7481" text-anchor="middle">実行前</text>
+      <rect x="24" y="42" width="160" height="42" rx="7" fill="#f3f8f9" stroke="#048a81"/>
+      <text x="104" y="60" font-size="10" font-weight="700" fill="#0b4f6c" text-anchor="middle">投票メッセージ</text>
+      <text x="104" y="76" font-size="9.2" fill="#5d7481" text-anchor="middle">チャンネルに出ている</text>
+      <rect x="24" y="96" width="160" height="42" rx="7" fill="#f2faf6" stroke="#2f9e6b"/>
+      <text x="104" y="114" font-size="10" font-weight="700" fill="#1e7a51" text-anchor="middle">票データ</text>
+      <text x="104" y="130" font-size="9.2" fill="#5d7481" text-anchor="middle">誰が何と答えたか</text>
+
+      <line x1="206" y1="90" x2="248" y2="90" stroke="#9fb0b8" stroke-width="1.8" marker-end="url(#aDel)"/>
+      <text x="227" y="82" font-size="9.2" font-weight="700" fill="#5d7481" text-anchor="middle">delete</text>
+
+      <!-- delete 後 -->
+      <rect x="252" y="26" width="196" height="126" rx="9" fill="#ffffff" stroke="#d5e0e5"/>
+      <text x="350" y="18" font-size="10.6" font-weight="700" fill="#a83f3a" text-anchor="middle">/schedule delete 後</text>
+      <rect x="270" y="42" width="160" height="42" rx="7" fill="#f6f7f8" stroke="#dbdee1" stroke-dasharray="4 3"/>
+      <text x="350" y="60" font-size="10" font-weight="700" fill="#9aa3ab" text-anchor="middle">投票メッセージ</text>
+      <text x="350" y="76" font-size="9.2" font-weight="700" fill="#c1554f" text-anchor="middle">消える</text>
+      <line x1="284" y1="48" x2="416" y2="78" stroke="#e0a3a3" stroke-width="1.6"/>
+      <rect x="270" y="96" width="160" height="42" rx="7" fill="#f2faf6" stroke="#2f9e6b"/>
+      <text x="350" y="114" font-size="10" font-weight="700" fill="#1e7a51" text-anchor="middle">票データ</text>
+      <text x="350" y="130" font-size="9.2" font-weight="700" fill="#1e7a51" text-anchor="middle">そのまま残る</text>
+
+      <line x1="452" y1="90" x2="494" y2="90" stroke="#9fb0b8" stroke-width="1.8" marker-end="url(#aDel)"/>
+      <text x="473" y="82" font-size="9.2" font-weight="700" fill="#5d7481" text-anchor="middle">restore</text>
+
+      <!-- restore 後 -->
+      <rect x="498" y="26" width="196" height="126" rx="9" fill="#ffffff" stroke="#d5e0e5"/>
+      <text x="596" y="18" font-size="10.6" font-weight="700" fill="#2467ab" text-anchor="middle">/schedule restore 後</text>
+      <rect x="516" y="42" width="160" height="42" rx="7" fill="#f6f7f8" stroke="#dbdee1" stroke-dasharray="4 3"/>
+      <text x="596" y="60" font-size="10" font-weight="700" fill="#9aa3ab" text-anchor="middle">投票メッセージ</text>
+      <text x="596" y="76" font-size="9.2" font-weight="700" fill="#9aa3ab" text-anchor="middle">戻りません</text>
+      <rect x="516" y="96" width="160" height="42" rx="7" fill="#f4f7fb" stroke="#2f7fd1"/>
+      <text x="596" y="114" font-size="10" font-weight="700" fill="#2467ab" text-anchor="middle">集計が見られる</text>
+      <text x="596" y="130" font-size="9.2" fill="#5d7481" text-anchor="middle">締切済みとして復活</text>
+
+      <text x="6" y="172" font-size="9.6" fill="#5d7481">
+        取り直したいときは、<tspan font-weight="700" fill="#23303a">/schedule create</tspan> で作り直してください。
+        復活しても、催促や自動締切はもう走りません。
+      </text>
+    </svg>
+    <div class="figcap">図3-2　削除と復元。消えるのは投票メッセージだけで、回答の記録は残ります。</div>
+  </div>
+</div>
+
+<div class="page">
+  <h2>3-3　名簿を整える</h2>
+  <p>
+    新入生が入ったときや班替えのときは、<code>/member setup</code> が便利です。
+    <strong>主所属・副所属・班長フラグを1回でまとめて設定できます。</strong>
+  </p>
+  <div class="cmdblock">/member setup<span class="note">       対象: @部員　主所属: 主翼班　副所属: 電装班　班長: はい</span>
+/member set-leader<span class="note"> 対象: @部員　班長: はい      ← 班長フラグだけを変える</span>
+/member set-channel<span class="note"> 班: 主翼班　チャンネル: #主翼班-連絡</span></div>
+
+  <div class="box warn">
+    <span class="t">「班長フラグ」を付けても、班長の権限（L2）にはなりません</span>
+    <code>/member set-leader</code> で付くのは<strong>名簿の上の肩書き</strong>です。
+    コマンドを実行できるかどうかは、<strong>Discord のロール</strong>だけで決まります。
+    実際に班長として操作できるようにするには、管理者に
+    <code>/set_role</code>（班長ロール）へ追加してもらってください。
+  </div>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 128" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <rect x="6" y="10" width="336" height="108" rx="9" fill="#f2faf6" stroke="#2f9e6b" stroke-width="1.5"/>
+      <text x="174" y="34" font-size="11" font-weight="700" fill="#1e7a51" text-anchor="middle">名簿の「班長フラグ」</text>
+      <text x="174" y="58" font-size="10" fill="#5d7481" text-anchor="middle">/member set-leader で付ける</text>
+      <text x="174" y="80" font-size="10" fill="#23303a" text-anchor="middle">できること：一覧に「班長」と表示される</text>
+      <text x="174" y="102" font-size="10" font-weight="700" fill="#a83f3a" text-anchor="middle">コマンドの権限は増えません</text>
+
+      <rect x="358" y="10" width="336" height="108" rx="9" fill="#f4f7fb" stroke="#2f7fd1" stroke-width="1.5"/>
+      <text x="526" y="34" font-size="11" font-weight="700" fill="#2467ab" text-anchor="middle">Discord の「班長ロール」</text>
+      <text x="526" y="58" font-size="10" fill="#5d7481" text-anchor="middle">管理者が /set_role で登録する</text>
+      <text x="526" y="80" font-size="10" fill="#23303a" text-anchor="middle">できること：第2章のコマンドが使える</text>
+      <text x="526" y="102" font-size="10" font-weight="700" fill="#1e7a51" text-anchor="middle">こちらが権限の根拠です</text>
+    </svg>
+    <div class="figcap">図3-3　似ていますが別物です。「班長なのにコマンドが使えない」ときは右が抜けています。</div>
+  </div>
+
+  <h2>3-4　うまく動かないときに確かめる</h2>
+  <p>
+    「通知が来ていない気がする」「設定がいつの間にか変わっている」というときは、
+    ログを見れば事実が確かめられます。<strong>どちらも表示は自分にだけ見えます。</strong>
+  </p>
+  <table>
+    <tr><th style="width:34%;">コマンド</th><th>分かること</th></tr>
+    <tr><td><code>/report notifications</code></td><td>Bot が実際に送った通知の記録。「送られていない」のか「届いていない」のかを切り分けられます</td></tr>
+    <tr><td><code>/report changes</code></td><td>設定や班・メンバーを<strong>誰がいつ変えたか</strong>の記録。実行者は表示名で出ます</td></tr>
+  </table>
+
+</div>
+
+<div class="page">
+  <h2>3-5　幹部が使えるコマンド一覧</h2>
+  <p>第1章・第2章のものに加えて、次が使えるようになります。</p>
+  <table>
+    <tr><th style="width:34%;">コマンド</th><th>何ができるか</th></tr>
+    <tr><td colspan="2" style="background:#fdf4e8; font-weight:700; color:#b76c0d;">メンバー・班</td></tr>
+    <tr><td><code>/member setup</code></td><td>主所属・副所属・班長フラグを一括で設定する</td></tr>
+    <tr><td><code>/member set-leader</code></td><td>名簿の班長フラグを変える</td></tr>
+    <tr><td><code>/member set-channel</code></td><td>班の通知先チャンネルを決める</td></tr>
+    <tr><td colspan="2" style="background:#fdf4e8; font-weight:700; color:#b76c0d;">Todoist セクションの紐付け</td></tr>
+    <tr><td><code>/task link-section</code></td><td>Todoist のセクションを班につなぐ</td></tr>
+    <tr><td><code>/task unlink-section</code></td><td>セクションの紐付けを外す</td></tr>
+    <tr><td><code>/task unlink-team-sections</code></td><td>ある班につながっているセクションをまとめて外す</td></tr>
+    <tr><td colspan="2" style="background:#fdf4e8; font-weight:700; color:#b76c0d;">日程調整・ログ</td></tr>
+    <tr><td><code>/schedule delete</code></td><td>投票を消す（票データは残る）</td></tr>
+    <tr><td><code>/schedule restore</code></td><td>消した投票を締切済みとして戻す</td></tr>
+    <tr><td><code>/report notifications</code></td><td>Bot が送った通知の記録を見る</td></tr>
+    <tr><td><code>/report changes</code></td><td>設定・マスタの変更履歴を見る</td></tr>
+  </table>
+
+  <div class="box tip">
+    <span class="t">出欠の答えが悪い人を見つけたいとき</span>
+    <code>/report member-attendance</code>（班長から使えます）を実行すると、
+    回答率の低い順に並びます。連続で答えていない人が分かるので、声かけの目安になります。
+  </div>
+</div>
+
+<!-- ============================= 第4章 L4 ============================= -->
+<div class="page">
+  <div class="chapter-head lv4">
+    <div class="lv">CHAPTER 4 — LEVEL 4</div>
+    <h1>Bot管理者</h1>
+    <div class="who">
+      担当は<strong>「最初の設定」</strong>と<strong>「サークルの構成が変わったときの反映」</strong>。<br>
+      すべてのコマンドが使えます。サーバーを作った人・サーバー管理権限を持つ人が自動的にここです。
+    </div>
+  </div>
+
+  <h2>4-1　導入は15分ほどで終わります</h2>
+  <p>
+    サーバーを借りたり、プログラムを触ったりする必要はありません。
+    <strong>Discord の中だけで完結します。</strong>
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 142" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <defs>
+        <marker id="aSetup" markerWidth="9" markerHeight="9" refX="8.5" refY="4.5" orient="auto">
+          <path d="M0 0 L9 4.5 L0 9 Z" fill="#a98ad4"/>
+        </marker>
+      </defs>
+      <g>
+        <rect x="2" y="18" width="116" height="86" rx="9" fill="#f7f3fd" stroke="#8250c4" stroke-width="1.5"/>
+        <circle cx="60" cy="42" r="14" fill="#8250c4"/>
+        <text x="60" y="47" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">1</text>
+        <text x="60" y="72" font-size="10.4" font-weight="700" fill="#5b3391" text-anchor="middle">Bot を招待</text>
+        <text x="60" y="90" font-size="9.2" fill="#5d7481" text-anchor="middle">1分</text>
+      </g>
+      <line x1="118" y1="61" x2="143" y2="61" stroke="#a98ad4" stroke-width="1.8" marker-end="url(#aSetup)"/>
+      <g>
+        <rect x="147" y="18" width="116" height="86" rx="9" fill="#f7f3fd" stroke="#8250c4" stroke-width="1.5"/>
+        <circle cx="205" cy="42" r="14" fill="#8250c4"/>
+        <text x="205" y="47" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">2</text>
+        <text x="205" y="72" font-size="10.4" font-weight="700" fill="#5b3391" text-anchor="middle">/setup</text>
+        <text x="205" y="90" font-size="9.2" fill="#5d7481" text-anchor="middle">5分・対話形式</text>
+      </g>
+      <line x1="263" y1="61" x2="288" y2="61" stroke="#a98ad4" stroke-width="1.8" marker-end="url(#aSetup)"/>
+      <g>
+        <rect x="292" y="18" width="116" height="86" rx="9" fill="#f7f3fd" stroke="#8250c4" stroke-width="1.5"/>
+        <circle cx="350" cy="42" r="14" fill="#8250c4"/>
+        <text x="350" y="47" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">3</text>
+        <text x="350" y="72" font-size="10.4" font-weight="700" fill="#5b3391" text-anchor="middle">班を整える</text>
+        <text x="350" y="90" font-size="9.2" fill="#5d7481" text-anchor="middle">3分</text>
+      </g>
+      <line x1="408" y1="61" x2="433" y2="61" stroke="#a98ad4" stroke-width="1.8" marker-end="url(#aSetup)"/>
+      <g>
+        <rect x="437" y="18" width="116" height="86" rx="9" fill="#f7f3fd" stroke="#8250c4" stroke-width="1.5"/>
+        <circle cx="495" cy="42" r="14" fill="#8250c4"/>
+        <text x="495" y="47" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">4</text>
+        <text x="495" y="72" font-size="10.4" font-weight="700" fill="#5b3391" text-anchor="middle">メンバー登録</text>
+        <text x="495" y="90" font-size="9.2" fill="#5d7481" text-anchor="middle">5分</text>
+      </g>
+      <line x1="553" y1="61" x2="578" y2="61" stroke="#a98ad4" stroke-width="1.8" marker-end="url(#aSetup)"/>
+      <g>
+        <rect x="582" y="18" width="116" height="86" rx="9" fill="#8250c4"/>
+        <circle cx="640" cy="42" r="14" fill="#ffffff"/>
+        <text x="640" y="47" font-size="12" font-weight="700" fill="#8250c4" text-anchor="middle">5</text>
+        <text x="640" y="72" font-size="10.4" font-weight="700" fill="#fff" text-anchor="middle">動くか確認</text>
+        <text x="640" y="90" font-size="9.2" fill="#e8dcf7" text-anchor="middle">/setup-status</text>
+      </g>
+      <text x="350" y="130" font-size="9.8" fill="#5d7481" text-anchor="middle">
+        途中でやめても大丈夫です。<tspan font-weight="700" fill="#23303a">/setup-status</tspan> が、残っている項目を教えてくれます。
+      </text>
+    </svg>
+    <div class="figcap">図4-1　導入の5ステップ。Todoist 連携は任意なので、あとから足せます。</div>
+  </div>
+
+  <h2>4-2　<code>/setup</code> で決めること</h2>
+  <p>
+    質問に答えていくだけのウィザードです。<strong>あとから <code>/set_role</code> や
+    <code>/set_channel</code> で個別に直せる</strong>ので、最初から完璧でなくて構いません。
+  </p>
+  <table>
+    <tr><th style="width:30%;">決めるもの</th><th>内容</th></tr>
+    <tr><td>サークル名</td><td>Bot の表示に使われます</td></tr>
+    <tr><td>班</td><td>班と対応ロールを<strong>まとめて作成</strong>できます</td></tr>
+    <tr><td>班長ロール</td><td>ここに入れたロールを持つ人が<strong>第2章の操作をできる</strong>ようになります</td></tr>
+    <tr><td>幹部ロール・管理者ロール</td><td>第3章・第4章の操作をできる人を決めます</td></tr>
+    <tr><td>通知チャンネル</td><td>タスク通知・ログの投稿先</td></tr>
+    <tr><td>新入生オンボーディング</td><td>入ってきた人に自動で案内を出すか（<strong>既定はオフ</strong>。新歓期だけオンにするのがおすすめ）</td></tr>
+  </table>
+
+  <div class="box tip">
+    <span class="t">大会日を入れておくと、逆算してくれます</span>
+    <code>/settings_set key:COMPETITION_DATE value:2027-07-28</code> のように登録すると、
+    <code>/countdown</code> で残り日数と、節目ごとの「間に合うペースかどうか」が出ます。
+    遅れている節目がある週は、月曜の朝に自動で知らせます（遅れが無い週は送りません）。
+  </div>
+</div>
+
+<div class="page">
+  <h2>4-3　Todoist をつなぐ（任意）</h2>
+  <p>
+    タスク機能を使うなら、サークルの Todoist トークンを1回だけ登録します。
+    <strong>トークンはコマンドの引数では受け取りません。</strong>
+    引数に入れた値は Discord のチャンネル履歴に残ってしまうためです。
+    代わりに、履歴に残らないフォーム（モーダル）で受け取ります。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 104" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <defs>
+        <marker id="aTd" markerWidth="9" markerHeight="9" refX="8.5" refY="4.5" orient="auto">
+          <path d="M0 0 L9 4.5 L0 9 Z" fill="#a98ad4"/>
+        </marker>
+      </defs>
+      <!-- 4ステップ -->
+      <rect x="2" y="14" width="156" height="80" rx="9" fill="#f7f3fd" stroke="#8250c4" stroke-width="1.5"/>
+      <text x="80" y="40" font-size="10.6" font-weight="700" fill="#5b3391" text-anchor="middle">/todoist-setup</text>
+      <text x="80" y="60" font-size="9.4" fill="#5d7481" text-anchor="middle">引数は何も要りません</text>
+      <text x="80" y="78" font-size="9.4" fill="#5d7481" text-anchor="middle">ただ実行するだけ</text>
+      <line x1="158" y1="54" x2="182" y2="54" stroke="#a98ad4" stroke-width="1.8" marker-end="url(#aTd)"/>
+
+      <rect x="186" y="14" width="156" height="80" rx="9" fill="#f7f3fd" stroke="#8250c4" stroke-width="1.5"/>
+      <text x="264" y="38" font-size="10.6" font-weight="700" fill="#5b3391" text-anchor="middle">ボタンが出る</text>
+      <rect x="222" y="48" width="84" height="22" rx="5" fill="#8250c4"/>
+      <text x="264" y="63" font-size="9.6" font-weight="700" fill="#fff" text-anchor="middle">トークンを入力</text>
+      <text x="264" y="85" font-size="9" fill="#9aa3ab" text-anchor="middle">🚫 あなたにのみ表示</text>
+      <line x1="342" y1="54" x2="366" y2="54" stroke="#a98ad4" stroke-width="1.8" marker-end="url(#aTd)"/>
+
+      <rect x="370" y="14" width="156" height="80" rx="9" fill="#ffffff" stroke="#8250c4" stroke-width="1.5"/>
+      <text x="448" y="36" font-size="10.6" font-weight="700" fill="#5b3391" text-anchor="middle">フォームに貼る</text>
+      <rect x="392" y="44" width="112" height="20" rx="4" fill="#f1f3f5" stroke="#dbdee1"/>
+      <text x="448" y="58" font-size="9.4" fill="#9aa3ab" text-anchor="middle">••••••••••••••••</text>
+      <text x="448" y="82" font-size="9.2" font-weight="700" fill="#1e7a51" text-anchor="middle">履歴には残りません</text>
+      <line x1="526" y1="54" x2="550" y2="54" stroke="#a98ad4" stroke-width="1.8" marker-end="url(#aTd)"/>
+
+      <rect x="554" y="14" width="144" height="80" rx="9" fill="#f2faf6" stroke="#2f9e6b" stroke-width="1.5"/>
+      <text x="626" y="38" font-size="14" text-anchor="middle">🔒</text>
+      <text x="626" y="60" font-size="10.4" font-weight="700" fill="#1e7a51" text-anchor="middle">暗号化して保存</text>
+      <text x="626" y="80" font-size="9.2" fill="#5d7481" text-anchor="middle">平文では持ちません</text>
+    </svg>
+    <div class="figcap">図4-2　Todoist トークンの登録の流れ。やり直したいときは、同じ手順で上書きできます。</div>
+  </div>
+
+  <div class="box warn">
+    <span class="t">なぜフォームで受け取るのか</span>
+    コマンドのオプションに入れた文字は、Discord のチャンネル履歴に残ります。
+    トークンは Todoist のデータを読み書きできる鍵なので、<strong>履歴に残る形では受け取りません</strong>。
+    保存されるときも暗号化されるため、<strong>平文のまま置かれることはありません</strong>。
+  </div>
+
+  <div class="box note">
+    <span class="t">つながったか確かめる</span>
+    <code>/todoist-status</code> で、登録の有無・対象プロジェクト・復号できるかどうかが分かります
+    （<strong>トークン本体は表示されません</strong>）。
+    やり直したいときは <code>/todoist-setup</code> をもう一度実行すれば上書きできます。
+    連携をやめるときは <code>/todoist-remove</code> です。
+  </div>
+
+</div>
+
+<div class="page">
+  <h2>4-4　年度替わり</h2>
+  <p>
+    代替わりのときは <code>/season rollover</code> を実行してください。
+    <strong>ウィザードが順番に聞いてくれる</strong>ので、手作業で名簿を直す必要はありません。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 206" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <rect x="2" y="10" width="696" height="186" rx="9" fill="#ffffff" stroke="#d5e0e5"/>
+      <rect x="18" y="24" width="150" height="30" rx="15" fill="#8250c4"/>
+      <text x="93" y="44" font-size="10.6" font-weight="700" fill="#fff" text-anchor="middle">/season rollover</text>
+      <line x1="93" y1="54" x2="93" y2="166" stroke="#cfdde8" stroke-width="2"/>
+
+      <circle cx="93" cy="86" r="6.5" fill="#8250c4"/>
+      <line x1="100" y1="86" x2="178" y2="86" stroke="#cfdde8" stroke-width="1.6"/>
+      <text x="190" y="82" font-size="10.6" font-weight="700" fill="#23303a">卒業する人を仕分ける</text>
+      <text x="190" y="100" font-size="9.4" fill="#5d7481">名簿からは消えません。「卒業」の印が付くだけなので、記録は残ります。</text>
+
+      <circle cx="93" cy="128" r="6.5" fill="#8250c4"/>
+      <line x1="100" y1="128" x2="178" y2="128" stroke="#cfdde8" stroke-width="1.6"/>
+      <text x="190" y="124" font-size="10.6" font-weight="700" fill="#23303a">班長フラグをいったん全部リセットする</text>
+      <text x="190" y="142" font-size="9.4" fill="#5d7481">新しい班長を付け直します。Discord の班長ロールも忘れずに入れ替えてください。</text>
+
+      <circle cx="93" cy="170" r="6.5" fill="#2f9e6b"/>
+      <line x1="100" y1="170" x2="178" y2="170" stroke="#cfdde8" stroke-width="1.6"/>
+      <text x="190" y="166" font-size="10.6" font-weight="700" fill="#1e7a51">その年度のスナップショットが添付されます</text>
+      <text x="190" y="184" font-size="9.4" fill="#5d7481">そのまま引き継ぎ資料として使えます。</text>
+    </svg>
+    <div class="figcap">図4-3　<code>/season rollover</code> がやってくれること。</div>
+  </div>
+
+  <div class="box warn">
+    <span class="t">班長ロールの入れ替えは手作業です</span>
+    <code>/season rollover</code> がリセットするのは<strong>名簿の班長フラグ</strong>だけです。
+    コマンドの権限は Discord のロールで決まるので、
+    <strong>旧班長からロールを外し、新班長へ付ける作業は別途必要</strong>です
+    （<code>/set_role</code> の <code>action:add</code> / <code>action:remove</code> で1つずつ足し引きできます）。
+  </div>
+
+  <h2>4-5　データの持ち出しと削除</h2>
+  <table>
+    <tr><th style="width:30%;">コマンド</th><th>何ができるか</th></tr>
+    <tr><td><code>/data export</code></td><td>このサーバーの主なデータを ZIP（CSV のまとまり）で受け取る。Excel でもスプレッドシートでも開けます</td></tr>
+    <tr><td><code>/data delete</code></td><td>データの削除を申し込む。まちがい防止のため<strong>サーバー名の入力</strong>が必要。最後のバックアップが添付されます</td></tr>
+    <tr><td><code>/data delete-cancel</code></td><td>申し込んだ削除を取り消す</td></tr>
+  </table>
+  <p style="font-size:9.6pt; color:#5d7481;">
+    ※ この3つは「サーバー管理」権限があれば実行できます（Bot管理者ロールが未設定でも使えます）。
+  </p>
+</div>
+
+<div class="page">
+  <h2>4-6　Bot管理者が使えるコマンド一覧</h2>
+  <p>第1章〜第3章のものに加えて、次が使えます。設定に関するものはすべてここです。</p>
+
+  <table>
+    <tr><th style="width:34%;">コマンド</th><th>何ができるか</th></tr>
+    <tr><td colspan="2" style="background:#f7f3fd; font-weight:700; color:#5b3391;">初期設定・サーバー設定</td></tr>
+    <tr><td><code>/setup</code></td><td>初期設定ウィザード。<strong>まずこれ</strong></td></tr>
+    <tr><td><code>/set_role</code></td><td>班長・幹部・管理者のロールを決める（<code>action:add</code> / <code>remove</code> で1つずつ増減も可）</td></tr>
+    <tr><td><code>/set_channel</code></td><td>通知チャンネルを決める</td></tr>
+    <tr><td><code>/set_common</code></td><td>共通設定</td></tr>
+    <tr><td><code>/settings_list</code></td><td>いまの設定を一覧する</td></tr>
+    <tr><td><code>/settings_get</code> / <code>settings_set</code> / <code>settings_delete</code></td><td>設定を1つずつ取得・保存・削除（大会日や保存期間など）</td></tr>
+    <tr><td colspan="2" style="background:#f7f3fd; font-weight:700; color:#5b3391;">班のマスタ</td></tr>
+    <tr><td><code>/team-add</code></td><td>班を追加する</td></tr>
+    <tr><td><code>/team-remove</code></td><td>班を使わなくする（論理削除。所属者がいるときは確認が必要）</td></tr>
+    <tr><td><code>/team-list</code></td><td>班の一覧（所属人数・ロール・通知先）</td></tr>
+    <tr><td><code>/team-role</code></td><td>班と Discord ロールを紐付ける</td></tr>
+    <tr><td colspan="2" style="background:#f7f3fd; font-weight:700; color:#5b3391;">Todoist</td></tr>
+    <tr><td><code>/todoist-setup</code></td><td>トークンを登録する（フォームで入力）</td></tr>
+    <tr><td><code>/todoist-status</code></td><td>連携できているかを確認する</td></tr>
+    <tr><td><code>/todoist-remove</code></td><td>このサーバーの Todoist 設定を消す</td></tr>
+    <tr><td><code>/task sync</code> / <code>/progress sync</code></td><td>同期をいますぐ実行する（ふだんは自動）</td></tr>
+    <tr><td colspan="2" style="background:#f7f3fd; font-weight:700; color:#5b3391;">年度・出欠絵文字・データ</td></tr>
+    <tr><td><code>/season new</code></td><td>いまの年度を終えて新しい年度を始める</td></tr>
+    <tr><td><code>/season rollover</code></td><td>年度切り替えウィザード（<strong>ふつうはこちら</strong>）</td></tr>
+    <tr><td><code>/schedule emoji set</code> / <code>show</code> / <code>reset</code></td><td>出欠の絵文字をサークル独自のものに変える・確認する・戻す</td></tr>
+    <tr><td><code>/data export</code> / <code>delete</code> / <code>delete-cancel</code></td><td>データの持ち出しと削除</td></tr>
+  </table>
+
+  <div class="box note">
+    <span class="t">出欠の絵文字を変えたときの注意</span>
+    変更が効くのは<strong>これから作る日程調整から</strong>です。投稿済みの投票は変わりません。
+    設定した絵文字を消した場合は、自動で ✅❓❌ に戻ります。
+  </div>
+</div>
+
+<!-- ============================= 付録 ============================= -->
+<div class="page">
+  <div class="chapter-head basic-head">
+    <div class="lv">APPENDIX</div>
+    <h1>付録</h1>
+    <div class="who">自動で届く通知・困ったときの対処・権限のまとめ</div>
+  </div>
+
+  <h2>付録A　自動で届く通知</h2>
+  <p>
+    Bot は<strong>誰も操作していなくても</strong>、決まった時刻に通知を送ります。
+    「通知が多い」と感じたときは、この表のどれかを止められないか管理者に相談してください。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 244" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <!-- 08:30 の吹き出し -->
+      <rect x="150" y="10" width="300" height="104" rx="9" fill="#eef8f3" stroke="#7cc4a4" stroke-width="1.5"/>
+      <text x="166" y="30" font-size="11" font-weight="700" fill="#1e7a51">毎朝 8:30 — まとめて届きます</text>
+      <text x="166" y="49" font-size="9.6" fill="#23303a">・今日〜7日以内が期限のタスク</text>
+      <text x="166" y="66" font-size="9.6" fill="#23303a">・班ごとのタスク（各班のチャンネルへ）</text>
+      <text x="166" y="83" font-size="9.6" fill="#23303a">・「今日やること」の印を付けたタスク</text>
+      <text x="166" y="100" font-size="9.6" fill="#23303a">・今日の確定予定 ／ 在庫が足りないもの</text>
+      <line x1="262" y1="114" x2="262" y2="128" stroke="#7cc4a4" stroke-width="1.5"/>
+
+      <!-- 21:00 の吹き出し -->
+      <rect x="496" y="36" width="200" height="56" rx="9" fill="#fff6ec" stroke="#f0cfa0" stroke-width="1.5"/>
+      <text x="512" y="56" font-size="11" font-weight="700" fill="#b76c0d">21:00</text>
+      <text x="512" y="76" font-size="9.6" fill="#23303a">期限が過ぎたタスクの通知</text>
+      <line x1="586" y1="92" x2="586" y2="128" stroke="#f0cfa0" stroke-width="1.5"/>
+
+      <!-- 軸 -->
+      <line x1="40" y1="136" x2="666" y2="136" stroke="#cfdde8" stroke-width="3"/>
+      <g stroke="#cfdde8" stroke-width="1.4">
+        <line x1="40"  y1="132" x2="40"  y2="144"/>
+        <line x1="144" y1="132" x2="144" y2="144"/>
+        <line x1="247" y1="132" x2="247" y2="144"/>
+        <line x1="350" y1="132" x2="350" y2="144"/>
+        <line x1="454" y1="132" x2="454" y2="144"/>
+        <line x1="557" y1="132" x2="557" y2="144"/>
+        <line x1="660" y1="132" x2="660" y2="144"/>
+      </g>
+      <g font-size="9" fill="#9aa3ab" text-anchor="middle">
+        <text x="40"  y="158">0時</text>
+        <text x="144" y="158">4時</text>
+        <text x="247" y="158">8時</text>
+        <text x="350" y="158">12時</text>
+        <text x="454" y="158">16時</text>
+        <text x="557" y="158">20時</text>
+        <text x="660" y="158">24時</text>
+      </g>
+
+      <!-- マーカー -->
+      <circle cx="144" cy="136" r="7" fill="#8250c4"/>
+      <circle cx="262" cy="136" r="8" fill="#2f9e6b"/>
+      <circle cx="557" cy="136" r="7" fill="#2f7fd1"/>
+      <circle cx="586" cy="136" r="7" fill="#e08b1e"/>
+
+      <!-- 04:00 -->
+      <line x1="144" y1="144" x2="144" y2="176" stroke="#c3aede" stroke-width="1.5"/>
+      <rect x="46" y="176" width="196" height="52" rx="9" fill="#f7f3fd" stroke="#c3aede" stroke-width="1.5"/>
+      <text x="62" y="196" font-size="11" font-weight="700" fill="#5b3391">4:00</text>
+      <text x="62" y="215" font-size="9.6" fill="#23303a">申し込まれたデータ削除の実行</text>
+
+      <!-- 20:00 -->
+      <line x1="557" y1="144" x2="557" y2="176" stroke="#9dc4e8" stroke-width="1.5"/>
+      <rect x="440" y="176" width="220" height="52" rx="9" fill="#eef4fa" stroke="#9dc4e8" stroke-width="1.5"/>
+      <text x="456" y="196" font-size="11" font-weight="700" fill="#2467ab">20:00</text>
+      <text x="456" y="215" font-size="9.6" fill="#23303a">明日の確定予定をリマインド</text>
+    </svg>
+    <div class="figcap">図A-1　1日のうちに Bot が動く時刻。予定やタスクが無い日は、何も送りません。</div>
+  </div>
+
+  <h3>そのほか、いつも動いているもの</h3>
+  <table>
+    <tr><th style="width:26%;">タイミング</th><th>内容</th></tr>
+    <tr><td><strong>5分ごと</strong></td><td>日程調整の締切判定と自動締切／締切1時間前の未回答者への催促／桁巻きの押し忘れ検知</td></tr>
+    <tr><td><strong>20分ごと</strong></td><td>Todoist の取り込み・桁巻きの反映・進捗の再計算</td></tr>
+    <tr><td><strong>毎週 月曜 8:30</strong></td><td>期限に遅れている節目（マイルストーン）の通知。<strong>遅れが無い週は送りません</strong></td></tr>
+  </table>
+
+  <div class="box note">
+    <span class="t">DM が届かない人には、チャンネルで呼びかけます</span>
+    Discord の設定で DM を受け取らないようにしていると、Bot からの催促が届きません。
+    その場合はチャンネルでメンションする形に自動で切り替わります。
+  </div>
+</div>
+
+<div class="page">
+  <h2>付録B　困ったときは</h2>
+
+  <table>
+    <tr><th style="width:38%;">こうなった</th><th>こうしてください</th></tr>
+    <tr>
+      <td><strong>コマンドの一覧に何も出てこない</strong></td>
+      <td>Bot との DM で打っていませんか。コマンドは<strong>サーバーのチャンネル</strong>で使ってください（第0章 0-5）</td>
+    </tr>
+    <tr>
+      <td><strong>「権限が足りません」と出た</strong></td>
+      <td>故障ではありません。表示された<strong>依頼先のロール</strong>の人にお願いしてください（第0章 0-5）</td>
+    </tr>
+    <tr>
+      <td><strong>班長なのにコマンドが使えない</strong></td>
+      <td>名簿の班長フラグと、Discord の班長ロールは別物です。管理者に <code>/set_role</code> でロールへ追加してもらってください（図3-3）</td>
+    </tr>
+    <tr>
+      <td><strong><code>/task</code> が「管理者が登録してください」と返す</strong></td>
+      <td>そのサークルは Todoist をつないでいません。使うなら管理者が <code>/todoist-setup</code> を実行します（4-3）</td>
+    </tr>
+    <tr>
+      <td><strong>桁名がメニューに出てこない</strong></td>
+      <td>まだ登録されていません。班長以上が <code>/layer keta-add</code> で追加します</td>
+    </tr>
+    <tr>
+      <td><strong>班が選べない</strong></td>
+      <td>まだ班が登録されていません。管理者が <code>/setup</code> か <code>/team-add</code> で追加します</td>
+    </tr>
+    <tr>
+      <td><strong>班のチャンネルにタスクが流れてこない</strong></td>
+      <td>セクション・班・チャンネルのどこかがつながっていません。<code>/task sections</code> で確認してください（図3-1）</td>
+    </tr>
+    <tr>
+      <td><strong>手で入れた進捗率が上書きされる／されない</strong></td>
+      <td>桁を紐付けたノードは自動計算です。手で数字を入れると手入力に切り替わり、自動更新が止まります（2-2）</td>
+    </tr>
+    <tr>
+      <td><strong>日程が決まったのにリマインドが来ない</strong></td>
+      <td><code>/schedule confirm</code> がまだです。確定を登録して初めて前日・当日の通知が出ます（2-1）</td>
+    </tr>
+    <tr>
+      <td><strong>桁巻きの記録が残っていない</strong></td>
+      <td><code>/layer end</code> を押し忘れると、12時間で自動的に取り消されます（1-2）</td>
+    </tr>
+    <tr>
+      <td><strong>Bot の反応がない</strong></td>
+      <td><code>/ping</code> と <code>/health</code> で生きているかを確認できます。動いていなければ管理者へ連絡してください</td>
+    </tr>
+  </table>
+
+  <h3>赤い字のエラーが出たとき</h3>
+  <table>
+    <tr><th style="width:30%;">表示</th><th>意味と対処</th></tr>
+    <tr><td><code>INVALID_DATETIME</code></td><td>日時の書き方が違います。<code>2026-07-03 19:00</code> の形で入れ直してください</td></tr>
+    <tr><td><code>PERMISSION_DENIED</code></td><td>権限が足りません。表示された依頼先の人にお願いしてください</td></tr>
+    <tr><td><code>ROLE_NOT_FOUND</code></td><td>指定したロールが見つかりません。選び直してください</td></tr>
+    <tr><td><code>TODOIST_API_FAILED</code></td><td>Todoist 側の不調です。少し待って再実行。続くときは <code>/health</code> で状態を確認</td></tr>
+    <tr><td><code>DM_FORBIDDEN</code></td><td>DM を受け取らない設定です。自動でチャンネル通知に切り替わります</td></tr>
+    <tr><td><code>MESSAGE_NOT_FOUND</code></td><td>投票メッセージが消えています。作り直してください</td></tr>
+  </table>
+
+</div>
+
+<div class="page">
+  <h2>付録C　権限のまとめ</h2>
+
+  <table>
+    <tr>
+      <th style="width:40%;">代表的な操作</th>
+      <th style="text-align:center;">L1<br>一般</th>
+      <th style="text-align:center;">L2<br>班長</th>
+      <th style="text-align:center;">L3<br>幹部</th>
+      <th style="text-align:center;">L4<br>管理者</th>
+    </tr>
+    <tr><td>出欠に答える・桁巻きを記録する・進捗を見る</td>
+      <td style="text-align:center; color:#2f9e6b; font-weight:700;">○</td>
+      <td style="text-align:center; color:#2f9e6b; font-weight:700;">○</td>
+      <td style="text-align:center; color:#2f9e6b; font-weight:700;">○</td>
+      <td style="text-align:center; color:#2f9e6b; font-weight:700;">○</td></tr>
+    <tr><td>日程調整をつくる・確定する／進捗を更新する</td>
+      <td style="text-align:center; color:#c8ced2;">—</td>
+      <td style="text-align:center; color:#2f9e6b; font-weight:700;">○</td>
+      <td style="text-align:center; color:#2f9e6b; font-weight:700;">○</td>
+      <td style="text-align:center; color:#2f9e6b; font-weight:700;">○</td></tr>
+    <tr><td>名簿を一括設定する／ログを見る／投票を消す・戻す</td>
+      <td style="text-align:center; color:#c8ced2;">—</td>
+      <td style="text-align:center; color:#c8ced2;">—</td>
+      <td style="text-align:center; color:#2f9e6b; font-weight:700;">○</td>
+      <td style="text-align:center; color:#2f9e6b; font-weight:700;">○</td></tr>
+    <tr><td>サーバー設定・班の追加・Todoist 登録・年度替わり</td>
+      <td style="text-align:center; color:#c8ced2;">—</td>
+      <td style="text-align:center; color:#c8ced2;">—</td>
+      <td style="text-align:center; color:#c8ced2;">—</td>
+      <td style="text-align:center; color:#2f9e6b; font-weight:700;">○</td></tr>
+  </table>
+
+  <div class="box tip">
+    <span class="t">迷ったら <code>/help</code></span>
+    カテゴリからコマンドを探せます。<strong>自分の権限では使えないものには 🔒 が付く</strong>ので、
+    「これは誰に頼めばいいか」もその場で分かります。
+    個別のコマンドは <code>/help command:</code> で、引数と必要な権限まで確認できます。
+  </div>
+
+  <div class="footer-note">
+    この説明書は Discord の中でできる操作を扱っています。<br>
+    Bot を自分のサーバーで動かす手順や、障害時の対応については、<br>
+    セットアップ手順書・運用マニュアルをご覧ください。
+  </div>
+</div>
+
+</body>
+</html>
