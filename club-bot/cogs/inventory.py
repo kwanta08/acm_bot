@@ -1,5 +1,5 @@
 """
-Inventory コグ（資材・消耗品の在庫 G4-8 ／ 工具・機材の貸出 G4-9）
+Inventory コグ（資材・消耗品の在庫 G4-8）
 
 人力飛行機で最も痛いのは「プリプレグが無くて桁が巻けない」。
 カーボンプリプレグは納期が数週間で、切れてから気づくと工程が1ヶ月ずれる。
@@ -15,17 +15,7 @@ Inventory コグ（資材・消耗品の在庫 G4-8 ／ 工具・機材の貸出
 違う（AGENTS.md「組織構造は可変」）。マスタ管理は layer_keta と同型で、
 有効フラグとオートコンプリートを持つ。
 
-- /tool list           : 工具一覧と貸出状況（全員）
-- /tool borrow         : 借りる（全員）
-- /tool return         : 返す（全員）
-- /tool add            : 工具の登録（班長以上）
-- /tool remove         : 工具の無効化（班長以上）
-
-`/tool` は `/layer start` → `/layer end` と同じ「開始 → 進行中 → 終了」モデル。
-貸出中かどうかは `tool_loans.returned_at IS NULL` で表す。
-
 閾値割れは (1) 割った瞬間に1回だけ告知、(2) 以降は朝の通知に含める。
-返却予定日の超過は本人へ DM（1貸出につき1回）。どちらも
 `cogs/reminders.py` の daily_morning から呼ぶ。
 """
 
@@ -37,9 +27,7 @@ from discord.ext import commands
 
 from repositories.audit_log_repository import AuditLogRepository
 from repositories.stock_repository import StockRepository
-from repositories.tool_repository import ToolRepository
 from services.stock_service import crossed_below, format_amount, is_low, low_items
-from services.tool_service import loan_status_label
 from utils.embeds import (
     MAX_EMBED_FIELDS,
     add_truncation_note,
@@ -50,13 +38,12 @@ from utils.embeds import (
 )
 from utils.logger import get_logger
 from utils.notify import guild_channel, resolve_notice_channel_id
-from utils.parser import InvalidDatetimeError, now, parse_deadline, to_iso
+from utils.parser import now, to_iso
 from utils.permissions import Level, ensure_guild, require
 
 log = get_logger("inventory")
 
 MAX_ITEM_NAME_LENGTH = 60
-MAX_TOOL_NAME_LENGTH = 60
 MAX_UNIT_LENGTH = 10
 #: 一覧に並べる最大件数（Embed の field 上限に収める）
 MAX_STOCK_FIELDS = MAX_EMBED_FIELDS - 1
@@ -76,7 +63,6 @@ class Inventory(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.repo = StockRepository(bot.db)
-        self.tool_repo = ToolRepository(bot.db)
         self.audit_repo = AuditLogRepository(bot.db)
 
     group = app_commands.Group(name="stock", description="資材・消耗品の在庫")
@@ -370,205 +356,6 @@ class Inventory(commands.Cog):
                 f"**{name}**（増減の履歴は残しています）",
                 executor=interaction.user.display_name,
             ),
-            ephemeral=True,
-        )
-
-    # =================================================================
-    # /tool — 工具・機材の貸出（G4-9）
-    # =================================================================
-    tool_group = app_commands.Group(name="tool", description="工具・機材の貸出")
-
-    async def _tool_autocomplete(
-        self, interaction: discord.Interaction, current: str
-    ) -> list[app_commands.Choice[str]]:
-        if interaction.guild is None:
-            return []
-        names = await self.tool_repo.list_tool_names(interaction.guild.id)
-        return [
-            app_commands.Choice(name=n, value=n) for n in names if current.lower() in n.lower()
-        ][:25]
-
-    @tool_group.command(name="list", description="工具の一覧と貸出状況を表示します。")
-    @require(Level.L1)
-    async def tool_list(self, interaction: discord.Interaction):
-        await interaction.response.defer(ephemeral=True)
-        guild_id = await ensure_guild(interaction)
-        if guild_id is None:
-            return
-        tools = await self.tool_repo.list_tools(guild_id)
-        if not tools:
-            await interaction.followup.send(
-                embed=empty_state_embed(
-                    "工具一覧", "登録済みの工具がありません。", "/tool add"
-                ),
-                ephemeral=True,
-            )
-            return
-        loans = {
-            int(loan["tool_id"]): loan for loan in await self.tool_repo.list_open_loans(guild_id)
-        }
-        today = now().date()
-        embed = info_embed(
-            "工具一覧", f"全 {len(tools)} 点 / 貸出中 {len(loans)} 点"
-        )
-        for tool in tools[:MAX_STOCK_FIELDS]:
-            loan = loans.get(int(tool["tool_id"]))
-            value = loan_status_label(loan, today)
-            if loan is not None:
-                value += f"\n借用者: <@{loan['user_id']}>"
-            if tool.get("note"):
-                value += f"\n{tool['note']}"
-            embed.add_field(name=str(tool["tool_name"]), value=value, inline=False)
-        add_truncation_note(embed, len(tools), MAX_STOCK_FIELDS)
-        await interaction.followup.send(embed=embed, ephemeral=True)
-
-    @tool_group.command(name="add", description="工具を登録します（班長以上）。")
-    @app_commands.describe(tool="工具名", note="メモ（保管場所など。任意）")
-    @require(Level.L2)
-    async def tool_add(
-        self, interaction: discord.Interaction, tool: str, note: str | None = None
-    ):
-        await interaction.response.defer(ephemeral=True)
-        guild_id = await ensure_guild(interaction)
-        if guild_id is None:
-            return
-        name = (tool or "").strip()
-        if not name or len(name) > MAX_TOOL_NAME_LENGTH:
-            await interaction.followup.send(
-                embed=error_embed(f"工具名は1〜{MAX_TOOL_NAME_LENGTH}文字で指定してください。"),
-                ephemeral=True,
-            )
-            return
-        await self.tool_repo.add_tool(
-            guild_id, name, str(interaction.user.id), to_iso(now()), note
-        )
-        await self._audit(guild_id, interaction, "tool.add", name, note or "")
-        await interaction.followup.send(
-            embed=success_embed(
-                "工具を登録しました", f"**{name}**", executor=interaction.user.display_name
-            ),
-            ephemeral=True,
-        )
-
-    @tool_group.command(name="remove", description="工具を無効化します（班長以上）。")
-    @app_commands.describe(tool="無効化する工具名")
-    @app_commands.autocomplete(tool=_tool_autocomplete)
-    @require(Level.L2)
-    async def tool_remove(self, interaction: discord.Interaction, tool: str):
-        await interaction.response.defer(ephemeral=True)
-        guild_id = await ensure_guild(interaction)
-        if guild_id is None:
-            return
-        name = (tool or "").strip()
-        if not await self.tool_repo.deactivate_tool(guild_id, name):
-            await interaction.followup.send(
-                embed=error_embed(f"工具「{tool}」は登録されていません。"), ephemeral=True
-            )
-            return
-        await self._audit(guild_id, interaction, "tool.remove", name, "")
-        await interaction.followup.send(
-            embed=success_embed(
-                "工具を無効化しました",
-                f"**{name}**（貸出の履歴は残しています）",
-                executor=interaction.user.display_name,
-            ),
-            ephemeral=True,
-        )
-
-    @tool_group.command(name="borrow", description="工具を借りたことを記録します。")
-    @app_commands.describe(
-        tool="工具名", due="返却予定日（YYYY-MM-DD。任意）", note="用途（任意）"
-    )
-    @app_commands.autocomplete(tool=_tool_autocomplete)
-    @require(Level.L1)
-    async def tool_borrow(
-        self,
-        interaction: discord.Interaction,
-        tool: str,
-        due: str | None = None,
-        note: str | None = None,
-    ):
-        await interaction.response.defer(ephemeral=True)
-        guild_id = await ensure_guild(interaction)
-        if guild_id is None:
-            return
-        name = (tool or "").strip()
-        row = await self.tool_repo.get_tool(guild_id, name)
-        if row is None or not row.get("active_flag"):
-            await interaction.followup.send(
-                embed=error_embed(
-                    f"工具「{tool}」は登録されていません。`/tool add` で登録してください。"
-                ),
-                ephemeral=True,
-            )
-            return
-        tool_id = int(row["tool_id"])
-        open_loan = await self.tool_repo.get_open_loan(guild_id, tool_id)
-        if open_loan is not None:
-            await interaction.followup.send(
-                embed=error_embed(
-                    f"**{name}** は貸出中です（借用者: <@{open_loan['user_id']}>）。\n"
-                    "返却されてから借りてください。"
-                ),
-                ephemeral=True,
-            )
-            return
-
-        due_date = None
-        if due:
-            try:
-                due_date = parse_deadline(due).date().isoformat()
-            except InvalidDatetimeError:
-                await interaction.followup.send(
-                    embed=error_embed(
-                        "返却予定日は `2026-09-01` の形式で指定してください。"
-                    ),
-                    ephemeral=True,
-                )
-                return
-
-        await self.tool_repo.borrow(
-            guild_id, tool_id, str(interaction.user.id), to_iso(now()), due_date, note
-        )
-        body = f"**{name}** を借りました。"
-        # 予定日を決めていない貸出を「期限なし」と正直に書く（ADR 0021）
-        body += f"\n返却予定: {due_date}" if due_date else "\n返却予定日は未設定です。"
-        await interaction.followup.send(
-            embed=success_embed("貸出を記録しました", body, executor=interaction.user.display_name),
-            ephemeral=True,
-        )
-
-    @tool_group.command(name="return", description="工具を返したことを記録します。")
-    @app_commands.describe(tool="工具名")
-    @app_commands.autocomplete(tool=_tool_autocomplete)
-    @require(Level.L1)
-    async def tool_return(self, interaction: discord.Interaction, tool: str):
-        await interaction.response.defer(ephemeral=True)
-        guild_id = await ensure_guild(interaction)
-        if guild_id is None:
-            return
-        name = (tool or "").strip()
-        row = await self.tool_repo.get_tool(guild_id, name)
-        if row is None:
-            await interaction.followup.send(
-                embed=error_embed(f"工具「{tool}」は登録されていません。"), ephemeral=True
-            )
-            return
-        open_loan = await self.tool_repo.get_open_loan(guild_id, int(row["tool_id"]))
-        if open_loan is None:
-            await interaction.followup.send(
-                embed=info_embed("返却の記録はありません", f"**{name}** は貸出中ではありません。"),
-                ephemeral=True,
-            )
-            return
-        # **借りた本人以外でも返却できる。** 工具は現物が戻れば返却であって、
-        # 借りた人が不在のときに記録できないと台帳が実物とずれる
-        await self.tool_repo.give_back(guild_id, int(open_loan["loan_id"]), to_iso(now()))
-        body = f"**{name}** の返却を記録しました。"
-        if str(open_loan["user_id"]) != str(interaction.user.id):
-            body += f"\n（借用者: <@{open_loan['user_id']}>）"
-        await interaction.followup.send(
-            embed=success_embed("返却を記録しました", body, executor=interaction.user.display_name),
             ephemeral=True,
         )
 

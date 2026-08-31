@@ -70,7 +70,7 @@ async def _make_db() -> Database:
 # 1. ホワイトリスト（構造的な保証）
 # =====================================================================
 def test_the_previously_unreachable_tables_are_now_in_the_whitelist():
-    for key in ("audit_log", "seasons", "progress_milestones", "layer_keta", "skill_tags"):
+    for key in ("audit_log", "seasons", "progress_milestones", "layer_keta"):
         assert key in TABLES, f"{key} が export・ダッシュボードから出せないまま"
 
 
@@ -81,7 +81,6 @@ def test_the_new_tables_are_read_only():
         "seasons",
         "progress_milestones",
         "layer_keta",
-        "skill_tags",
         "settings",
     ):
         assert TABLES[key].editable_columns == (), f"{key} に編集可能な列がある"
@@ -113,7 +112,7 @@ def test_the_audit_log_table_requires_l3():
 
 
 def test_the_ordinary_tables_stay_visible_to_everyone():
-    for key in ("tasks", "members", "teams", "schedules", "layer_records", "progress"):
+    for key in ("members", "teams", "schedules", "layer_records", "progress"):
         assert TABLES[key].min_level == 1, f"{key} の閲覧レベルを上げてしまっている"
 
 
@@ -418,7 +417,6 @@ def test_export_zip_contains_the_new_tables():
                 "seasons",
                 "progress_milestones",
                 "layer_keta",
-                "skill_tags",
                 "settings",
             ):
                 assert key in counts

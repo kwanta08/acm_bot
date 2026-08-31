@@ -65,63 +65,9 @@ async def _seed_base(db: Database) -> None:
 
 
 # ---------------------------------------------------------------------
-# tasks
-# ---------------------------------------------------------------------
-def test_import_tasks_dedup_and_dry_run():
-    async def _main():
-        db = await _connected_db()
-        try:
-            await _seed_base(db)  # 班「翼」の解決に必要
-            rows = [
-                ["1", "td1", "既存タスク", "Taro", "翼", "", "3", "open", "111", "2026-01-01", ""],
-                [
-                    "2",
-                    "",
-                    "新規タスク",
-                    "Taro",
-                    "翼",
-                    "2026-07-05",
-                    "2",
-                    "open",
-                    "111",
-                    "2026-01-02",
-                    "",
-                ],
-                ["", "", "IDなしはスキップ", "", "", "", "", "open", "", "", ""],
-            ]
-            # dry-run: DB は変わらないが集計は出る
-            stats = await mig.import_tasks(db, G1, rows, apply=False)
-            assert stats.input_rows == 3
-            assert stats.migrated == 2  # id=1,2 が移行対象
-            assert stats.skipped == 1
-            row = await db.fetchone("SELECT COUNT(*) AS c FROM tasks WHERE guild_id = ?", (G1,))
-            assert row["c"] == 0  # dry-run では書き込まれない
-
-            # apply → 2件移行
-            stats = await mig.import_tasks(db, G1, rows, apply=True)
-            assert stats.migrated == 2
-            row = await db.fetchone(
-                "SELECT title, team_key FROM tasks WHERE guild_id = ? AND local_task_id = 2", (G1,)
-            )
-            assert row["title"] == "新規タスク"
-            assert row["team_key"] == "wing"  # 班名→キー解決
-
-            # 再実行（冪等）: 既存 ID はスキップされ増えない
-            stats = await mig.import_tasks(db, G1, rows, apply=True)
-            assert stats.migrated == 0
-            assert stats.skipped == 3
-            row = await db.fetchone("SELECT COUNT(*) AS c FROM tasks WHERE guild_id = ?", (G1,))
-            assert row["c"] == 2
-        finally:
-            await db.close()
-
-    run(_main())
-
-
-# ---------------------------------------------------------------------
 # members
 # ---------------------------------------------------------------------
-def test_import_members_and_skill_registration():
+def test_import_members_dedup_and_dry_run():
     async def _main():
         db = await _connected_db()
         try:
@@ -140,12 +86,8 @@ def test_import_members_and_skill_registration():
             m = await repo.get_member(G1, "222")
             assert m["display_name"] == "Jiro"
             assert m["primary_team"] == "wing"
-            assert sorted(m["skills"]) == ["CAD", "はんだ"]
-            # 技能タグがギルドのマスタに自動登録されている
-            rows = await db.fetchall(
-                "SELECT skill_name FROM skill_tags WHERE guild_id = ? ORDER BY skill_name", (G1,)
-            )
-            assert [r["skill_name"] for r in rows] == ["CAD", "はんだ"]
+            # 旧シートの「技能」列は取り込まない（v22 で技能タグ機能ごと廃止）
+            assert "skills" not in m
 
             # 再実行（冪等）
             stats = await mig.import_members(db, G1, rows, apply=True)
@@ -232,10 +174,8 @@ def test_import_layer_rows_dedup():
 
 
 if __name__ == "__main__":
-    test_import_tasks_dedup_and_dry_run()
-    print("test_import_tasks_dedup_and_dry_run: OK")
-    test_import_members_and_skill_registration()
-    print("test_import_members_and_skill_registration: OK")
+    test_import_members_dedup_and_dry_run()
+    print("test_import_members_dedup_and_dry_run: OK")
     test_import_attendance_resolution_and_dedup()
     print("test_import_attendance_resolution_and_dedup: OK")
     test_import_layer_rows_dedup()

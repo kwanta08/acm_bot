@@ -1,7 +1,7 @@
 -- =====================================================================
--- 021_club_name_key.sql
+-- 023_club_name_key.sql
 --
--- サークル名の設定キーを CLUB_NAME に統一する（スキーマバージョン 22。D2-1）。
+-- サークル名の設定キーを CLUB_NAME に統一する（スキーマバージョン 24。D2-1）。
 --
 -- 背景:
 --   ダッシュボードの設定 API は「サークル名」を GUILD_NAME キーで保存していたが、
@@ -25,7 +25,7 @@
 --
 -- 適用方法:
 --   通常は bot / dashboard 起動時に utils/db.py の
---   _migrate_v22_club_name_key() が自動適用する（冪等）。
+--   _migrate_v24_club_name_key() が自動適用する（冪等）。
 --   手動で当てる場合のみ、以下を実行する。
 -- =====================================================================
 
@@ -38,5 +38,5 @@ WHERE s.setting_key = 'GUILD_NAME'
     WHERE c.guild_id = s.guild_id AND c.setting_key = 'CLUB_NAME'
   );
 
--- スキーマバージョン更新（SQLite: PRAGMA user_version = 22 /
--- PostgreSQL: UPDATE schema_meta SET version = 22 WHERE id = 1）
+-- スキーマバージョン更新（SQLite: PRAGMA user_version = 24 /
+-- PostgreSQL: UPDATE schema_meta SET version = 24 WHERE id = 1）

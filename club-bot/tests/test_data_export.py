@@ -63,13 +63,12 @@ async def _connected_db() -> Database:
 
 
 async def _seed(
-    db: Database, guild_id: int, *, tasks: int, members: int, title_prefix: str
+    db: Database, guild_id: int, *, teams: int, members: int, title_prefix: str
 ) -> None:
-    for i in range(tasks):
+    for i in range(teams):
         await db.execute(
-            "INSERT INTO tasks (guild_id, title, status, created_by, created_at)"
-            " VALUES (?, ?, 'open', 'tester', '2026-01-01')",
-            (guild_id, f"{title_prefix}タスク{i}"),
+            "INSERT INTO teams (guild_id, team_key, team_name) VALUES (?, ?, ?)",
+            (guild_id, f"{title_prefix.lower()}t{i}", f"{title_prefix}班{i}"),
         )
     for i in range(members):
         # user_id は Discord のユーザー ID。guild_id とは無関係の値にする
@@ -93,17 +92,17 @@ def test_export_contains_only_own_guild_rows():
     async def _main():
         db = await _connected_db()
         try:
-            await _seed(db, GA, tasks=3, members=2, title_prefix="A")
-            await _seed(db, GB, tasks=7, members=5, title_prefix="B")
+            await _seed(db, GA, teams=3, members=2, title_prefix="A")
+            await _seed(db, GB, teams=7, members=5, title_prefix="B")
 
             payload, counts = await build_export_zip(db, GA)
-            assert counts["tasks"] == 3
+            assert counts["teams"] == 3
             assert counts["members"] == 2
 
             texts = _zip_texts(payload)
             joined = "\n".join(texts.values())
-            assert "Aタスク0" in joined
-            assert "Bタスク" not in joined, "他サーバーの行が混入している"
+            assert "A班0" in joined
+            assert "B班" not in joined, "他サーバーの行が混入している"
             assert "Bメンバー" not in joined
             assert str(GB) not in joined
         finally:
@@ -116,7 +115,7 @@ def test_export_of_empty_guild_still_has_all_tables():
     async def _main():
         db = await _connected_db()
         try:
-            await _seed(db, GB, tasks=4, members=1, title_prefix="B")
+            await _seed(db, GB, teams=4, members=1, title_prefix="B")
             payload, counts = await build_export_zip(db, GA)
 
             assert set(counts) == set(TABLES)
@@ -136,7 +135,7 @@ def test_export_omits_guild_id_and_secrets():
     async def _main():
         db = await _connected_db()
         try:
-            await _seed(db, GA, tasks=2, members=1, title_prefix="A")
+            await _seed(db, GA, teams=2, members=1, title_prefix="A")
             # Todoist トークン（暗号化済み文字列）を同じ DB に置いておく
             await db.execute(
                 "INSERT INTO todoist_configs (guild_id, api_token_encrypted,"
@@ -179,12 +178,12 @@ def test_csv_has_bom_and_labels():
     async def _main():
         db = await _connected_db()
         try:
-            await _seed(db, GA, tasks=1, members=0, title_prefix="A")
+            await _seed(db, GA, teams=1, members=0, title_prefix="A")
             texts = _zip_texts((await build_export_zip(db, GA))[0])
-            body = texts["tasks.csv"]
+            body = texts["teams.csv"]
             assert body.startswith(CSV_BOM), "BOM が無いと Excel で文字化けする"
             header = body[len(CSV_BOM) :].splitlines()[0]
-            assert "タイトル" in header
+            assert "班名" in header
         finally:
             await db.close()
 
@@ -201,16 +200,15 @@ def test_csv_neutralizes_formula_injection():
     assert csv_safe(None) == ""
 
 
-def test_injected_task_title_is_escaped_in_export():
+def test_injected_team_name_is_escaped_in_export():
     async def _main():
         db = await _connected_db()
         try:
             await db.execute(
-                "INSERT INTO tasks (guild_id, title, status, created_by,"
-                " created_at) VALUES (?, ?, 'open', 'tester', '2026-01-01')",
+                "INSERT INTO teams (guild_id, team_key, team_name) VALUES (?, 'evil', ?)",
                 (GA, '=HYPERLINK("http://evil")'),
             )
-            body = _zip_texts((await build_export_zip(db, GA))[0])["tasks.csv"]
+            body = _zip_texts((await build_export_zip(db, GA))[0])["teams.csv"]
             assert "'=HYPERLINK" in body
             assert "\n=HYPERLINK" not in body
         finally:
@@ -234,8 +232,8 @@ def test_list_all_rows_reads_beyond_display_limit():
     async def _main():
         db = await _connected_db()
         try:
-            await _seed(db, GA, tasks=520, members=0, title_prefix="A")
-            rows = await TableRepository(db).list_all_rows(GA, "tasks")
+            await _seed(db, GA, teams=520, members=0, title_prefix="A")
+            rows = await TableRepository(db).list_all_rows(GA, "teams")
             assert len(rows) == 520, "MAX_LIMIT=500 で打ち切られている"
         finally:
             await db.close()

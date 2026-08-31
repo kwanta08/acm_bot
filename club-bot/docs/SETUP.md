@@ -155,11 +155,11 @@ Todoist の API トークンは **`.env` には書きません**。セキュリ�
 ローカル・小規模運用では SQLite（`DB_PATH`）のままでも動作します。
 
 > かつて閲覧 UI として提供していた Directus / NocoDB 連携は廃止しました
-> （NocoDB の旧手順は [`NOCODB.md`](NOCODB.md) に参照用として残しています）。
+> （NocoDB の旧手順は [`archive/NOCODB.md`](archive/NOCODB.md) に参照用として残しています）。
 
 > 以前のバージョンで使っていた Google Sheets 連携は廃止されました。
 > 旧 Sheets のデータを移す場合は `scripts/migrate_sheets_to_db.py` を使います
-> （[`NOCODB.md`](NOCODB.md) 8章）。
+> （[`archive/NOCODB.md`](archive/NOCODB.md) 8章）。
 
 ---
 
@@ -487,7 +487,7 @@ $ sudo cp ~/club-bot/club-bot/deploy/club-bot.logrotate /etc/logrotate.d/club-bo
     ```bash
     $ cp ~/club-bot/data/club.db ~/club-bot/backup_$(date +%Y%m%d).db
     ```
-  - PostgreSQL 運用: `pg_dump` で定期的に取得（手順は [`NOCODB.md`](NOCODB.md) 5章）。
+  - PostgreSQL 運用: `pg_dump` で定期的に取得（手順は [`archive/NOCODB.md`](archive/NOCODB.md) 5章）。
 - **タスクの控え**：週1回 Discord で `/report export-tasks` を実行して CSV を保存。
 - **状態チェック**：Discord で `/health`、サーバーで `sudo systemctl status club-bot`。
 

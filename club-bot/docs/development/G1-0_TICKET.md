@@ -1,6 +1,11 @@
 # G1-0: ダッシュボードの `row_id` を主キーの型へ変換する
 
-`docs/IMPROVEMENT_TASKS.md` の **Phase G1 の先頭**に入れてください（G1-1 より前）。
+> **内部の作業用ドキュメントです（[development/README.md](README.md)）。**
+> 書かれた時点のスナップショットで、現在のコードとは食い違う記述を含みます。
+> **現状の仕様の根拠には使えません。** 使い方は [`../GUIDE.md`](../GUIDE.md)、
+> 運用は [`../OPERATION.md`](../OPERATION.md) を参照してください。
+
+`docs/development/IMPROVEMENT_TASKS.md` の **Phase G1 の先頭**に入れてください（G1-1 より前）。
 G0-3 の検証で **落ちることが実測で確定**したため、優先度は最上位です。
 
 ---
@@ -23,7 +28,7 @@ G0-3 の検証で **落ちることが実測で確定**したため、優先度�
       - 当初 `CLUB_TEST_PG_DSN=... pytest tests/test_dashboard_edit.py` で検証すると書いていたが、
         **このテストは `CLUB_TEST_PG_DSN` を一度も読まず SQLite 決め打ち**のため、
         実行しても PG 経路は1行も通らない（緑が出ても「測れていない」だけ）。検証方法を差し替えた
-      - `docs/IMPROVEMENT_REPORT.md` の P0-8 は【要検証】から**確定**へ格上げ
+      - `docs/development/IMPROVEMENT_REPORT.md` の P0-8 は【要検証】から**確定**へ格上げ
       - 申し送り: G1-0 として起票
 
 ---
@@ -89,13 +94,13 @@ G0-3 の検証で **落ちることが実測で確定**したため、優先度�
 ```
 /acm-bot-loop
 
-club-bot/docs/IMPROVEMENT_TASKS.md の G1-0 を実装して。
+club-bot/docs/development/IMPROVEMENT_TASKS.md の G1-0 を実装して。
 G0-3 の検証で PostgreSQL では落ちることが実測で確定している（完了ログ参照）。
 
 ## 事前に読むもの
 
 1. IMPROVEMENT_TASKS.md の G1-0 の受入基準・検証・注意
-2. ClaudeVault の decisions/_index.md（/add-dir 済み）。
+2. 開発ノート の decisions/_index.md（/add-dir 済み）。
    特に 0016（外部へ出すテーブル・列はホワイトリストで定義する）と
    0006（本番は PostgreSQL、SQLite は開発・テスト専用）
 3. gotchas/dashboard-tests-silently-skipped.md

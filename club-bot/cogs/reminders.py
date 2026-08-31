@@ -6,16 +6,14 @@ Reminders モジュール（仕様 11.5）。
   - Schedule 締切前催促: 締切1時間前 → 未回答者へ通知
   - Schedule 自動締切: 5分ごと → 締切済み投票を終了
   - 積層セッションの押し忘れ検知: 5分ごと → 本人へ DM / 長すぎるものは自動取り消し
-  - Task 7日以内期限通知: 毎日08:30
   - Task 今日やること通知: 毎日08:30
   - Todoist セクション別通知: 毎日08:30
   - 在庫の閾値割れ通知: 毎日08:30（割れている品目が無い日は送らない）
-  - 工具の返却督促: 毎日08:30（返却予定日を過ぎた貸出の本人へ DM。1貸出1回）
   - 確定日程リマインド: 前日20:00 / 当日08:30
   - 遅延マイルストーン通知: 毎週月曜08:30（遅れが無い週は送らない）
   - 週次ダイジェスト: 指定曜日08:30（WEEKLY_DIGEST_ENABLED が ON のギルドのみ・既定 OFF）
   - データ削除の実行: 毎日04:00
-  - Task 超過通知: 毎日21:00
+  - Task 超過通知: 毎日21:00（Todoist の期限超過タスク）
 通知失敗の扱い（11.5.2）: DM 失敗→チャンネル、API 障害→#bot-log、多重送信防止。
 
 マルチテナント版: 各ループは「参加中の全ギルド」を対象にギルドごと処理する。
@@ -40,14 +38,13 @@ from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.schedule_repository import ScheduleRepository
 from repositories.section_repository import SectionRepository
 from repositories.stock_repository import StockRepository
-from repositories.task_repository import TaskRepository
-from repositories.tool_repository import ToolRepository
+from services import todoist_task_service
 from services.layer_tracking_service import classify_stale_sessions
 from services.milestone_service import days_until_competition, evaluate_all
+from services.parent_chain import PARENT_FIELD_NAME
 from services.progress_sync_service import resolve_default_channel_id
 from services.progress_tree import load_tree
 from services.stock_service import low_items
-from services.tool_service import overdue_loans
 from utils.embeds import task_embed
 from utils.logger import get_logger
 from utils.notify import guild_channel, resolve_notice_channel_id
@@ -137,7 +134,10 @@ def _build_grouped_description(
 ) -> str:
     """
     items: [{"due_date": date, "title": str, "priority": int,
-            "url": str | None, "category": str}]
+            "url": str | None, "category": str, "parent": str | None}]
+
+    parent は任意（進捗プロジェクト通知の「親タスク」パンくず。
+    services/parent_chain.py が組み立てる）。無いタスクには行を出さない。
     """
     today = now().date()
     lines = [
@@ -155,6 +155,8 @@ def _build_grouped_description(
                 line += f" （[開く]({it['url']})）"
             lines.append(line)
             lines.append(f"　　📂 {it['category']}")
+            if it.get("parent"):
+                lines.append(f"　　🧭 {PARENT_FIELD_NAME}: {it['parent']}")
         lines.append("")
     return "\n".join(lines).rstrip()
 
@@ -163,13 +165,11 @@ class Reminders(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.schedule_repo = ScheduleRepository(bot.db)
-        self.task_repo = TaskRepository(bot.db)
         self.member_repo = MemberRepository(bot.db)
         self.section_repo = SectionRepository(bot.db)
         self.log_repo = RemindersLogRepository(bot.db)
         self.session_repo = LayerSessionRepository(bot.db)
         self.stock_repo = StockRepository(bot.db)
-        self.tool_repo = ToolRepository(bot.db)
 
     async def cog_load(self):
         # 起動時にループを開始
@@ -304,59 +304,6 @@ class Reminders(commands.Cog):
         )
         await self._safe_send(guild_id, channel, embed=embed)
         return len(items)
-
-    # ---------- 毎朝 08:30: 工具の返却督促（G4-9） ----------
-    async def _notify_overdue_tools(self, guild_id: int) -> int:
-        """返却予定日を過ぎた貸出の**本人へ** DM する。
-
-        **1貸出につき1回だけ**（`overdue_notified_flag`）。毎朝送ると
-        読まれなくなるうえ、返せない事情がある人を毎日責めることになる。
-        一覧は `/tool list` に常に出ているので、督促は最初の1回で足りる。
-
-        督促の形は G4-2（積層セッションの押し忘れ）と同じ:
-        閾値を超えたものを選び、送れたときだけフラグを立てる。
-        **DM 拒否も「このセッションではもう試さない」側に倒す**——
-        次の tick でも直らないため（G4-2 の設計判断2と同じ）。
-
-        予定日が未設定の貸出は督促しない（ADR 0021）。
-        """
-        loans = overdue_loans(await self.tool_repo.list_open_loans(guild_id), now().date())
-        if not loans:
-            return 0
-        guild = self.bot.get_guild(guild_id)
-        sent = 0
-        for loan in loans:
-            member = None
-            if guild is not None:
-                try:
-                    member = guild.get_member(int(loan.user_id))
-                except (TypeError, ValueError):
-                    member = None
-            if member is None:
-                # 退部済み・キャッシュ欠落。**フラグは立てない**
-                # （借用者が戻ってきたら督促できるように）
-                log.info(
-                    "工具の督促先が見つかりません (guild=%s, loan=%s)", guild_id, loan.loan_id
-                )
-                continue
-            text = (
-                f"🔧 **{loan.tool_name}** の返却予定日"
-                f"（{loan.due_date.isoformat()}）を {loan.days_over} 日過ぎています。\n"
-                "返却したら `/tool return` で記録してください。"
-            )
-            try:
-                await member.send(text)
-            except discord.Forbidden:
-                # DM 拒否。次の日も直らないので再試行しない
-                log.info("工具の督促 DM を拒否されました (guild=%s)", guild_id)
-            except discord.HTTPException as e:
-                # 一時障害。フラグを立てず翌朝また試す
-                log.warning("工具の督促 DM に失敗 (guild=%s): %s", guild_id, e)
-                continue
-            else:
-                sent += 1
-            await self.tool_repo.set_overdue_notified(guild_id, loan.loan_id, True)
-        return sent
 
     # ---------- 5分ごと: 積層セッションの押し忘れ検知（G4-2） ----------
     async def _process_layer_sessions(self, guild_id: int) -> int:
@@ -497,14 +444,11 @@ class Reminders(commands.Cog):
             # 各ジョブを個別に握る。1つの失敗で同じギルドの残りのジョブや
             # 他ギルドの通知、ループ自体を止めない
             for label, job in (
-                ("7日以内タスク通知", self._notify_due_within_7days),
                 ("今日やること通知", self._notify_today_label),
                 # Todoist セクション別の期限7日以内/超過タスクを各班チャンネルへ
                 ("セクション別通知", self.push_section_tasks),
                 # 閾値を割っている資材（G4-8）。割れが無い日は何も送らない
                 ("在庫の閾値割れ通知", self._notify_low_stock),
-                # 返却予定日を過ぎた工具（G4-9）。超過が無い日は何も送らない
-                ("工具の返却督促", self._notify_overdue_tools),
             ):
                 try:
                     await job(guild.id)
@@ -517,25 +461,9 @@ class Reminders(commands.Cog):
 
     @tasks.loop(time=time(hour=21, minute=0, tzinfo=TZ))
     async def daily_night(self):
-        today = now().date()
         for guild in list(self.bot.guilds):
             try:
-                tasks_ = await self.task_repo.list_overdue(guild.id, today.isoformat())
-            except Exception as e:  # noqa: BLE001
-                log.warning("超過タスク取得失敗 (guild=%s): %s", guild.id, e)
-                continue
-            if not tasks_:
-                continue
-            try:
-                await self._dispatch_by_team(
-                    guild.id,
-                    tasks_,
-                    title="⚠️【期限超過タスク】対応をお願いします",
-                    reminder_type="task_overdue",
-                    period_desc="期限超過",
-                    period_start=today,
-                    period_end=today,
-                )
+                await self._notify_overdue_tasks(guild.id)
             except Exception as e:  # noqa: BLE001  (ギルド間の影響を遮断)
                 log.warning("超過タスク通知失敗 (guild=%s): %s", guild.id, type(e).__name__)
 
@@ -900,27 +828,6 @@ class Reminders(commands.Cog):
             await self._safe_send(guild_id, channel, content=f"```\n{summary}\n```")
         return deleted
 
-    async def _notify_due_within_7days(self, guild_id: int):
-        today = now().date()
-        until_date = today + timedelta(days=7)
-        until = until_date.isoformat()
-        try:
-            tasks_ = await self.task_repo.list_due_within(guild_id, today.isoformat(), until)
-        except Exception as e:  # noqa: BLE001
-            log.warning("7日以内タスク取得失敗 (guild=%s): %s", guild_id, e)
-            return
-        if not tasks_:
-            return
-        await self._dispatch_by_team(
-            guild_id,
-            tasks_,
-            title="【今週の期限タスク】今日から7日以内",
-            reminder_type="task_due_7days",
-            period_desc="今日から7日以内",
-            period_start=today,
-            period_end=until_date,
-        )
-
     async def _notify_today_label(self, guild_id: int):
         svc = await self.bot.todoist_manager.for_guild(guild_id)
         if not svc.enabled:
@@ -1128,23 +1035,67 @@ class Reminders(commands.Cog):
             for t in teams
         }
 
-    async def _dispatch_by_team(
+    # ---------- 毎晩 21:00: 期限超過タスクの通知（Todoist 直読み） ----------
+    async def _notify_overdue_tasks(self, guild_id: int) -> int:
+        """期限を過ぎた Todoist タスクを、班チャンネル（無ければ既定）へ通知する。
+
+        タスクの正本は Todoist だけなので、ここも Todoist を直接読む。
+        班への振り分けは「Todoist セクション ↔ 班」の紐付けで行う
+        （紐付いていないセクション・セクションなしは既定チャンネル行き）。
+        """
+        svc = await self.bot.todoist_manager.for_guild(guild_id)
+        if not svc.enabled:
+            return 0
+        try:
+            tasks_ = await todoist_task_service.list_open_tasks(svc)
+        except Exception as e:  # noqa: BLE001
+            log.warning("超過タスク取得失敗 (guild=%s): %s", guild_id, type(e).__name__)
+            return 0
+        today = now().date()
+        overdue = todoist_task_service.overdue(tasks_, today)
+        if not overdue:
+            return 0
+        return await self._dispatch_todoist_tasks(
+            guild_id,
+            overdue,
+            title="⚠️【期限超過タスク】対応をお願いします",
+            reminder_type="task_overdue",
+            period_desc="期限超過",
+            period_start=min(t.due_date for t in overdue),
+            period_end=today,
+        )
+
+    async def _dispatch_todoist_tasks(
         self,
         guild_id: int,
-        tasks_: list[dict],
+        tasks_: list,
         *,
         title: str,
         reminder_type: str,
         period_desc: str,
         period_start,
         period_end,
-    ) -> None:
+    ) -> int:
+        """Todoist タスクを班チャンネルへ振り分けて通知する。
+
+        セクション → 班の解決に失敗したものは既定のタスクチャンネルへ
+        まとめる（送り先が無いものを黙って捨てない）。
+        """
         team_map = await self._team_map(guild_id)
         default_channel = await self._task_channel(guild_id)
+        try:
+            links = await self.section_repo.list_links(guild_id)
+        except Exception as e:  # noqa: BLE001
+            log.warning("セクション紐付けの取得失敗 (guild=%s): %s", guild_id, type(e).__name__)
+            links = []
+        section_team = {link["section_id"]: link["team_key"] for link in links}
+        section_name = {
+            link["section_id"]: (link.get("section_name") or link["section_id"]) for link in links
+        }
 
-        buckets: dict[str | None, list[dict]] = {}
+        buckets: dict[str | None, list] = {}
         for t in tasks_:
-            team_key = t.get("team_key") or None
+            team_key = section_team.get(t.section_id) if t.section_id else None
             info = team_map.get(team_key) if team_key else None
             # 班チャンネルは TEXT 列で、手入力・旧データに数字以外が入りうる。
             # 数字として読めないものは既定チャンネル行きにまとめる
@@ -1153,6 +1104,7 @@ class Reminders(commands.Cog):
             else:
                 buckets.setdefault(None, []).append(t)
 
+        sent = 0
         for bucket_key, bucket_tasks in buckets.items():
             if bucket_key is None:
                 channel = default_channel
@@ -1172,28 +1124,19 @@ class Reminders(commands.Cog):
                 )
                 continue
 
-            items = []
-            for t in bucket_tasks:
-                # due_date は TEXT 列。壊れた値の1件で通知全体を落とさない
-                try:
-                    due_date = from_iso(t["due_date"]).date()
-                except (TypeError, ValueError):
-                    log.warning(
-                        "期限を解釈できないタスクをスキップ (guild=%s): %r",
-                        guild_id,
-                        t.get("due_date"),
-                    )
-                    continue
-                url = _todoist_task_url(t["todoist_task_id"]) if t.get("todoist_task_id") else None
-                items.append(
-                    {
-                        "due_date": due_date,
-                        "title": t["title"],
-                        "priority": t.get("priority") or 1,
-                        "url": url,
-                        "category": "班別タスク",
-                    }
-                )
+            items = [
+                {
+                    "due_date": t.due_date,
+                    "title": t.content,
+                    "priority": t.priority,
+                    "url": t.url,
+                    "category": section_name.get(t.section_id, "未分類")
+                    if t.section_id
+                    else "未分類",
+                }
+                for t in bucket_tasks
+                if t.due_date is not None
+            ]
             if not items:
                 continue
 
@@ -1209,12 +1152,8 @@ class Reminders(commands.Cog):
                 str(channel.id),
                 "success",
             )
-
-    def _assignee_name(self, task: dict, guild) -> str:
-        if task.get("assignee_id") and guild:
-            m = guild.get_member(int(task["assignee_id"]))
-            return m.display_name if m else "不明"
-        return "未割当"
+            sent += 1
+        return sent
 
     async def _safe_send(self, guild_id: int, channel, **kwargs):
         try:

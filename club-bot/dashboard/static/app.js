@@ -315,7 +315,6 @@ function svg(tag, attrs = {}, children = []) {
 }
 
 const ICON_PATHS = {
-  tasks: ["M4 12.5l5 5L20 6.5"],
   members: ["M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z", "M4 20c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5"],
   teams: ["M4 4h6v6H4Z", "M14 4h6v6h-6Z", "M4 14h6v6H4Z", "M14 14h6v6h-6Z"],
   schedules: ["M4 6h16v14H4Z", "M4 10h16", "M8 3v5", "M16 3v5"],
@@ -341,8 +340,6 @@ const DOCK_LABELS = {
   progress_snapshots: "履歴",
   stock_items: "在庫",
   stock_movements: "入出庫",
-  tool_loans: "貸出",
-  skill_tags: "技能",
   audit_log: "ログ",
 };
 

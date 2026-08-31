@@ -1,7 +1,8 @@
-"""週次ダイジェスト（G4-5）の期間と集計の純関数。
+"""週次ダイジェスト（G4-5）の期間の純関数。
 
-`/report weekly` と、月曜朝の自動投稿が**同じ数字**を出すために、
-「先週」の定義と数え方をここ1箇所に置く。
+`/report weekly` と、月曜朝の自動投稿が**同じ期間**を見るために、
+「先週」の定義をここ1箇所に置く。完了タスクの件数は Todoist から
+取る（スキーマ v22 でローカルの tasks テーブルを廃止した）。
 
 **ADR 0023 は覆さない。** マイルストーン警告（遅延があるときだけ送る）と
 このダイジェスト（週次の実績報告）は別物として共存させる。
@@ -11,11 +12,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
 from datetime import datetime, time, timedelta
-from typing import Any
 
-from utils.parser import TZ, from_iso
+from utils.parser import TZ
 
 #: ダイジェストを送る曜日の既定（0 = 月曜）
 DEFAULT_DIGEST_WEEKDAY = 0
@@ -30,29 +29,6 @@ def last_week_range(current: datetime) -> tuple[datetime, datetime]:
     day = datetime.combine(current.date(), time(0, 0), tzinfo=current.tzinfo or TZ)
     this_monday = day - timedelta(days=day.weekday())
     return this_monday - timedelta(days=7), this_monday
-
-
-def count_completed_between(
-    tasks: Iterable[Mapping[str, Any]], start: datetime, end: datetime
-) -> int:
-    """`completed_at` が `[start, end)` に入るタスクの件数（純関数）。
-
-    ISO 文字列の大小比較ではなく datetime に直して比べる。
-    オフセット表記が混ざると文字列比較が黙って壊れるため
-    （`+09:00` と `Z` は辞書順で逆転する）。読めない行は数えない。
-    """
-    count = 0
-    for row in tasks:
-        raw = row.get("completed_at")
-        if not raw:
-            continue
-        try:
-            done_at = from_iso(str(raw))
-        except (TypeError, ValueError):
-            continue
-        if start <= done_at < end:
-            count += 1
-    return count
 
 
 def week_label(start: datetime, end: datetime) -> str:

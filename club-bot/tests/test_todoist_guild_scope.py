@@ -65,21 +65,18 @@ def test_unconfigured_guild_disabled_and_guided():
         run(db.close())
 
 # ---------------------------------------------------------------------
-# 同期失敗を利用者に見せる（G2-7）
+# Todoist が正本（スキーマ v22）
 #
-# /task done・delete は Todoist 側の操作が失敗しても except TodoistError:
-# pass で握りつぶし、必ず「完了にしました」と返していた。Todoist 側は
-# 未完了のまま残り、翌朝の通知に出続ける
-# （gotcha `todoist-completed-tasks-not-detected` の同期の片方向性と関連）。
-# ローカル完了は維持したまま、成功メッセージに同期結果を明記する。
+# 以前はローカル DB にタスクの複製を持ち、Todoist 側の close/delete が
+# 失敗しても「ローカルは完了、警告つき」で返していた（G2-7）。
+# 複製をやめた今は**片側だけ成立する状態そのものが作れない**——
+# Todoist が失敗したら操作は失敗し、TODOIST_API_FAILED を見せて終わる。
 # ---------------------------------------------------------------------
-import logging
 from types import SimpleNamespace
 from unittest import mock
 
 import discord
 
-from repositories.task_repository import TaskRepository
 from services.todoist_service import TodoistError
 
 
@@ -107,26 +104,53 @@ class _SyncInteraction:
         return f"{embed.title or ''} {embed.description or ''}"
 
 
+_RAW_TASK = SimpleNamespace(
+    id="td_1",
+    content="主桁の積層",
+    description="",
+    due=None,
+    priority=1,
+    section_id=None,
+)
+
+
 class _FailingTodoist:
     """close/delete が常に失敗する有効サービス。"""
 
     enabled = True
+    project_id = None
 
-    async def close_task(self, todoist_task_id):
+    async def get_task(self, task_id):
+        return _RAW_TASK
+
+    async def close_task(self, task_id):
         raise TodoistError("boom")
 
-    async def delete_task(self, todoist_task_id):
+    async def delete_task(self, task_id):
         raise TodoistError("boom")
 
 
 class _WorkingTodoist:
     enabled = True
+    project_id = None
 
-    async def close_task(self, todoist_task_id):
-        return None
+    def __init__(self):
+        self.closed: list[str] = []
+        self.deleted: list[str] = []
 
-    async def delete_task(self, todoist_task_id):
-        return None
+    async def get_task(self, task_id):
+        return _RAW_TASK
+
+    async def close_task(self, task_id):
+        self.closed.append(task_id)
+
+    async def delete_task(self, task_id):
+        self.deleted.append(task_id)
+
+
+class _DisabledTodoist:
+    enabled = False
+    project_id = None
 
 
 def _cog_with_svc(db, svc):
@@ -134,83 +158,149 @@ def _cog_with_svc(db, svc):
         async def for_guild(self, guild_id):
             return svc
 
-    return Tasks(SimpleNamespace(db=db, guilds=[], todoist_manager=_Manager(),
-                                 get_channel=lambda cid: None))
-
-
-async def _seed_linked_task(db) -> int:
-    return await TaskRepository(db).create_task(
-        G1, "主桁の積層", created_by="501", todoist_task_id="td_1"
+    return Tasks(
+        SimpleNamespace(
+            db=db, guilds=[], todoist_manager=_Manager(), get_channel=lambda cid: None
+        )
     )
 
 
-def test_done_shows_a_warning_when_todoist_close_fails(caplog):
-    """ローカルは完了、ただし同期失敗を成功メッセージに明記すること。"""
+def test_done_fails_loudly_when_todoist_close_fails():
+    """Todoist が閉じられなければ「完了にしました」とは言わないこと。"""
 
     async def _main():
         db = Database(_tmp_db_path())
         await db.connect()
         try:
-            task_id = await _seed_linked_task(db)
             cog = _cog_with_svc(db, _FailingTodoist())
             interaction = _SyncInteraction()
-            with caplog.at_level(logging.WARNING, logger="tasks"):
-                await Tasks.done.callback(cog, interaction, task_id=task_id)
-
-            # ローカル完了は維持
-            row = await TaskRepository(db).get_task(G1, task_id)
-            assert row["status"] == "done"
+            await Tasks.done.callback(cog, interaction, task_id="td_1")
 
             text = interaction.text()
-            assert "完了にしました" in text
-            assert "⚠️" in text and "Todoist 上で直接完了" in text, text
-
-            # guild_id と task_id が warning に出ること
-            warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
-            assert any(str(G1) in w and str(task_id) in w for w in warnings), warnings
+            assert "完了にしました" not in text, text
+            assert "TODOIST_API_FAILED" in text, text
         finally:
             await db.close()
 
     run(_main())
 
 
-def test_done_has_no_warning_when_todoist_close_succeeds():
+def test_done_closes_the_task_in_todoist():
     async def _main():
         db = Database(_tmp_db_path())
         await db.connect()
         try:
-            task_id = await _seed_linked_task(db)
-            cog = _cog_with_svc(db, _WorkingTodoist())
+            svc = _WorkingTodoist()
+            cog = _cog_with_svc(db, svc)
             interaction = _SyncInteraction()
-            await Tasks.done.callback(cog, interaction, task_id=task_id)
-            assert "⚠️" not in interaction.text()
+            await Tasks.done.callback(cog, interaction, task_id="td_1")
+            assert svc.closed == ["td_1"]
+            assert "完了にしました" in interaction.text()
         finally:
             await db.close()
 
     run(_main())
 
 
-def test_delete_shows_a_warning_when_todoist_delete_fails(caplog):
+def test_delete_fails_loudly_when_todoist_delete_fails():
     async def _main():
         db = Database(_tmp_db_path())
         await db.connect()
         try:
-            task_id = await _seed_linked_task(db)
             cog = _cog_with_svc(db, _FailingTodoist())
             interaction = _SyncInteraction()
-            with caplog.at_level(logging.WARNING, logger="tasks"):
-                await Tasks.delete.callback(cog, interaction, task_id=task_id)
-
-            # ローカルの削除（論理削除 = archived）は維持
-            row = await TaskRepository(db).get_task(G1, task_id)
-            assert row["status"] == "archived"
+            await Tasks.delete.callback(cog, interaction, task_id="td_1")
             text = interaction.text()
-            assert "削除しました" in text
-            assert "⚠️" in text and "Todoist 上で直接削除" in text, text
-            warnings = [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
-            assert any(str(G1) in w and str(task_id) in w for w in warnings), warnings
+            assert "削除しました" not in text, text
+            assert "TODOIST_API_FAILED" in text, text
         finally:
             await db.close()
 
     run(_main())
 
+
+def test_delete_removes_the_task_in_todoist():
+    async def _main():
+        db = Database(_tmp_db_path())
+        await db.connect()
+        try:
+            svc = _WorkingTodoist()
+            cog = _cog_with_svc(db, svc)
+            interaction = _SyncInteraction()
+            await Tasks.delete.callback(cog, interaction, task_id="td_1")
+            assert svc.deleted == ["td_1"]
+            assert "削除しました" in interaction.text()
+        finally:
+            await db.close()
+
+    run(_main())
+
+
+def test_task_commands_refuse_to_run_without_todoist():
+    """未設定ギルドでは、成功したふりをせず設定を促して終わること。"""
+
+    async def _main():
+        db = Database(_tmp_db_path())
+        await db.connect()
+        try:
+            for callback, kwargs in (
+                (Tasks.add.callback, {"title": "主桁の積層"}),
+                (Tasks.list_cmd.callback, {}),
+                (Tasks.done.callback, {"task_id": "td_1"}),
+                (Tasks.delete.callback, {"task_id": "td_1"}),
+                (Tasks.overdue.callback, {}),
+            ):
+                cog = _cog_with_svc(db, _DisabledTodoist())
+                interaction = _SyncInteraction()
+                await callback(cog, interaction, **kwargs)
+                text = interaction.text()
+                assert "未設定" in text, text
+                assert "/todoist-setup" in text, text
+        finally:
+            await db.close()
+
+    run(_main())
+
+
+# ---------------------------------------------------------------------
+# SDK の版差（close_task ↔ complete_task）
+#
+# todoist-api-python は v2 が close_task、v3 以降が complete_task。
+# requirements は >=2.1.0 で両方を許すので、どちらでも完了できること。
+# ローカルに複製が無い今、ここが落ちると /task done が丸ごと効かない。
+# ---------------------------------------------------------------------
+def _service_with_api(api):
+    from services.todoist_service import TodoistService
+
+    svc = TodoistService.__new__(TodoistService)
+    svc.enabled = True
+    svc._api = api
+    svc.project_id = None
+    svc.label_name = "今日やること"
+    return svc
+
+
+def test_close_task_uses_close_task_on_sdk_v2():
+    closed: list[str] = []
+    api = SimpleNamespace(close_task=lambda task_id: closed.append(task_id) or True)
+    assert run(_service_with_api(api).close_task("td_1")) is True
+    assert closed == ["td_1"]
+
+
+def test_close_task_falls_back_to_complete_task_on_newer_sdks():
+    completed: list[str] = []
+
+    class _V4Api:
+        def complete_task(self, task_id):
+            completed.append(task_id)
+            return True
+
+    assert run(_service_with_api(_V4Api()).close_task("td_1")) is True
+    assert completed == ["td_1"]
+
+
+def test_close_task_raises_when_the_sdk_has_neither():
+    import pytest
+
+    with pytest.raises(TodoistError):
+        run(_service_with_api(SimpleNamespace()).close_task("td_1"))

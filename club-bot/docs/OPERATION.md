@@ -52,7 +52,7 @@ Bot管理者」というラベルで出ます（`utils/permissions.LEVEL_LABELS`
 ### Data（エクスポート・削除）
 | コマンド | 権限 | 説明 |
 |---|---|---|
-| `/data export` | L4 または Manage Server | このサーバーの主要19テーブルを ZIP（CSV 群）で受け取る。サーバーIDと認証情報は含まれない |
+| `/data export` | L4 または Manage Server | このサーバーの主要14テーブルを ZIP（CSV 群）で受け取る。サーバーIDと認証情報は含まれない |
 | `/data delete` | L4 または Manage Server | データ削除を申告する。確認のためサーバー名の入力が必要。最後のバックアップが添付される |
 | `/data delete-cancel` | L4 または Manage Server | 予約済みの削除を取り消す |
 
@@ -81,27 +81,46 @@ Bot管理者」というラベルで出ます（`utils/permissions.LEVEL_LABELS`
 | `/schedule emoji show` | L4 | 現在の絵文字設定を表示 |
 | `/schedule emoji reset` | L4 | 絵文字設定を既定（✅❓❌）に戻す（ステータス指定可・省略で全部） |
 
-**投票方法**: 候補日ごとに投稿されるメッセージへ ✅(参加) / ❌(不参加) / ❓(未定) でリアクション。
-1候補につき1状態のみ。別の状態を押すと前の状態は自動で外れます。
+**投票方法**: 既定では全候補が1つの**投票ボード**にまとまって投稿されます。
+候補は下部のボタンとして横に並び（Discord モバイルは Embed の inline field を
+縦積みにするため、横並びはボタン行で実現しています）、本文に候補ごとの
+人数集計が1行ずつ出ます。名前の一覧は候補ボタンを押した詳細と締切後の
+集計サマリーで確認できます。回答は候補ボタン → 自分にだけ見えるステータス選択
+（✅参加 / ❓未定 / ❌不参加 / 回答を取り消す）。
+1候補につき1状態のみ。選び直すと前の状態は上書きされます。
+候補が 26 件以上ある場合はボードが複数メッセージに分かれます。
+
+サーバー別設定 `SCHEDULE_UI_STYLE`（`/settings_set` で変更。
+`buttons` = 投票ボード（既定） / `reaction` = 従来の
+「候補日ごとに1メッセージ＋リアクション」）で方式を選べます。
+変更は**この後に作成する日程調整から**適用され、投稿済みの投票は
+作成時の方式のまま動き続けます。
 
 **リアクション絵文字のカスタマイズ**: 管理者が `/schedule emoji set` で
 サーバー固有のカスタム絵文字（アニメーション絵文字も可）に変更できます。
 設定はサーバーごとに保存され、**この後に作成する日程調整から**適用されます
-（投稿済みの投票メッセージのリアクションは変わりません）。
+（ボタンの絵文字・リアクションのどちらにも使われます。
+投稿済みの投票メッセージは変わりません）。
 未設定のステータスは既定絵文字のまま。設定した絵文字がサーバーから
 削除されていた場合は自動で既定絵文字にフォールバックし、ログに記録されます。
 
-### Tasks（タスク・Todoist 連携）
+### Tasks（タスク・Todoist）
+**タスクの正本は Todoist だけです。** bot はローカル DB にタスクを持たず、
+`/task` の各コマンドは Todoist API を直接呼びます。`<id>` は Todoist の
+タスク ID で、オートコンプリートから選べます（手で写す必要はありません）。
+
+**Todoist 未設定のサーバーでは `/task` は使えません。** 「管理者が
+`/todoist-setup` で登録してください」と案内して終わります。
+
 | コマンド | 権限 | 説明 |
 |---|---|---|
-| `/task add` | L1 | タスク作成（Todoist へ反映） |
-| `/task list [mine]` | L1 | 一覧（`mine:true` で自分の担当のみ） |
-| `/task done <id>` | L1※ | 完了（Todoist 側も close）。※担当者・作成者・班長以上のみ |
-| `/task delete <id>` | L2 | 削除 |
-| `/task assign <id> <user>` | L2 | 担当者変更 |
-| `/task priority <id> <1-4>` | L1※ | 優先度変更。※担当者・作成者・班長以上のみ |
+| `/task add` | L1 | タスク作成（Todoist へ登録） |
+| `/task list` | L1 | 未完了タスクの一覧 |
+| `/task done <id>` | L1 | 完了（Todoist 側で close） |
+| `/task delete <id>` | L2 | 削除（Todoist 側でも削除） |
+| `/task priority <id> <1-4>` | L1 | 優先度変更 |
 | `/task overdue` | L1 | 期限超過一覧 |
-| `/task team <班>` | L1 | 班別一覧 |
+| `/task team <班>` | L1 | 班に紐付いた Todoist セクションのタスク一覧 |
 | `/task sections` | L2 | Todoist のセクション一覧と班との紐付け状況を表示 |
 | `/task link-section <班> <section_id>` | L3 | Todoist セクションを班に紐付け |
 | `/task unlink-section <section_id>` | L3 | セクションの紐付けを解除 |
@@ -113,6 +132,11 @@ Bot管理者」というラベルで出ます（`utils/permissions.LEVEL_LABELS`
 
 Todoist 連携はサーバーごとの登録制です。未登録のサーバーでは Todoist 関連
 コマンドは「管理者が `/todoist-setup` で登録してください」と案内します。
+
+**担当者の割り当てはありません。** Todoist には「どの Discord ユーザーが
+担当か」という概念がないため、`/task assign` と担当者への DM 通知、
+`/me` のタスク欄は廃止しました（スキーマ v22）。班への割り当ては
+「Todoist セクション ↔ 班」の紐付けで行います。
 
 ### Todoist 管理（トークン登録）
 | コマンド | 権限 | 説明 |
@@ -226,6 +250,9 @@ Discord からドリルダウンで確認できる機能です。深さに制限
    - Todoist でタスクを完了チェック → 進捗率 100%・状態=完了 に自動更新
 4. 毎朝 08:30 に各プロジェクトの期限タスク（7日以内・超過）を、
    ②で選んだチャンネルへ通知
+   - サブタスクには「親タスク」行（例: 主翼 > 第2リブ > 桁受け加工）が付き、
+     どの部品・工程のタスクかが通知だけで分かる。直近の親が Todoist の
+     タスクなら、その親タスクへのリンクになる。トップレベルのタスクには付かない
 ```
 
 通知先は「紐付け時に選んだチャンネル → `PROGRESS_DEFAULT_CHANNEL_ID`（settings）→
@@ -252,7 +279,7 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
   CJK フォントの導入は不要になりました。より詳細なグラフは
   Web ダッシュボードの「機体進捗」タブで表示されます（8章）
 
-### Members（班・技能）
+### Members（班・メンバー）
 | コマンド | 権限 | 説明 |
 |---|---|---|
 | `/member register <user> [班]` | L2 | メンバー登録 |
@@ -262,30 +289,24 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 | `/member setup <user>` | L3 | 主所属班・副所属班・班長を一括設定 |
 | `/member set-channel <班> <channel>` | L3 | 班の通知先チャンネルを設定（タスクの班別通知に使用） |
 | `/member set-leader <user> <bool>` | L3 | 班長フラグ設定 |
-| `/member skill add <技能> [user]` | L1※ | 技能タグ追加（ギルドに登録済みのタグから選択）。※`user` 指定は班長以上のみ |
-| `/member skill remove <技能> [user]` | L1※ | 技能タグ削除。※`user` 指定は班長以上のみ |
-| `/member support [班] [技能]` | L2 | 支援候補検索（班横断作業向け）。既定は現役のみ。`include_alumni:True` で卒業者も含む |
+| `/member support <班>` | L2 | 支援候補検索（班横断作業向け）。既定は現役のみ。`include_alumni:True` で卒業者も含む |
 
-班・技能の選択肢は、そのギルドの DB（teams / skill_tags テーブル）から
-入力途中の文字列で絞り込んで表示されます（autocomplete）。
-班やタグがまだ登録されていないギルドでは、先に管理者が
-`/team-add` / `/skill-add` で登録してください。
+班の選択肢は、そのギルドの DB（teams テーブル）から入力途中の文字列で
+絞り込んで表示されます（autocomplete）。班がまだ登録されていないギルドでは、
+先に管理者が `/team-add` で登録してください。
 
-### Teams・Skills（班・技能マスタ管理）
+### Teams（班マスタ管理）
 | コマンド | 権限 | 説明 |
 |---|---|---|
 | `/team-add slug:<識別子> name:<表示名>` | L4 | 班を追加。識別子は半角英小文字・数字・`-`・`_`（32文字以内）。同じ識別子の再登録で表示名更新・再有効化 |
 | `/team-remove slug:<識別子> [confirm]` | L4 | 班を無効化（論理削除）。主所属メンバーがいる場合は `confirm:True` が必要 |
 | `/team-list` | L4 | 班の一覧（有効/無効・所属人数・ロール・通知ch） |
 | `/team-role team:<識別子> role:<ロール> [role_type]` | L4 | 班と Discord ロールを紐付け。`role_type` は `primary`（主所属、既定）・`secondary`（副所属）・`leader`（班長。`/team-list` の表示用で自動付与も権限付与もしない） |
-| `/skill-add name:<タグ名>` | L4 | 技能タグを追加 |
-| `/skill-remove name:<タグ名>` | L4 | 技能タグを無効化（論理削除） |
-| `/skill-list` | L4 | 技能タグの一覧（有効/無効・付与人数） |
 
-**新しいサーバーを追加した場合**: 班・技能タグは空の状態で始まります。
+**新しいサーバーを追加した場合**: 班は空の状態で始まります。
 管理者（L4: Bot管理者ロール・サーバーオーナー・Discord管理者権限のいずれか）が
 `/setup` の「班を一括作成」（班と対応ロールをまとめて作成）か
-`/team-add` `/skill-add` で登録してください。
+`/team-add` で登録してください。
 個別の班ロールは Discord 側で作成したロールを `/team-role` で紐付けます。
 
 `role_type:leader` で設定する班長ロールは `/team-list` に表示するための情報です。
@@ -299,8 +320,6 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 /team-role team:wing role:@翼班 role_type:primary
 /team-role team:wing role:@翼班支援 role_type:secondary
 /team-role team:wing role:@翼班長 role_type:leader
-/skill-add name:CFRP積層
-/skill-add name:はんだ
 ```
 
 ### Reports（集計・出力）
@@ -317,27 +336,12 @@ venv/bin/python scripts/migrate_progress_sheet_to_db.py     --guild-id <サー�
 ### Me（個人サマリー）
 | コマンド | 権限 | 説明 |
 |---|---|---|
-| `/me [user]` | L1 | 自分の未完了タスク・未回答の投票・今月の積層・担当中の進捗ノードをまとめて表示（ephemeral）。`user` の指定は L2 以上 |
+| `/me [user]` | L1 | 自分の未回答の投票・今月の積層・担当中の進捗ノードをまとめて表示（ephemeral）。`user` の指定は L2 以上 |
 
 新しいテーブルは使いません（既存の集計を合成しているだけ）。
+タスクは出しません（正本の Todoist に Discord ユーザー単位の担当が無いため）。
 担当中の進捗ノードは `progress_nodes.assignee`（自由記述の名前）を、
 Discord の表示名と `members.display_name` の両方で照合します。
-
----
-
-### Safety（ヒヤリハット・事故報告）
-| コマンド | 権限 | 説明 |
-|---|---|---|
-| `/incident report [anonymous]` | L1 | Modal（発生日時 / 場所 / 何が起きたか / けがの有無 / 再発防止案）を開いて報告。幹部ロールへ通知 |
-| `/incident list [limit]` | L3 | 直近の報告を一覧（ephemeral） |
-
-`anonymous:true` で報告すると、一覧・通知・エクスポートのいずれにも
-報告者名が出ません。**ただし報告者のユーザーIDは DB に保存されます**
-（虚偽・悪用への対処のため。表示・エクスポートの対象列には含めていません）。
-この扱いは `docs/PRIVACY.md` §2.5 に明記しています。
-
-通知先は在庫アラートと同じ「お知らせ →（無ければ）進捗 → タスク」の順で、
-`EXEC_ROLE_ID`（実行役ロール）が設定されていればメンションします。
 
 ---
 
@@ -350,20 +354,7 @@ Discord の表示名と `members.display_name` の両方で照合します。
 | `/stock set-threshold <品目> <閾値>` | L2 | 発注アラートの閾値（負の値で解除。`0` は「尽きたら知らせる」） |
 | `/stock remove <品目>` | L2 | 品目の無効化（増減の履歴は残る） |
 
-#### 工具・機材の貸出（`/tool`）
-
-| コマンド | 権限 | 説明 |
-|---|---|---|
-| `/tool list` | L1 | 工具一覧と貸出状況（誰が借りているか・超過日数） |
-| `/tool borrow <工具> [返却予定日] [用途]` | L1 | 借りる。返却予定日は `YYYY-MM-DD`（省略可） |
-| `/tool return <工具>` | L1 | 返す（**借りた本人でなくても記録できます**） |
-| `/tool add <工具> [メモ]` | L2 | 工具の登録 |
-| `/tool remove <工具>` | L2 | 工具の無効化（貸出の履歴は残る） |
-
-返却予定日を過ぎた貸出は、毎朝 08:30 に**借りた本人へ DM**します
-（1貸出につき1回）。**返却予定日を設定していない貸出は督促しません。**
-
-**品目・工具の初期値は入っていません**（何を管理するかはサークルごとに違うため）。
+**品目の初期値は入っていません**（何を管理するかはサークルごとに違うため）。
 `/stock add` で登録すると、以降は候補から選べます。
 
 閾値を割ると (1) その場で1回、告知チャンネルへ通知し、
@@ -474,8 +465,8 @@ Todoist 側の「セクション」を班と紐付けると、そのセクショ
 
 ### 班をまたいだ支援者を探す
 ```
-/member support skill:CFRP積層        ← CFRP積層ができる人を検索
-/member support team:電装 skill:はんだ ← 電装班ではんだができる人
+/member support team:電装                        ← 電装班の現役メンバー
+/member support team:電装 include_alumni:True    ← 卒業生も含めて探す
 ```
 
 ---
@@ -495,7 +486,7 @@ Todoist 側の「セクション」を班と紐付けると、そのセクショ
 | データ削除の実行 | 毎日 04:00 | 退出後の保持期間満了、または `/data delete` を申告したサーバーのデータを全テーブルから削除。結果は `#bot-log` へ（退出済みサーバーは通知先が解決できないため送られない） |
 | 超過通知 | 毎日 21:00 | 期限切れの未完了タスク |
 | 進捗同期 | 20分ごと | 全サーバーの Todoist 取り込み・桁巻き反映・進捗の再集計（`/progress sync` で即時実行） |
-| 進捗プロジェクト通知 | 毎日 08:30 | 紐付け済みプロジェクトの期限タスク（7日以内・超過） |
+| 進捗プロジェクト通知 | 毎日 08:30 | 紐付け済みプロジェクトの期限タスク（7日以内・超過）。サブタスクには親タスクのパンくず（例: 主翼 > 第2リブ）を添える |
 
 通知失敗時（仕様 11.5.2）: DM 失敗→チャンネル通知へフォールバック、
 API 障害→`#bot-log` に記録、送信履歴を保存し多重送信を防止。
@@ -546,7 +537,7 @@ API 障害→`#bot-log` に記録、送信履歴を保存し多重送信を防�
 
   暗号鍵 `ENCRYPTION_KEY` は DB とは**別の場所**に保管する（次章）。
 - **桁の増減**: `/layer keta-add` / `/layer keta-remove` で管理（DB に保存。再起動不要）。
-- **班・技能の増減**: `/team-add` `/team-remove` `/skill-add` `/skill-remove` で管理
+- **班の増減**: `/team-add` `/team-remove` で管理
   （DB に保存。再起動不要）。班ロールの紐付けは `/team-role`。
 
 ---
@@ -801,11 +792,13 @@ A. はい。Todoist は `/todoist-setup` で登録しなければ自動的に無
 A. 常時同期は廃止されました。記録の正本は SQLite/PostgreSQL です
 （任意のエクスポート連携 `/set_sheet` `/sheet_sync` は利用できます）。
 旧 Sheets のデータは `scripts/migrate_sheets_to_db.py` で DB に取り込めます
-（[`NOCODB.md`](NOCODB.md) 6章）。
+（[`archive/NOCODB.md`](archive/NOCODB.md) 6章）。
 
 **Q. Bot を再起動すると進行中の投票や桁巻き作業は消えますか？**
-A. 消えません。投票はリアクションの raw イベントで再処理され、桁巻きセッションは
-SQLite から復元されるため、再起動後も `/layer end` を実行できます。
+A. 消えません。投票ボードのボタンは永続 View（DynamicItem）なので再起動後も
+押せます。リアクション式の投票も raw イベントで再処理されます。
+桁巻きセッションは SQLite から復元されるため、再起動後も `/layer end` を
+実行できます。
 
 **Q. 桁名を間違えて開始してしまいました。**
 A. 一度 `/layer end` で終了（DB に記録されます）し、正しい桁名で `/layer start`

@@ -1,12 +1,12 @@
 """
 Members モジュール（仕様 11.4）。
 
-班所属・班長・技能タグ・支援候補検索を管理する。
+班所属・班長・支援候補検索を管理する。
 マルチテナント版: 全データを interaction.guild.id でスコープし、
 班ロール同期は teams テーブルのロール紐付け（settings は後方互換の
 フォールバック）を参照する。
-班・技能タグの選択肢は config 固定値ではなく、ギルドの DB
-（teams / skill_tags テーブル）から autocomplete で動的取得する。
+班の選択肢は config 固定値ではなく、ギルドの DB（teams テーブル）から
+autocomplete で動的取得する。
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ from discord.ext import commands
 
 from config import config
 from repositories.member_repository import MemberRepository
-from repositories.skill_tag_repository import SkillTagRepository
 from services import team_service
 from utils.embeds import (
     MAX_EMBED_FIELDS,
@@ -29,7 +28,7 @@ from utils.embeds import (
 )
 from utils.logger import get_logger
 from utils.parser import fmt_jp, from_iso
-from utils.permissions import Level, ensure_guild, is_self_or_level, require
+from utils.permissions import Level, ensure_guild, require
 
 log = get_logger("members")
 
@@ -38,10 +37,8 @@ class Members(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.repo = MemberRepository(bot.db)
-        self.skill_repo = SkillTagRepository(bot.db)
 
-    group = app_commands.Group(name="member", description="メンバー・班・技能管理")
-    skill_group = app_commands.Group(name="skill", description="技能タグ管理", parent=group)
+    group = app_commands.Group(name="member", description="メンバー・班管理")
 
     # ---------- autocomplete ----------
     async def _team_ac(
@@ -50,24 +47,6 @@ class Members(commands.Cog):
         if interaction.guild is None:
             return []
         return await team_service.team_choices(self.bot.db, interaction.guild.id, current)
-
-    async def _skill_ac(
-        self, interaction: discord.Interaction, current: str
-    ) -> list[app_commands.Choice[str]]:
-        if interaction.guild is None:
-            return []
-        return await team_service.skill_choices(self.bot.db, interaction.guild.id, current)
-
-    async def _own_skill_ac(
-        self, interaction: discord.Interaction, current: str
-    ) -> list[app_commands.Choice[str]]:
-        """実行者が現在持っている技能タグの候補（remove 用）。"""
-        if interaction.guild is None:
-            return []
-        m = await self.repo.get_member(interaction.guild.id, str(interaction.user.id))
-        skills = m["skills"] if m else []
-        c = current.lower()
-        return [app_commands.Choice(name=s, value=s) for s in skills if c in s.lower()][:25]
 
     async def _valid_team(self, guild_id: int, team_key: str) -> dict | None:
         """有効な班を返す。未登録・無効化済みなら None。"""
@@ -191,12 +170,10 @@ class Members(commands.Cog):
         team_names = await team_service.team_name_map(self.bot.db, guild_id)
         primary = team_names.get(m.get("primary_team"), m.get("primary_team") or "—")
         secondary = "、".join(team_names.get(t, t) for t in m["secondary_teams"]) or "—"
-        skills = "、".join(m["skills"]) or "—"
         embed = member_embed(f"メンバー情報: {m['display_name']}")
         embed.add_field(name="主所属班", value=primary, inline=True)
         embed.add_field(name="副所属班", value=secondary, inline=True)
         embed.add_field(name="班長", value="はい" if m["is_leader"] else "いいえ", inline=True)
-        embed.add_field(name="技能", value=skills, inline=False)
         embed.add_field(name="入部日", value=fmt_jp(from_iso(m["joined_at"])), inline=True)
         await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -445,113 +422,29 @@ class Members(commands.Cog):
             ephemeral=True,
         )
 
-    # ---------- skill add / remove ----------
-    @skill_group.command(name="add", description="技能タグを追加します。")
-    @app_commands.describe(skill="技能タグ", user="対象（省略時は自分）")
-    @app_commands.autocomplete(skill=_skill_ac)
-    @require(Level.L1)
-    async def skill_add(
-        self, interaction: discord.Interaction, skill: str, user: discord.Member | None = None
-    ):
-        await interaction.response.defer(ephemeral=True)
-        guild_id = await ensure_guild(interaction)
-        if guild_id is None:
-            return
-        if not await self.skill_repo.exists_active(guild_id, skill):
-            await interaction.followup.send(
-                embed=error_embed(
-                    f"技能タグ「{skill}」は登録されていません。"
-                    "管理者に `/skill-add` での登録を依頼してください。"
-                ),
-                ephemeral=True,
-            )
-            return
-        target = user or interaction.user
-        if not await is_self_or_level(interaction, str(target.id), Level.L2):
-            await interaction.followup.send(
-                embed=error_embed(
-                    "他の人の技能タグを変更できるのは班長以上です。\n"
-                    "自分に付けるだけなら `user` を空にして実行してください。"
-                ),
-                ephemeral=True,
-            )
-            return
-        await self.repo.upsert_member(guild_id, str(target.id), target.display_name)
-        await self.repo.add_skill(guild_id, str(target.id), skill)
-        await interaction.followup.send(
-            embed=success_embed(
-                "技能を追加しました",
-                f"{target.display_name} に「{skill}」",
-                executor=interaction.user.display_name,
-            ),
-            ephemeral=True,
-        )
-
-    @skill_group.command(name="remove", description="技能タグを削除します。")
-    @app_commands.describe(skill="技能タグ", user="対象（省略時は自分）")
-    @app_commands.autocomplete(skill=_own_skill_ac)
-    @require(Level.L1)
-    async def skill_remove(
-        self, interaction: discord.Interaction, skill: str, user: discord.Member | None = None
-    ):
-        await interaction.response.defer(ephemeral=True)
-        guild_id = await ensure_guild(interaction)
-        if guild_id is None:
-            return
-        target = user or interaction.user
-        if not await is_self_or_level(interaction, str(target.id), Level.L2):
-            await interaction.followup.send(
-                embed=error_embed(
-                    "他の人の技能タグを変更できるのは班長以上です。\n"
-                    "自分から外すだけなら `user` を空にして実行してください。"
-                ),
-                ephemeral=True,
-            )
-            return
-        await self.repo.remove_skill(guild_id, str(target.id), skill)
-        await interaction.followup.send(
-            embed=success_embed(
-                "技能を削除しました",
-                f"{target.display_name} から「{skill}」",
-                executor=interaction.user.display_name,
-            ),
-            ephemeral=True,
-        )
-
     # ---------- support ----------
-    @group.command(name="support", description="班・技能から支援候補を検索します。")
+    @group.command(name="support", description="班から支援候補を検索します。")
     @app_commands.describe(
-        team="班で絞り込み（任意）",
-        skill="技能で絞り込み（任意）",
+        team="班",
         include_alumni="卒業した人も含める（既定は現役のみ）",
     )
-    @app_commands.autocomplete(team=_team_ac, skill=_skill_ac)
+    @app_commands.autocomplete(team=_team_ac)
     @require(Level.L2)
     async def support(
         self,
         interaction: discord.Interaction,
-        team: str | None = None,
-        skill: str | None = None,
+        team: str,
         include_alumni: bool = False,
     ):
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
             return
-        if not team and not skill:
-            await interaction.followup.send(
-                embed=error_embed("班または技能のいずれかを指定してください。"), ephemeral=True
-            )
-            return
         team_names = await team_service.team_name_map(self.bot.db, guild_id)
         candidates = await self.repo.search_support(
-            guild_id, team, skill, include_alumni=include_alumni
+            guild_id, team, include_alumni=include_alumni
         )
-        cond = []
-        if team:
-            cond.append(f"班={team_names.get(team, team)}")
-        if skill:
-            cond.append(f"技能={skill}")
+        cond = [f"班={team_names.get(team, team)}"]
         if include_alumni:
             cond.append("卒業者を含む")
         embed = member_embed(f"支援候補検索（{' / '.join(cond)}）")
@@ -560,10 +453,12 @@ class Members(commands.Cog):
         else:
             for m in candidates[:MAX_EMBED_FIELDS]:
                 primary = team_names.get(m.get("primary_team"), m.get("primary_team") or "—")
-                skills = "、".join(m["skills"]) or "—"
+                secondary = (
+                    "、".join(team_names.get(t, t) for t in m["secondary_teams"]) or "—"
+                )
                 embed.add_field(
                     name=m["display_name"],
-                    value=f"主所属: {primary} / 技能: {skills}",
+                    value=f"主所属: {primary} / 副所属: {secondary}",
                     inline=False,
                 )
             add_truncation_note(

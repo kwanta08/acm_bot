@@ -149,7 +149,6 @@ CREATE TABLE IF NOT EXISTS members (
     primary_team    TEXT,
     secondary_teams TEXT,
     is_leader       INTEGER NOT NULL DEFAULT 0,
-    skills          TEXT,
     notes           TEXT,
     joined_at       TEXT NOT NULL,
     active_flag     INTEGER NOT NULL DEFAULT 1,
@@ -179,7 +178,10 @@ CREATE TABLE IF NOT EXISTS schedules (
     -- （/schedule delete は投票メッセージを消すが、票データは残す）
     deleted_flag       INTEGER NOT NULL DEFAULT 0,
     -- 確定した候補（v17。schedule_options.option_id）。NULL は未確定
-    confirmed_option_id TEXT
+    confirmed_option_id TEXT,
+    -- 投票 UI 方式（v23）。'reaction' = 候補ごとに1メッセージ＋リアクション、
+    -- 'buttons' = 全候補を1メッセージに集約＋ボタン投票
+    ui_style           TEXT NOT NULL DEFAULT 'reaction'
 );
 """,
     "schedule_options": f"""
@@ -204,23 +206,6 @@ CREATE TABLE IF NOT EXISTS schedule_votes (
     updated_at TEXT NOT NULL,
     UNIQUE (guild_id, option_id, user_id),
     FOREIGN KEY (option_id) REFERENCES schedule_options(option_id) ON DELETE CASCADE
-);
-""",
-    "tasks": f"""
-CREATE TABLE IF NOT EXISTS tasks (
-    local_task_id   INTEGER PRIMARY KEY AUTOINCREMENT,
-    {_GUILD_COL},
-    todoist_task_id TEXT,
-    title           TEXT NOT NULL,
-    assignee_id     TEXT,
-    team_key        TEXT,
-    due_date        TEXT,
-    priority        INTEGER,
-    location_key    TEXT,
-    status          TEXT NOT NULL DEFAULT 'open',
-    created_by      TEXT NOT NULL,
-    created_at      TEXT NOT NULL,
-    completed_at    TEXT
 );
 """,
     "reminders_log": f"""
@@ -293,18 +278,6 @@ CREATE TABLE IF NOT EXISTS audit_log (
     target     TEXT,
     detail     TEXT,
     created_at TEXT NOT NULL
-);
-""",
-    # 技能タグ マスタ（ギルド別。名前はギルド内で一意）
-    "skill_tags": f"""
-CREATE TABLE IF NOT EXISTS skill_tags (
-    skill_tag_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    {_GUILD_COL},
-    skill_name   TEXT NOT NULL,
-    active_flag  INTEGER NOT NULL DEFAULT 1,
-    created_by   TEXT NOT NULL,
-    created_at   TEXT NOT NULL,
-    UNIQUE (guild_id, skill_name)
 );
 """,
     # Todoist 接続設定（1ギルド1件。トークンは Fernet 暗号文で保存し、
@@ -524,72 +497,6 @@ CREATE TABLE IF NOT EXISTS stock_movements (
     created_at    TEXT NOT NULL
 );
 """,
-    # 工具・機材の貸出（G4-9）。
-    #
-    # `/layer start` → `/layer end` とまったく同じ「開始 → 進行中 → 終了」モデル。
-    # マスタ（tools）と貸出（tool_loans）を分け、貸出中かどうかは
-    # **tool_loans に returned_at が NULL の行があるか**で表す
-    # （tools 側にフラグを置くと、行を消したときに貸出の事実まで消える）。
-    #
-    # - due_date は **NULL 許容**。返却予定日を決めていない貸出を
-    #   「本日返却」にしない（ADR 0021）。督促は due_date がある貸出だけ
-    # - tools は layer_keta と同型（有効フラグ・(guild_id, tool_name) で一意）
-    "tools": f"""
-CREATE TABLE IF NOT EXISTS tools (
-    tool_id     INTEGER PRIMARY KEY AUTOINCREMENT,
-    {_GUILD_COL},
-    tool_name   TEXT NOT NULL,
-    note        TEXT,
-    active_flag INTEGER NOT NULL DEFAULT 1,
-    created_by  TEXT NOT NULL,
-    created_at  TEXT NOT NULL,
-    UNIQUE (guild_id, tool_name)
-);
-""",
-    # 貸出1回ぶん。returned_at が NULL なら貸出中。
-    # tool_id に外部キーを張らない（progress_nodes と同じ既存方針。ADR 0019）
-    "tool_loans": f"""
-CREATE TABLE IF NOT EXISTS tool_loans (
-    loan_id       INTEGER PRIMARY KEY AUTOINCREMENT,
-    {_GUILD_COL},
-    tool_id       INTEGER NOT NULL,
-    user_id       TEXT NOT NULL,
-    borrowed_at   TEXT NOT NULL,
-    due_date      TEXT,
-    returned_at   TEXT,
-    note          TEXT,
-    overdue_notified_flag INTEGER NOT NULL DEFAULT 0
-);
-""",
-    # ヒヤリハット・事故報告（G4-10）。
-    #
-    # 工房での切削・溶剤・高所作業・機体運搬・テストフライトと危険度が高く、
-    # 大学から安全管理体制の提示を求められることもある。今は雑談に流れて消える。
-    #
-    # **匿名の扱いに2つの列を使う。**
-    #   - reporter_id は匿名でも必ず保存する（悪用・虚偽報告への対処に要る）。
-    #     ただし**表示にもエクスポートにも出さない**（TABLES の列ホワイトリスト
-    #     から外してある。ADR 0016 の仕組みをそのまま使う）
-    #   - reporter_name は「表示してよい名前」。匿名報告では NULL。
-    #     表示側はこちらしか見ないので、匿名の約束が構造で守られる
-    #
-    # injury（けがの有無）は自由記述。「軽い擦り傷」「無し」など、
-    # 選択肢に収まらない実態を書けるようにする。
-    "incidents": f"""
-CREATE TABLE IF NOT EXISTS incidents (
-    incident_id   INTEGER PRIMARY KEY AUTOINCREMENT,
-    {_GUILD_COL},
-    occurred_at   TEXT NOT NULL,
-    place         TEXT NOT NULL,
-    description   TEXT NOT NULL,
-    injury        TEXT,
-    prevention    TEXT,
-    anonymous_flag INTEGER NOT NULL DEFAULT 0,
-    reporter_id   TEXT NOT NULL,
-    reporter_name TEXT,
-    created_at    TEXT NOT NULL
-);
-""",
     # Discord の表示名キャッシュ（ギルド別）。bot がギルドキャッシュから
     # 書き込み、ダッシュボード（Bot トークンを持たない別プロセス）が
     # ID → 表示名の解決に読む。name はユーザーなら「そのギルドでの表示名」
@@ -616,13 +523,11 @@ CREATE INDEX IF NOT EXISTS idx_schedules_guild ON schedules(guild_id, closed_fla
 CREATE INDEX IF NOT EXISTS idx_options_guild_schedule ON schedule_options(guild_id, schedule_id);
 CREATE INDEX IF NOT EXISTS idx_votes_guild_option ON schedule_votes(guild_id, option_id);
 CREATE INDEX IF NOT EXISTS idx_votes_option ON schedule_votes(option_id);
-CREATE INDEX IF NOT EXISTS idx_tasks_guild_status ON tasks(guild_id, status);
 CREATE INDEX IF NOT EXISTS idx_reminders_guild ON reminders_log(guild_id, reminder_id);
 CREATE INDEX IF NOT EXISTS idx_sections_guild_team ON todoist_sections(guild_id, team_key);
 CREATE INDEX IF NOT EXISTS idx_layer_records_guild_synced ON layer_records(guild_id, synced_flag);
 CREATE INDEX IF NOT EXISTS idx_layer_records_synced ON layer_records(synced_flag);
 CREATE INDEX IF NOT EXISTS idx_audit_log_guild ON audit_log(guild_id, audit_id);
-CREATE INDEX IF NOT EXISTS idx_skill_tags_guild ON skill_tags(guild_id, active_flag);
 CREATE INDEX IF NOT EXISTS idx_progress_nodes_guild_parent ON progress_nodes(guild_id, parent_id);
 CREATE INDEX IF NOT EXISTS idx_progress_nodes_guild_source ON progress_nodes(guild_id, source);
 CREATE INDEX IF NOT EXISTS idx_progress_todoist_links_guild ON progress_todoist_links(guild_id);
@@ -633,9 +538,6 @@ CREATE INDEX IF NOT EXISTS idx_progress_spar_links_guild ON progress_spar_links(
 CREATE INDEX IF NOT EXISTS idx_progress_snapshots_node ON progress_snapshots(guild_id, node_id, snapshot_date);
 CREATE INDEX IF NOT EXISTS idx_stock_items_guild ON stock_items(guild_id, active_flag);
 CREATE INDEX IF NOT EXISTS idx_stock_movements_item ON stock_movements(guild_id, stock_item_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_tools_guild ON tools(guild_id, active_flag);
-CREATE INDEX IF NOT EXISTS idx_tool_loans_open ON tool_loans(guild_id, returned_at, tool_id);
-CREATE INDEX IF NOT EXISTS idx_incidents_guild ON incidents(guild_id, occurred_at);
 """
 
 # ---------------------------------------------------------------------------
@@ -702,8 +604,9 @@ POSTGRES_VIEW_DDL = "\n".join(
 # スキーマバージョン（SQLite: PRAGMA user_version / PostgreSQL: schema_meta）。
 # 1: guild_id 導入済みの初期マルチテナントスキーマ（旧版は user_version=0 として扱う）
 # 2: guilds（ギルド台帳）・audit_log（監査ログ）追加
-# 3: skill_tags 追加。teams に member_role_id / secondary_role_id /
-#    created_at / updated_at を追加し、settings のロールマップをバックフィル
+# 3: skill_tags 追加（v22 で廃止）。teams に member_role_id /
+#    secondary_role_id / created_at / updated_at を追加し、
+#    settings のロールマップをバックフィル
 # 4: todoist_configs 追加（Todoist トークンのギルド別暗号化保存）
 # 5: v_attendance / v_team_summary ビュー追加（Sheets 廃止に伴う NocoDB 表示用）
 # 6: PostgreSQL の guild_id を BIGINT へ変更（int4 で作成された既存 DB の修復。
@@ -726,14 +629,24 @@ POSTGRES_VIEW_DDL = "\n".join(
 #    （年度替わり。既存メンバーはすべて active。migrations/013）
 # 15: discord_name_cache を追加（ダッシュボードの ID → 表示名解決用。
 #    bot がギルドキャッシュから書き、Web 側が読む。migrations/014）
-# 21: incidents を追加（ヒヤリハット・事故報告。G4-10）
-# 20: tools / tool_loans を追加（工具・機材の貸出。G4-9）
+# 24: settings のサークル名キーを CLUB_NAME へ統一（GUILD_NAME からコピー。
+#    ダッシュボードで保存した名前が週次サマリー等へ反映されない不具合の解消。
+#    D2-1。開発中は v22 だったが、main 側の v22（機能廃止）と衝突したため
+#    マージ時に v24 へ採番し直した。migrations/023）
+# 23: schedules に ui_style を追加（投票 UI 方式。'reaction' = 候補ごとに
+#    1メッセージ＋リアクション投票（従来）、'buttons' = 全候補を1メッセージに
+#    集約＋ボタン投票。既存行は 'reaction' のまま。migrations/022）
+# 22: skill_tags / members.skills / tools / tool_loans / incidents / tasks を
+#    DROP（技能タグ・工具の貸出・ヒヤリハット報告を廃止し、タスクの正本を
+#    Todoist へ一本化した。migrations/021）
+# 21: incidents を追加（ヒヤリハット・事故報告。G4-10。v22 で廃止）
+# 20: tools / tool_loans を追加（工具・機材の貸出。G4-9。v22 で廃止）
 # 19: stock_items / stock_movements を追加（資材・消耗品の在庫。G4-8）
 # 18: progress_snapshots を追加（進捗の日次履歴。G4-7）
 # 16: layer_sessions.layer_num を INTEGER から TEXT へ変更（/layer start は
 #    「シュリンク」等のテキスト層番号を受け付ける仕様。PostgreSQL では
 #    asyncpg の DataError になっていた。migrations/015）
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 24
 
 # 改訂版スキーマ（マルチテナント版）。テーブル定義のみ。
 SCHEMA = "\n".join(TABLE_DDL.values())
@@ -759,22 +672,17 @@ _PK_COLUMNS: dict[str, str] = {
     "teams": "team_id",
     "members": "member_id",
     "schedule_votes": "vote_id",
-    "tasks": "local_task_id",
     "reminders_log": "reminder_id",
     "layer_sessions": "session_id",
     "layer_records": "record_id",
     "layer_keta": "keta_id",
     "audit_log": "audit_id",
-    "skill_tags": "skill_tag_id",
     "progress_nodes": "progress_node_id",
     "progress_todoist_links": "link_id",
     "progress_spar_links": "spar_link_id",
     "progress_snapshots": "snapshot_id",
     "stock_items": "stock_item_id",
     "stock_movements": "movement_id",
-    "tools": "tool_id",
-    "tool_loans": "loan_id",
-    "incidents": "incident_id",
 }
 
 _INSERT_TABLE_RE = re.compile(r"INSERT\s+INTO\s+(\w+)", re.IGNORECASE)
@@ -1214,14 +1122,14 @@ class Database:
         if version < 19:
             await self._migrate_v19_stock()
 
-        if version < 20:
-            await self._migrate_v20_tools()
-
-        if version < 21:
-            await self._migrate_v21_incidents()
-
         if version < 22:
-            await self._migrate_v22_club_name_key()
+            await self._migrate_v22_remove_features()
+
+        if version < 23:
+            await self._migrate_v23_schedule_ui_style()
+
+        if version < 24:
+            await self._migrate_v24_club_name_key()
 
         await self._set_user_version(SCHEMA_VERSION)
         log.info("スキーマバージョンを %d に更新しました。", SCHEMA_VERSION)
@@ -1236,7 +1144,6 @@ class Database:
         "schedules",
         "schedule_options",
         "schedule_votes",
-        "tasks",
         "reminders_log",
         "todoist_sections",
         "todoist_configs",
@@ -1244,7 +1151,6 @@ class Database:
         "layer_records",
         "layer_keta",
         "audit_log",
-        "skill_tags",
     )
 
     async def _migrate_v6_pg_bigint(self) -> None:
@@ -1438,80 +1344,42 @@ class Database:
         await self._executescript(ddl_map["discord_name_cache"])
         log.info("discord_name_cache テーブルを作成しました（v15）。")
 
-    async def _migrate_v22_club_name_key(self) -> None:
+    #: v22 で廃止したテーブル。子（参照する側）から先に落とす
+    _V22_DROPPED_TABLES = ("skill_tags", "tool_loans", "tools", "incidents", "tasks")
+
+    async def _migrate_v22_remove_features(self) -> None:
         """
-        v22: サークル名の設定キーを `CLUB_NAME` に統一する（冪等。D2-1）。
+        v22: 技能タグ・工具の貸出・ヒヤリハット報告を廃止し、
+        タスクの正本を Todoist へ一本化する（冪等）。
 
-        ダッシュボードは `GUILD_NAME` キーで保存していたが、週次サマリー等が
-        読むのは `CLUB_NAME`（config.py）。保存しても反映されない不具合の解消。
+        **破壊的変更。** 落としたテーブルの行は戻らない
+        （migrations/021_remove_features.sql に運用上の注意を書いてある）。
 
-        既存データの扱い（ADR 0024 に照らした判断）:
-        - `GUILD_NAME` だけのギルド: 値を `CLUB_NAME` へ**コピー**する。
-          利用者がダッシュボードで明示的に保存した値を初めて有効にする移行で、
-          「既定値で勝手に動かす」ものではない
-        - `CLUB_NAME` が既にあるギルド: **上書きしない**（現に効いている値を守る）
-        - 旧キー `GUILD_NAME` の行は**消さない**（安全側。以後どのコードも
-          読まないが、監査と巻き戻しの余地を残す。bot は新規ギルド参加時に
-          今後も `GUILD_NAME` を Discord サーバー名で埋めるが（bot.py の
-          set_if_absent）、v22 以降にできた行がここへ来ることはない）
+        v19〜v21 を通っていない DB では対象テーブルがそもそも無いため、
+        すべて `IF EXISTS` で落とす。v20 / v21 の CREATE は削除済みなので、
+        古い DB は「作らずにそのまま v22 へ上がる」経路を通る。
 
-        影響の注記: `GUILD_NAME` は bot がギルド参加時に **Discord サーバー名で
-        自動設定**するため、ダッシュボードで一度も編集していないギルドにも
-        値がある。そのため CLUB_NAME 未設定のギルドでは、週次サマリー等の
-        表示が既定の「サークル」からサーバー名に変わる。破壊も不可逆もなく、
-        /setup のサークル名モーダルでいつでも上書きできる。
+        `todoist_configs` と `todoist_sections` は残す。どちらもタスクでは
+        なく**ギルド別設定**で、班別の通知と配置先の解決に要る。
         """
-        await self.execute(
-            """
-            INSERT INTO settings (guild_id, setting_key, setting_value, updated_at)
-            SELECT s.guild_id, 'CLUB_NAME', s.setting_value, s.updated_at
-            FROM settings s
-            WHERE s.setting_key = 'GUILD_NAME'
-              AND NOT EXISTS (
-                SELECT 1 FROM settings c
-                WHERE c.guild_id = s.guild_id AND c.setting_key = 'CLUB_NAME'
-              )
-            """
-        )
-        log.info("サークル名の設定キーを CLUB_NAME に統一しました（v22）。")
+        for table in self._V22_DROPPED_TABLES:
+            await self.execute(f"DROP TABLE IF EXISTS {table}")
+        log.info("v22: %s を削除しました。", " / ".join(self._V22_DROPPED_TABLES))
 
-    async def _migrate_v21_incidents(self) -> None:
-        """
-        v21: incidents テーブルを追加する（冪等）。
-
-        ヒヤリハット・事故報告（G4-10）。
-
-        **v19（在庫）にも v20（工具）にも足さない。**
-        `_migrate_versioned()` は `version >= SCHEMA_VERSION` で早期 return する
-        ため、既に適用済みの版へ後から CREATE を足しても既存 DB には届かない
-        （gotcha `bot-wont-start-undefined-column`）。
-
-        **既存データには一切触れない。** 追加されるのは空のテーブル1つだけ。
-        """
-        ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
-        await self._executescript(ddl_map["incidents"])
-        log.info("incidents テーブルを作成しました（v21）。")
-
-    async def _migrate_v20_tools(self) -> None:
-        """
-        v20: tools / tool_loans テーブルを追加する（冪等）。
-
-        工具・機材の貸出管理（G4-9）。
-
-        **v19（在庫）に足さない。** `_migrate_versioned()` は
-        `version >= SCHEMA_VERSION` で早期 return するため、v19 済みの DB は
-        二度と v19 の処理を通らない。後から v19 へ CREATE を足すと
-        **新規 DB にだけテーブルがある**状態になり、本番だけ
-        「relation does not exist」で落ちる（gotcha
-        `bot-wont-start-undefined-column` と同型）。
-
-        **既存データには一切触れない。** 追加されるのは空のテーブル2つだけで、
-        工具の初期値も入れない（何を貸出管理するかはサークルごとに違う）。
-        """
-        ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
-        for name in ("tools", "tool_loans"):
-            await self._executescript(ddl_map[name])
-        log.info("tools / tool_loans テーブルを作成しました（v20）。")
+        # members.skills（技能タグ本体）。使わない個人データを残さない。
+        # SQLite の DROP COLUMN は 3.35 以降。古い環境では列だけ残るが、
+        # 参照するコードはもう無いので**移行そのものは失敗させない**
+        if "skills" in await self._table_columns("members"):
+            try:
+                await self.execute("ALTER TABLE members DROP COLUMN skills")
+                log.info("v22: members.skills を削除しました。")
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "v22: members.skills を削除できませんでした（列は残りますが"
+                    "参照されません。手動で ALTER TABLE members DROP COLUMN skills "
+                    "を実行してください）: %s",
+                    type(e).__name__,
+                )
 
     async def _migrate_v19_stock(self) -> None:
         """
@@ -1550,6 +1418,65 @@ class Database:
         ddl_map = TABLE_DDL_PG if self._is_pg else TABLE_DDL
         await self._executescript(ddl_map["progress_snapshots"])
         log.info("progress_snapshots テーブルを作成しました（v18）。")
+
+    async def _migrate_v23_schedule_ui_style(self) -> None:
+        """
+        v23: schedules に ui_style を追加する（冪等）。
+
+        'reaction' = 候補ごとに1メッセージ＋リアクション投票（従来）、
+        'buttons' = 全候補を1メッセージに集約＋ボタン投票。
+
+        既定値つきの列追加のみで、**既存行はすべて 'reaction' になる**。
+        投稿済みの投票メッセージはリアクションで動いているので、
+        マイグレーションで挙動を変えない（新規作成分だけがギルド別設定
+        SCHEDULE_UI_STYLE に従う）。ALTER 前に列の有無を確認するのは
+        v17 と同じ理由（PostgreSQL の DuplicateColumn 対策）。
+        """
+        cols = await self._table_columns("schedules")
+        if "ui_style" not in cols:
+            await self.execute(
+                "ALTER TABLE schedules ADD COLUMN ui_style TEXT NOT NULL DEFAULT 'reaction'"
+            )
+            log.info("schedules テーブルに ui_style カラムを追加しました（v23）。")
+
+    async def _migrate_v24_club_name_key(self) -> None:
+        """
+        v24: サークル名の設定キーを `CLUB_NAME` に統一する（冪等。D2-1）。
+
+        ダッシュボードは `GUILD_NAME` キーで保存していたが、週次サマリー等が
+        読むのは `CLUB_NAME`（config.py）。保存しても反映されない不具合の解消。
+        開発中は v22 として実装したが、main 側の v22（機能廃止）と衝突した
+        ため、マージ時に v24 へ採番し直した。
+
+        既存データの扱い（ADR 0024 に照らした判断）:
+        - `GUILD_NAME` だけのギルド: 値を `CLUB_NAME` へ**コピー**する。
+          利用者がダッシュボードで明示的に保存した値を初めて有効にする移行で、
+          「既定値で勝手に動かす」ものではない
+        - `CLUB_NAME` が既にあるギルド: **上書きしない**（現に効いている値を守る）
+        - 旧キー `GUILD_NAME` の行は**消さない**（安全側。以後どのコードも
+          読まないが、監査と巻き戻しの余地を残す。bot は新規ギルド参加時に
+          今後も `GUILD_NAME` を Discord サーバー名で埋めるが（bot.py の
+          set_if_absent）、本移行以降にできた行がここへ来ることはない）
+
+        影響の注記: `GUILD_NAME` は bot がギルド参加時に **Discord サーバー名で
+        自動設定**するため、ダッシュボードで一度も編集していないギルドにも
+        値がある。そのため CLUB_NAME 未設定のギルドでは、週次サマリー等の
+        表示が既定の「サークル」からサーバー名に変わる。破壊も不可逆もなく、
+        /setup のサークル名モーダルでいつでも上書きできる。
+        """
+        await self.execute(
+            """
+            INSERT INTO settings (guild_id, setting_key, setting_value, updated_at)
+            SELECT s.guild_id, 'CLUB_NAME', s.setting_value, s.updated_at
+            FROM settings s
+            WHERE s.setting_key = 'GUILD_NAME'
+              AND NOT EXISTS (
+                SELECT 1 FROM settings c
+                WHERE c.guild_id = s.guild_id AND c.setting_key = 'CLUB_NAME'
+              )
+            """
+        )
+        log.info("サークル名の設定キーを CLUB_NAME に統一しました（v24）。")
 
     async def _migrate_v17_schedule_confirmed(self) -> None:
         """
@@ -1739,9 +1666,10 @@ class Database:
 
     async def _migrate_v3_teams_skills(self) -> None:
         """
-        v3: 班・技能タグの DB 管理化。
+        v3: 班の DB 管理化。
 
-        - skill_tags テーブルは init_schema（CREATE TABLE IF NOT EXISTS）で作成済み。
+        （同時に追加していた skill_tags テーブルは v22 で廃止された。）
+
         - teams に member_role_id / secondary_role_id / created_at / updated_at を
           追加する（既に存在する場合はスキップ）。
         - settings の PRIMARY_TEAM_ROLE_IDS / SECONDARY_TEAM_ROLE_IDS（書式:
@@ -1791,8 +1719,12 @@ class Database:
         手順（migrations/001_add_guild_id.sql と同等）:
           1. 旧テーブルを <table>_legacy にリネーム
           2. 新スキーマでテーブルを作成
-          3. guild_id をバックフィルしつつデータをコピー
+          3. guild_id をバックフィルしつつ、**両方に在る列だけ**コピー
           4. 旧テーブルを削除
+
+        新スキーマに無くなった旧列は落とす。TABLE_DDL から消えたテーブル
+        （v22 の tasks 等）はそもそもこのループの対象外で、後続の
+        _migrate_v22_remove_features() が DROP する。
         """
         assert self._conn is not None
         targets: dict[str, list[str]] = {}
@@ -1818,9 +1750,21 @@ class Database:
         await self._conn.commit()
         try:
             for table, cols in targets.items():
-                col_list = ", ".join(cols)
                 await self._conn.execute(f"ALTER TABLE {table} RENAME TO {table}_legacy")
                 await self._conn.execute(TABLE_DDL[table])
+                # **新スキーマに無くなった旧列はコピーしない。** 旧列をそのまま
+                # INSERT すると "table X has no column named Y" で移行が落ち、
+                # 古い DB が起動できなくなる（v22 で落とした members.skills 等）
+                new_cols = await self._table_columns(table)
+                copy_cols = [c for c in cols if c in new_cols]
+                dropped = [c for c in cols if c not in new_cols]
+                if dropped:
+                    log.info(
+                        "%s: 新スキーマに無い旧カラムは移行しません（%s）",
+                        table,
+                        ", ".join(dropped),
+                    )
+                col_list = ", ".join(copy_cols)
                 await self._conn.execute(
                     f"INSERT INTO {table} (guild_id, {col_list}) "
                     f"SELECT ?, {col_list} FROM {table}_legacy",

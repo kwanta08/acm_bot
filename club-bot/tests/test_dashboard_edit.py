@@ -526,7 +526,7 @@ def test_unconvertible_row_id_is_404_not_500(bad_id):
     client = _client(db_path)
     try:
         res = client.patch(
-            f"/api/guilds/{GUILD_A}/tables/tasks/{bad_id}", json={"title": "書き換え"}
+            f"/api/guilds/{GUILD_A}/tables/members/{bad_id}", json={"display_name": "書き換え"}
         )
         assert res.status_code == 404, res.text
     finally:
@@ -541,14 +541,15 @@ def test_unconvertible_row_id_does_not_write():
     try:
         assert (
             client.patch(
-                f"/api/guilds/{GUILD_A}/tables/tasks/abc", json={"title": "書き換わってはいけない"}
+                f"/api/guilds/{GUILD_A}/tables/members/abc",
+                json={"display_name": "書き換わってはいけない"},
             ).status_code
             == 404
         )
         # 既存行はそのまま
-        res = client.get(f"/api/guilds/{GUILD_A}/tables/tasks")
-        titles = [r["title"] for r in res.json()["rows"]]
-        assert "書き換わってはいけない" not in titles
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/members")
+        names = [r["display_name"] for r in res.json()["rows"]]
+        assert "書き換わってはいけない" not in names
         assert ids  # シードが効いていること
     finally:
         client.__exit__(None, None, None)
@@ -592,7 +593,7 @@ async def _pg_reset(dsn: str) -> None:
     db = Database("./unused.db", database_url=dsn)
     await db.connect()
     try:
-        for table in ("tasks", "progress_nodes", "members", "guilds"):
+        for table in ("layer_records", "progress_nodes", "members", "guilds"):
             for guild_id in (GUILD_A, GUILD_B):
                 await db.execute(f"DELETE FROM {table} WHERE guild_id = ?", (guild_id,))
     finally:
@@ -645,18 +646,19 @@ def test_pg_live_dashboard_edit_accepts_string_row_id():
 # ---------------------------------------------------------------------
 # number 列を DDL の型どおりに受けること（G1-9）
 #
-# INTEGER 列（tasks.priority / layer_records.minutes）に小数が来たら 400。
+# INTEGER 列（layer_records.minutes）に小数が来たら 400。
 # REAL 列（progress.sort_order / 重量2列）は小数を受ける。
 # SQLite はどちらの列にも何でも保存できるので、**HTTP で 400 が返ること**と
 # **PG 実機で通ること**の両方を見る。
 # ---------------------------------------------------------------------
-async def _insert_task(db_path: str, database_url: str | None = None) -> int:
+async def _insert_layer_record(db_path: str, database_url: str | None = None) -> int:
     db = Database(db_path, database_url=database_url)
     await db.connect()
     try:
         cur = await db.execute(
-            "INSERT INTO tasks (guild_id, title, status, created_by, created_at, priority)"
-            " VALUES (?, '主桁の積層', 'open', 'tester', '2026-01-01', 2)",
+            "INSERT INTO layer_records (guild_id, user_id, keta, layer_num,"
+            " started_at, ended_at, minutes)"
+            " VALUES (?, 'tester', '主桁', '3', '2026-01-01 10:00', '2026-01-01 10:02', 2)",
             (GUILD_A,),
         )
         return cur.lastrowid
@@ -667,11 +669,11 @@ async def _insert_task(db_path: str, database_url: str | None = None) -> int:
 def test_fraction_for_an_integer_column_is_400():
     db_path = _tmp_db_path()
     asyncio.run(_seed(db_path))
-    task_id = asyncio.run(_insert_task(db_path))
+    record_id = asyncio.run(_insert_layer_record(db_path))
     client = _client(db_path)
     try:
         res = client.patch(
-            f"/api/guilds/{GUILD_A}/tables/tasks/{task_id}", json={"priority": "2.7"}
+            f"/api/guilds/{GUILD_A}/tables/layer_records/{record_id}", json={"minutes": "2.7"}
         )
         assert res.status_code == 400, res.text
         assert "整数" in res.json()["detail"]
@@ -679,7 +681,7 @@ def test_fraction_for_an_integer_column_is_400():
         # JSON 由来の float も同じ扱い（文字列を経ない経路）
         assert (
             client.patch(
-                f"/api/guilds/{GUILD_A}/tables/tasks/{task_id}", json={"priority": 2.7}
+                f"/api/guilds/{GUILD_A}/tables/layer_records/{record_id}", json={"minutes": 2.7}
             ).status_code
             == 400
         )
@@ -690,8 +692,8 @@ def test_fraction_for_an_integer_column_is_400():
         db = Database(db_path)
         await db.connect()
         try:
-            row = await TableRepository(db).get_row(GUILD_A, "tasks", task_id)
-            assert row["priority"] == 2  # 丸めも書き込みもされていない
+            row = await TableRepository(db).get_row(GUILD_A, "layer_records", record_id)
+            assert row["minutes"] == 2  # 丸めも書き込みもされていない
         finally:
             await db.close()
 
@@ -729,7 +731,7 @@ def test_pg_live_number_out_of_range_is_400_not_500():
     dsn = _pg_dsn_or_skip()
     asyncio.run(_pg_reset(dsn))
     ids = asyncio.run(_seed("./unused.db", dsn))
-    task_id = asyncio.run(_insert_task("./unused.db", dsn))
+    record_id = asyncio.run(_insert_layer_record("./unused.db", dsn))
     node_id = ids["node"][GUILD_A]
     client = _client("./unused.db", database_url=dsn)
     int32_max = 2**31 - 1
@@ -737,16 +739,16 @@ def test_pg_live_number_out_of_range_is_400_not_500():
         # INTEGER 列: BIGINT を超える3つの入口はすべて 400
         for value in ("9" * 30, "1e20", str(int32_max + 1), 10**30):
             res = client.patch(
-                f"/api/guilds/{GUILD_A}/tables/tasks/{task_id}", json={"priority": value}
+                f"/api/guilds/{GUILD_A}/tables/layer_records/{record_id}", json={"minutes": value}
             )
             assert res.status_code == 400, f"{value!r}: {res.status_code} / {res.text}"
 
         # 境界そのものは通る（1つ内側で切っていない）
         res = client.patch(
-            f"/api/guilds/{GUILD_A}/tables/tasks/{task_id}", json={"priority": str(int32_max)}
+            f"/api/guilds/{GUILD_A}/tables/layer_records/{record_id}", json={"minutes": str(int32_max)}
         )
         assert res.status_code == 200, res.text
-        assert res.json()["row"]["priority"] == int32_max
+        assert res.json()["row"]["minutes"] == int32_max
 
         # REAL 列: inf / nan / float8 に収まらない int は 400
         for value in ("1e400", "nan", "inf", "9" * 400):
@@ -805,25 +807,25 @@ def test_pg_live_float8_would_store_nan_if_we_let_it():
 def test_pg_live_number_columns_match_the_ddl_types():
     """PG 実機: INTEGER 列は小数を弾き、REAL 列は受ける。
 
-    修正前は `{"priority": 2.7}` がそのまま asyncpg へ渡り、
+    修正前は `{"minutes": 2.7}` がそのまま asyncpg へ渡り、
     int8 引数に float を渡した時点で DataError（＝500）になっていた。
     """
     dsn = _pg_dsn_or_skip()
     asyncio.run(_pg_reset(dsn))
     ids = asyncio.run(_seed("./unused.db", dsn))
-    task_id = asyncio.run(_insert_task("./unused.db", dsn))
+    record_id = asyncio.run(_insert_layer_record("./unused.db", dsn))
     client = _client("./unused.db", database_url=dsn)
     try:
         # INTEGER 列: 小数は 400（500 にしない）
         res = client.patch(
-            f"/api/guilds/{GUILD_A}/tables/tasks/{task_id}", json={"priority": "2.7"}
+            f"/api/guilds/{GUILD_A}/tables/layer_records/{record_id}", json={"minutes": "2.7"}
         )
         assert res.status_code == 400, res.text
 
         # INTEGER 列: 整数は通る（int でバインドされている）
-        res = client.patch(f"/api/guilds/{GUILD_A}/tables/tasks/{task_id}", json={"priority": "3"})
+        res = client.patch(f"/api/guilds/{GUILD_A}/tables/layer_records/{record_id}", json={"minutes": "3"})
         assert res.status_code == 200, res.text
-        assert res.json()["row"]["priority"] == 3
+        assert res.json()["row"]["minutes"] == 3
 
         # REAL 列: 小数を受ける
         res = client.patch(

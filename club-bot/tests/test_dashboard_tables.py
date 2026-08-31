@@ -39,7 +39,6 @@ from repositories.table_repository import (
     UnknownTableError,
     rows_to_csv,
 )
-from repositories.task_repository import TaskRepository
 from utils.db import Database
 
 GUILD_A = 100000000000000001
@@ -47,10 +46,9 @@ GUILD_B = 200000000000000002
 USER_ID = "42"
 NOW = "2026-08-11 10:00"
 
-# G4-3 で読み取り専用の6表を追加した。**件数ではなくキー集合で書く**
+# **件数ではなくキー集合で書く**
 # （件数だけだと、別の表と入れ替わっても緑のまま通る）。
 EXPECTED_TABLES = {
-    "tasks",
     "members",
     "teams",
     "schedules",
@@ -62,18 +60,12 @@ EXPECTED_TABLES = {
     "seasons",
     "progress_milestones",
     "layer_keta",
-    "skill_tags",
     "settings",
     # 進捗の日次履歴（G4-7）
     "progress_snapshots",
     # 資材・消耗品の在庫（G4-8）
     "stock_items",
     "stock_movements",
-    # 工具・機材の貸出（G4-9）
-    "tools",
-    "tool_loans",
-    # ヒヤリハット・事故報告（G4-10）
-    "incidents",
 }
 
 
@@ -103,7 +95,6 @@ async def _seed(db_path: str) -> None:
         await GuildRepository(db).ensure(GUILD_A, "A大学")
         await GuildRepository(db).ensure(GUILD_B, "B大学")
         members = MemberRepository(db)
-        tasks = TaskRepository(db)
         progress = ProgressRepository(db)
         schedules = ScheduleRepository(db)
         sessions = LayerSessionRepository(db)
@@ -111,7 +102,6 @@ async def _seed(db_path: str) -> None:
         for guild_id, mark in ((GUILD_A, "A大学"), (GUILD_B, "B大学")):
             await members.upsert_member(guild_id, USER_ID, f"{mark}の部員")
             await members.upsert_team(guild_id, "wing", f"{mark}の主翼班")
-            await tasks.create_task(guild_id, f"{mark}のタスク", USER_ID)
             await progress.upsert_node(guild_id, "m1", name=f"{mark}の機体", now_text=NOW)
             await schedules.create_schedule(
                 guild_id,
@@ -240,8 +230,8 @@ def test_limit_is_capped():
         try:
             repo = TableRepository(db)
             # 上限を超える指定でも例外にならず、SQL に巨大値が渡らない
-            assert await repo.list_rows(GUILD_A, "tasks", limit=10**9) == []
-            assert await repo.list_rows(GUILD_A, "tasks", offset=-5) == []
+            assert await repo.list_rows(GUILD_A, "members", limit=10**9) == []
+            assert await repo.list_rows(GUILD_A, "members", offset=-5) == []
         finally:
             await db.close()
 
@@ -289,34 +279,35 @@ def test_offset_paging_returns_correct_rows():
     db_path = _tmp_db_path()
     asyncio.run(_seed(db_path))
 
-    async def _more_tasks() -> None:
+    async def _more_nodes() -> None:
         db = Database(db_path)
         await db.connect()
         try:
-            tasks = TaskRepository(db)
-            # 期限順に並ぶよう due_date を振る（order_by は due_date, priority DESC）
+            progress = ProgressRepository(db)
+            # 表示順に並ぶよう sort_order を振る（order_by は sort_order, node_id）
             for i in range(2, 6):
-                await tasks.create_task(
-                    GUILD_A, f"A大学のタスク{i}", USER_ID, due_date=f"2026-09-0{i}"
+                await progress.upsert_node(
+                    GUILD_A, f"m{i}", name=f"A大学のノード{i}",
+                    sort_order=float(i), now_text=NOW,
                 )
         finally:
             await db.close()
 
-    asyncio.run(_more_tasks())
+    asyncio.run(_more_nodes())
     client = _logged_in_client(db_path)
     try:
-        first = client.get(f"/api/guilds/{GUILD_A}/tables/tasks?limit=2&offset=0").json()
-        second = client.get(f"/api/guilds/{GUILD_A}/tables/tasks?limit=2&offset=2").json()
+        first = client.get(f"/api/guilds/{GUILD_A}/tables/progress?limit=2&offset=0").json()
+        second = client.get(f"/api/guilds/{GUILD_A}/tables/progress?limit=2&offset=2").json()
         assert first["total"] == 5
         assert second["total"] == 5
         assert len(first["rows"]) == 2
         assert len(second["rows"]) == 2
         # ページが重ならず、並び順どおりに続いている
-        ids_first = [r["local_task_id"] for r in first["rows"]]
-        ids_second = [r["local_task_id"] for r in second["rows"]]
+        ids_first = [r["progress_node_id"] for r in first["rows"]]
+        ids_second = [r["progress_node_id"] for r in second["rows"]]
         assert not set(ids_first) & set(ids_second)
-        titles = [r["title"] for r in first["rows"] + second["rows"]]
-        assert titles == ["A大学のタスク2", "A大学のタスク3", "A大学のタスク4", "A大学のタスク5"]
+        names = [r["name"] for r in first["rows"] + second["rows"]]
+        assert names == ["A大学の機体", "A大学のノード2", "A大学のノード3", "A大学のノード4"]
         assert second["offset"] == 2
         assert second["limit"] == 2
     finally:
@@ -349,20 +340,20 @@ def test_search_filters_rows_and_total():
         db = Database(db_path)
         await db.connect()
         try:
-            tasks = TaskRepository(db)
-            await tasks.create_task(GUILD_A, "主翼のリブ切り出し", USER_ID)
-            await tasks.create_task(GUILD_A, "尾翼の桁巻き", USER_ID)
+            members = MemberRepository(db)
+            await members.upsert_member(GUILD_A, "u-rib", "主翼のリブ切り出し係")
+            await members.upsert_member(GUILD_A, "u-keta", "尾翼の桁巻き係")
         finally:
             await db.close()
 
     asyncio.run(_more())
     client = _logged_in_client(db_path)
     try:
-        body = client.get(f"/api/guilds/{GUILD_A}/tables/tasks?q=主翼").json()
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/members?q=主翼").json()
         assert body["total"] == 1
-        assert [r["title"] for r in body["rows"]] == ["主翼のリブ切り出し"]
+        assert [r["display_name"] for r in body["rows"]] == ["主翼のリブ切り出し係"]
         # ヒットしない語は 0 件（エラーにしない）
-        body = client.get(f"/api/guilds/{GUILD_A}/tables/tasks?q=存在しない語").json()
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/members?q=存在しない語").json()
         assert body["total"] == 0
         assert body["rows"] == []
     finally:
@@ -378,21 +369,21 @@ def test_search_escapes_like_wildcards():
         db = Database(db_path)
         await db.connect()
         try:
-            tasks = TaskRepository(db)
-            await tasks.create_task(GUILD_A, "進捗50%の報告", USER_ID)
-            await tasks.create_task(GUILD_A, "進捗5割の報告", USER_ID)
-            await tasks.create_task(GUILD_A, "main_spar の検査", USER_ID)
-            await tasks.create_task(GUILD_A, "mainXspar の検査", USER_ID)
+            members = MemberRepository(db)
+            await members.upsert_member(GUILD_A, "u-1", "進捗50%の報告")
+            await members.upsert_member(GUILD_A, "u-2", "進捗5割の報告")
+            await members.upsert_member(GUILD_A, "u-3", "main_spar の検査")
+            await members.upsert_member(GUILD_A, "u-4", "mainXspar の検査")
         finally:
             await db.close()
 
     asyncio.run(_more())
     client = _logged_in_client(db_path)
     try:
-        body = client.get(f"/api/guilds/{GUILD_A}/tables/tasks?q=50%25").json()
-        assert [r["title"] for r in body["rows"]] == ["進捗50%の報告"]
-        body = client.get(f"/api/guilds/{GUILD_A}/tables/tasks?q=main_spar").json()
-        assert [r["title"] for r in body["rows"]] == ["main_spar の検査"]
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/members?q=50%25").json()
+        assert [r["display_name"] for r in body["rows"]] == ["進捗50%の報告"]
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/members?q=main_spar").json()
+        assert [r["display_name"] for r in body["rows"]] == ["main_spar の検査"]
     finally:
         client.__exit__(None, None, None)
 
@@ -403,8 +394,8 @@ def test_search_does_not_match_unsearchable_columns():
     asyncio.run(_seed(db_path))
     client = _logged_in_client(db_path)
     try:
-        # created_by は USER_ID（"42"）だが、searchable に無いのでヒットしない
-        body = client.get(f"/api/guilds/{GUILD_A}/tables/tasks?q=42").json()
+        # user_id は USER_ID（"42"）だが、searchable に無いのでヒットしない
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/members?q=42").json()
         assert body["total"] == 0
     finally:
         client.__exit__(None, None, None)
@@ -419,17 +410,17 @@ def test_search_applies_to_csv_export():
         db = Database(db_path)
         await db.connect()
         try:
-            await TaskRepository(db).create_task(GUILD_A, "主翼のリブ切り出し", USER_ID)
+            await MemberRepository(db).upsert_member(GUILD_A, "u-rib", "主翼のリブ切り出し係")
         finally:
             await db.close()
 
     asyncio.run(_more())
     client = _logged_in_client(db_path)
     try:
-        res = client.get(f"/api/guilds/{GUILD_A}/tables/tasks/export.csv?q=主翼")
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/members/export.csv?q=主翼")
         assert res.status_code == 200
-        assert "主翼のリブ切り出し" in res.text
-        assert "A大学のタスク" not in res.text
+        assert "主翼のリブ切り出し係" in res.text
+        assert "A大学の部員" not in res.text
     finally:
         client.__exit__(None, None, None)
 
@@ -467,16 +458,19 @@ def test_searchable_columns_are_whitelisted_text_columns():
 # ソート（D1-3）。ORDER BY はバインドできないため、列名は必ず
 # TableSpec 側のホワイトリストから取る
 # ---------------------------------------------------------------------
-def _seed_sortable_tasks(db_path: str) -> None:
+def _seed_sortable_nodes(db_path: str) -> None:
     async def _more() -> None:
         db = Database(db_path)
         await db.connect()
         try:
-            tasks = TaskRepository(db)
-            await tasks.create_task(GUILD_A, "い", USER_ID, priority=2)
-            await tasks.create_task(GUILD_A, "あ", USER_ID, priority=3)
-            # priority NULL の行（NULL の並び順の検査に使う）
-            await tasks.create_task(GUILD_A, "う", USER_ID)
+            progress = ProgressRepository(db)
+            await progress.upsert_node(
+                GUILD_A, "n-i", name="い", manual_progress=0.2, now_text=NOW)
+            await progress.upsert_node(
+                GUILD_A, "n-a", name="あ", manual_progress=0.3, now_text=NOW)
+            # manual_progress NULL の行（NULL の並び順の検査に使う。
+            # _seed の m1 も NULL なので NULL は計2行になる）
+            await progress.upsert_node(GUILD_A, "n-u", name="う", now_text=NOW)
         finally:
             await db.close()
 
@@ -486,15 +480,15 @@ def _seed_sortable_tasks(db_path: str) -> None:
 def test_sort_by_allowed_column():
     db_path = _tmp_db_path()
     asyncio.run(_seed(db_path))
-    _seed_sortable_tasks(db_path)
+    _seed_sortable_nodes(db_path)
     client = _logged_in_client(db_path)
     try:
         # SQLite の既定コレーションは UTF-8 バイト順（ASCII が仮名より先）
-        body = client.get(f"/api/guilds/{GUILD_A}/tables/tasks?sort=title&dir=asc").json()
-        titles = [r["title"] for r in body["rows"]]
-        assert titles == ["A大学のタスク", "あ", "い", "う"]
-        body = client.get(f"/api/guilds/{GUILD_A}/tables/tasks?sort=title&dir=desc").json()
-        assert [r["title"] for r in body["rows"]] == ["う", "い", "あ", "A大学のタスク"]
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/progress?sort=name&dir=asc").json()
+        names = [r["name"] for r in body["rows"]]
+        assert names == ["A大学の機体", "あ", "い", "う"]
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/progress?sort=name&dir=desc").json()
+        assert [r["name"] for r in body["rows"]] == ["う", "い", "あ", "A大学の機体"]
     finally:
         client.__exit__(None, None, None)
 
@@ -503,15 +497,15 @@ def test_sort_nulls_are_always_last():
     """NULL は昇順・降順とも末尾（SQLite / PostgreSQL で揃える）。"""
     db_path = _tmp_db_path()
     asyncio.run(_seed(db_path))
-    _seed_sortable_tasks(db_path)
+    _seed_sortable_nodes(db_path)
     client = _logged_in_client(db_path)
     try:
         for direction in ("asc", "desc"):
             body = client.get(
-                f"/api/guilds/{GUILD_A}/tables/tasks?sort=priority&dir={direction}"
+                f"/api/guilds/{GUILD_A}/tables/progress?sort=manual_progress&dir={direction}"
             ).json()
-            priorities = [r["priority"] for r in body["rows"]]
-            assert priorities[-2:] == [None, None], (direction, priorities)
+            values = [r["manual_progress"] for r in body["rows"]]
+            assert values[-2:] == [None, None], (direction, values)
     finally:
         client.__exit__(None, None, None)
 
@@ -523,13 +517,13 @@ def test_sort_rejects_unknown_column_and_bad_dir():
     client = _logged_in_client(db_path)
     try:
         assert client.get(
-            f"/api/guilds/{GUILD_A}/tables/tasks?sort=guild_id"
+            f"/api/guilds/{GUILD_A}/tables/members?sort=guild_id"
         ).status_code == 400
         assert client.get(
-            f"/api/guilds/{GUILD_A}/tables/tasks?sort=title;DROP"
+            f"/api/guilds/{GUILD_A}/tables/members?sort=display_name;DROP"
         ).status_code == 400
         assert client.get(
-            f"/api/guilds/{GUILD_A}/tables/tasks?sort=title&dir=up"
+            f"/api/guilds/{GUILD_A}/tables/members?sort=display_name&dir=up"
         ).status_code == 400
     finally:
         client.__exit__(None, None, None)
@@ -538,13 +532,14 @@ def test_sort_rejects_unknown_column_and_bad_dir():
 def test_sort_applies_to_csv_export():
     db_path = _tmp_db_path()
     asyncio.run(_seed(db_path))
-    _seed_sortable_tasks(db_path)
+    _seed_sortable_nodes(db_path)
     client = _logged_in_client(db_path)
     try:
-        res = client.get(f"/api/guilds/{GUILD_A}/tables/tasks/export.csv?sort=title&dir=asc")
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/progress/export.csv?sort=name&dir=asc")
         assert res.status_code == 200
-        lines = [line.split(",")[1] for line in res.text.splitlines()[1:]]
-        assert lines == ["A大学のタスク", "あ", "い", "う"]
+        # 列順は TableSpec 準拠（name は5列目 = index 4）
+        lines = [line.split(",")[4] for line in res.text.splitlines()[1:]]
+        assert lines == ["A大学の機体", "あ", "い", "う"]
     finally:
         client.__exit__(None, None, None)
 
@@ -854,9 +849,9 @@ def test_csv_export_is_not_capped_at_display_limit():
         db = Database(db_path)
         await db.connect()
         try:
-            repo = TaskRepository(db)
+            repo = MemberRepository(db)
             for i in range(over):
-                await repo.create_task(GUILD_A, title=f"タスク{i:04d}", created_by="42")
+                await repo.upsert_member(GUILD_A, f"u{i:04d}", f"部員{i:04d}")
         finally:
             await db.close()
 
@@ -864,11 +859,11 @@ def test_csv_export_is_not_capped_at_display_limit():
 
     client = _logged_in_client(db_path)
     try:
-        res = client.get(f"/api/guilds/{GUILD_A}/tables/tasks/export.csv")
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/members/export.csv")
         assert res.status_code == 200
         body = res.content.decode("utf-8-sig")
-        assert "タスク0000" in body
-        assert f"タスク{over - 1:04d}" in body, "MAX_LIMIT で打ち切られている"
+        assert "部員0000" in body
+        assert f"部員{over - 1:04d}" in body, "MAX_LIMIT で打ち切られている"
         # 見出し1行 + データ行（末尾の改行で空要素が出ないよう strip）
         assert len(body.strip().splitlines()) >= over + 1
     finally:
@@ -914,12 +909,12 @@ def _pg_dsn_or_skip() -> str:
     return dsn
 
 
-async def _pg_reset_tasks(dsn: str) -> None:
+async def _pg_reset_rows(dsn: str) -> None:
     """このテストが使うギルドの行だけ消す（他の行には触らない）。"""
     db = Database("./unused.db", database_url=dsn)
     await db.connect()
     try:
-        for table in ("tasks", "guilds"):
+        for table in ("progress_nodes", "members", "guilds"):
             for guild_id in (GUILD_A, GUILD_B):
                 await db.execute(f"DELETE FROM {table} WHERE guild_id = ?", (guild_id,))
     finally:
@@ -928,29 +923,29 @@ async def _pg_reset_tasks(dsn: str) -> None:
 
 def test_pg_live_search_is_case_insensitive_and_escaped():
     dsn = _pg_dsn_or_skip()
-    asyncio.run(_pg_reset_tasks(dsn))
+    asyncio.run(_pg_reset_rows(dsn))
 
     async def _main() -> None:
         db = Database("./unused.db", database_url=dsn)
         await db.connect()
         try:
             await GuildRepository(db).ensure(GUILD_A, "A大学")
-            tasks = TaskRepository(db)
-            await tasks.create_task(GUILD_A, "Main_Spar の検査", USER_ID)
-            await tasks.create_task(GUILD_A, "MainXSpar の検査", USER_ID)
-            await tasks.create_task(GUILD_A, "進捗50%の報告", USER_ID)
+            members = MemberRepository(db)
+            await members.upsert_member(GUILD_A, "u-1", "Main_Spar の検査")
+            await members.upsert_member(GUILD_A, "u-2", "MainXSpar の検査")
+            await members.upsert_member(GUILD_A, "u-3", "進捗50%の報告")
 
             repo = TableRepository(db)
             # 大文字小文字を区別しない（PG の LIKE は素だと区別する）
-            rows = await repo.list_rows(GUILD_A, "tasks", q="main_spar")
-            assert [r["title"] for r in rows] == ["Main_Spar の検査"]
-            rows = await repo.list_rows(GUILD_A, "tasks", q="MAIN_SPAR")
-            assert [r["title"] for r in rows] == ["Main_Spar の検査"]
+            rows = await repo.list_rows(GUILD_A, "members", q="main_spar")
+            assert [r["display_name"] for r in rows] == ["Main_Spar の検査"]
+            rows = await repo.list_rows(GUILD_A, "members", q="MAIN_SPAR")
+            assert [r["display_name"] for r in rows] == ["Main_Spar の検査"]
             # % はワイルドカードとして扱わない
-            rows = await repo.list_rows(GUILD_A, "tasks", q="50%")
-            assert [r["title"] for r in rows] == ["進捗50%の報告"]
+            rows = await repo.list_rows(GUILD_A, "members", q="50%")
+            assert [r["display_name"] for r in rows] == ["進捗50%の報告"]
             # total にも効く
-            assert await repo.count_rows(GUILD_A, "tasks", q="main_spar") == 1
+            assert await repo.count_rows(GUILD_A, "members", q="main_spar") == 1
         finally:
             await db.close()
 
@@ -965,22 +960,28 @@ def test_pg_live_sort_nulls_are_always_last():
     （SQLite は元々 DESC でも NULL が末尾なので、SQLite だけでは検出できない）。
     """
     dsn = _pg_dsn_or_skip()
-    asyncio.run(_pg_reset_tasks(dsn))
+    asyncio.run(_pg_reset_rows(dsn))
 
     async def _main() -> None:
         db = Database("./unused.db", database_url=dsn)
         await db.connect()
         try:
             await GuildRepository(db).ensure(GUILD_A, "A大学")
-            tasks = TaskRepository(db)
-            await tasks.create_task(GUILD_A, "低", USER_ID, priority=1)
-            await tasks.create_task(GUILD_A, "高", USER_ID, priority=3)
-            await tasks.create_task(GUILD_A, "なし", USER_ID)
+            progress = ProgressRepository(db)
+            await progress.upsert_node(
+                GUILD_A, "n-low", name="低", manual_progress=0.25, now_text=NOW)
+            await progress.upsert_node(
+                GUILD_A, "n-high", name="高", manual_progress=0.75, now_text=NOW)
+            await progress.upsert_node(GUILD_A, "n-none", name="なし", now_text=NOW)
 
             repo = TableRepository(db)
-            for direction, expected in (("asc", [1, 3, None]), ("desc", [3, 1, None])):
-                rows = await repo.list_rows(GUILD_A, "tasks", sort="priority", dir=direction)
-                assert [r["priority"] for r in rows] == expected, direction
+            for direction, expected in (
+                ("asc", [0.25, 0.75, None]),
+                ("desc", [0.75, 0.25, None]),
+            ):
+                rows = await repo.list_rows(
+                    GUILD_A, "progress", sort="manual_progress", dir=direction)
+                assert [r["manual_progress"] for r in rows] == expected, direction
         finally:
             await db.close()
 

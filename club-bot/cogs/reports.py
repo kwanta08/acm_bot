@@ -25,8 +25,8 @@ from repositories.name_cache_repository import ENTITY_USER, NameCacheRepository
 from repositories.progress_repository import ProgressRepository
 from repositories.reminders_log_repository import RemindersLogRepository
 from repositories.schedule_repository import ScheduleRepository
-from repositories.task_repository import TaskRepository
-from services import team_service
+from repositories.section_repository import SectionRepository
+from services import team_service, todoist_task_service
 from services.attendance_service import (
     MemberAttendance,
     ScheduleAnswers,
@@ -37,15 +37,13 @@ from services.layer_stats_service import aggregate_layer_stats
 from services.milestone_service import days_until_competition, evaluate_all
 from services.progress_tree import load_tree
 from services.schedule_service import select_unanswered_targets
-from services.weekly_digest_service import (
-    count_completed_between,
-    last_week_range,
-    week_label,
-)
+from services.todoist_service import TodoistError
+from services.weekly_digest_service import last_week_range, week_label
 from utils.embeds import (
     MAX_EMBED_FIELDS,
     add_truncation_note,
     empty_state_embed,
+    error_embed,
     info_embed,
     success_embed,
 )
@@ -59,7 +57,6 @@ log = get_logger("reports")
 class Reports(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.task_repo = TaskRepository(bot.db)
         self.schedule_repo = ScheduleRepository(bot.db)
         self.log_repo = RemindersLogRepository(bot.db)
         self.audit_repo = AuditLogRepository(bot.db)
@@ -81,17 +78,12 @@ class Reports(commands.Cog):
         （ADR 0023 と同じ考え方: 言うことが無い週は黙る）。
         """
         current = now_dt or now()
-        today = current.date().isoformat()
-        overdue = await self.task_repo.list_overdue(guild_id, today)
-        open_tasks = await self.task_repo.list_tasks(guild_id, status="open")
-        schedules = await self.schedule_repo.list_open_schedules(guild_id)
         start, end = last_week_range(current)
-        completed = count_completed_between(
-            await self.task_repo.list_completed(guild_id), start, end
-        )
+        schedules = await self.schedule_repo.list_open_schedules(guild_id)
         layer = aggregate_layer_stats(
             await self.session_repo.list_records(guild_id), {}, since=start, until=end
         )
+        open_tasks, overdue, completed = await self._weekly_task_stats(guild_id, current, start, end)
 
         gconf = await config.for_guild(guild_id, db=self.bot.db)
 
@@ -107,23 +99,25 @@ class Reports(commands.Cog):
 
         # 先週の実績（G4-5）。**「遅延はありません」の類は書かない**
         # ——それを入れると ADR 0023 が却下した「毎週届く定型文」になる
+        #
+        # 完了タスク数は Todoist が返せたときだけ出す。取れないときに 0 と
+        # 書くと「先週は1件も終わらなかった」という嘘になる
+        lines = []
+        if completed is not None:
+            lines.append(f"完了タスク {completed} 件")
+        lines.append(
+            f"積層 {layer.records} 件 / {layer.total_minutes} 分 / 参加 {len(layer.members)} 人"
+        )
         embed.add_field(
             name=f"先週の実績（{week_label(start, end)}）",
-            value=(
-                f"完了タスク {completed} 件\n"
-                f"積層 {layer.records} 件 / {layer.total_minutes} 分 / "
-                f"参加 {len(layer.members)} 人"
-            ),
+            value="\n".join(lines),
             inline=False,
         )
 
-        # 班別タスク集計
-        team_names = await team_service.team_name_map(self.bot.db, guild_id)
-        by_team: dict[str, int] = {}
-        for t in open_tasks:
-            key = t.get("team_key") or "未分類"
-            by_team[key] = by_team.get(key, 0) + 1
+        # 班別タスク集計（Todoist セクション ↔ 班 の紐付けで振り分ける）
+        by_team = await self._count_tasks_by_team(guild_id, open_tasks)
         if by_team:
+            team_names = await team_service.team_name_map(self.bot.db, guild_id)
             lines = [f"{team_names.get(k, k)}: {v}" for k, v in sorted(by_team.items())]
             embed.add_field(name="班別未完了タスク", value="\n".join(lines), inline=False)
 
@@ -157,6 +151,46 @@ class Reports(commands.Cog):
             )
             return
         await interaction.followup.send(embed=embed, ephemeral=not public)
+
+    async def _weekly_task_stats(self, guild_id: int, current, start, end):
+        """週次サマリーのタスク集計を Todoist から取る。
+
+        戻り値は `(未完了, 期限超過, 先週の完了件数 | None)`。Todoist 未設定・
+        API 障害のときは「タスクの数字は出せない」として空・None を返し、
+        サマリーの他の項目（投票・積層）は従来どおり出す。
+        """
+        svc = await self.bot.todoist_manager.for_guild(guild_id)
+        if not svc.enabled:
+            return [], [], None
+        try:
+            open_tasks = await todoist_task_service.list_open_tasks(svc)
+        except TodoistError as e:
+            log.warning("週次サマリーのタスク取得に失敗 (guild=%s): %s", guild_id, e)
+            return [], [], None
+        overdue = todoist_task_service.overdue(open_tasks, current.date())
+        try:
+            done = await svc.get_completed_tasks_between(start, end)
+        except TodoistError as e:
+            log.warning("完了タスクの取得に失敗 (guild=%s): %s", guild_id, e)
+            done = None
+        return open_tasks, overdue, None if done is None else len(done)
+
+    async def _count_tasks_by_team(self, guild_id: int, tasks_) -> dict[str, int]:
+        """Todoist タスクを、セクション紐付け経由で班別に数える。"""
+        if not tasks_:
+            return {}
+        try:
+            links = await SectionRepository(self.bot.db).list_links(guild_id)
+        except Exception as e:  # noqa: BLE001  (週次サマリー全体は止めない)
+            log.warning("セクション紐付けの取得に失敗 (guild=%s): %s", guild_id, type(e).__name__)
+            return {}
+        section_team = {link["section_id"]: link["team_key"] for link in links}
+        by_team: dict[str, int] = {}
+        for t in tasks_:
+            key = section_team.get(t.section_id) if t.section_id else None
+            key = key or "未分類"
+            by_team[key] = by_team.get(key, 0) + 1
+        return by_team
 
     async def countdown_summary(self, guild_id: int, gconf) -> str:
         """「大会まで N 日 / 遅延 M 件」の1行。
@@ -193,51 +227,75 @@ class Reports(commands.Cog):
         return " / ".join(parts)
 
     # ---------- export tasks (CSV) ----------
-    @group.command(name="export-tasks", description="タスク一覧を CSV で出力します。")
+    @group.command(name="export-tasks", description="未完了タスクを CSV で出力します。")
     @require(Level.L2)
     async def export_tasks(self, interaction: discord.Interaction):
+        """Todoist の未完了タスクを CSV にする。
+
+        タスクの正本は Todoist なので、完了・削除済みはここには出ない
+        （Todoist の `get_tasks` が未完了しか返さない）。
+        """
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
             return
-        tasks = await self.task_repo.list_all_for_export(guild_id)
+        svc = await self.bot.todoist_manager.for_guild(guild_id)
+        if not svc.enabled:
+            await interaction.followup.send(
+                embed=empty_state_embed(
+                    "タスク CSV",
+                    "このサーバーでは Todoist が未設定です。\n"
+                    "管理者が `/todoist-setup` で登録すると出力できます。",
+                    "/todoist-setup",
+                ),
+                ephemeral=True,
+            )
+            return
+        try:
+            tasks = await todoist_task_service.list_open_tasks(svc)
+        except TodoistError:
+            await interaction.followup.send(
+                embed=error_embed(
+                    "Todoist の取得に失敗しました。時間をおいて再試行してください。",
+                    code="TODOIST_API_FAILED",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        links = await SectionRepository(self.bot.db).list_links(guild_id)
+        section_team = {link["section_id"]: link["team_key"] for link in links}
+        section_names = {
+            link["section_id"]: (link.get("section_name") or link["section_id"]) for link in links
+        }
         team_names = await team_service.team_name_map(self.bot.db, guild_id)
-        guild = interaction.guild
+
         buf = io.StringIO()
         writer = csv.writer(buf)
         writer.writerow(
             [
-                "local_task_id",
                 "todoist_task_id",
                 "title",
-                "assignee",
+                "section",
                 "team",
                 "due_date",
                 "priority",
-                "status",
-                "created_by",
-                "created_at",
-                "completed_at",
+                "url",
+                "description",
             ]
         )
-        for t in tasks:
-            assignee = ""
-            if t.get("assignee_id") and guild:
-                m = guild.get_member(int(t["assignee_id"]))
-                assignee = m.display_name if m else t["assignee_id"]
+        for t in todoist_task_service.sort_for_display(tasks):
+            team_key = section_team.get(t.section_id) if t.section_id else None
             writer.writerow(
                 [
-                    t["local_task_id"],
-                    t.get("todoist_task_id") or "",
-                    t["title"],
-                    assignee,
-                    team_names.get(t.get("team_key"), t.get("team_key") or ""),
-                    t.get("due_date") or "",
-                    t.get("priority") or "",
-                    t["status"],
-                    t["created_by"],
-                    t["created_at"],
-                    t.get("completed_at") or "",
+                    t.id,
+                    t.content,
+                    section_names.get(t.section_id, t.section_id or ""),
+                    team_names.get(team_key, team_key or ""),
+                    t.due_date.isoformat() if t.due_date else "",
+                    t.priority,
+                    t.url,
+                    t.description,
                 ]
             )
         data = buf.getvalue().encode("utf-8-sig")

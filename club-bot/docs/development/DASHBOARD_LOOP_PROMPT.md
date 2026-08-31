@@ -1,6 +1,6 @@
 # Claude Code（Opus 5）でダッシュボード改良を回すための起動プロンプト
 
-`docs/DASHBOARD_TASKS.md`（D0〜D3）を Claude Code で 1 タスクずつ実装するための入力集。
+`docs/development/DASHBOARD_TASKS.md`（D0〜D3）を Claude Code で 1 タスクずつ実装するための入力集。
 `docs/IMPROVEMENT_LOOP_PROMPT.md` と同じ構成で、**ダッシュボード（`club-bot/dashboard/`）専用**。
 Cowork（チャット）ではなく **アプリ内 / ターミナルの Claude Code で実装する**前提。
 
@@ -80,7 +80,7 @@ Claude Code が自動で読むのは `CLAUDE.md`。**現状は完了済みの `F
 
 ## 実装タスク（2トラック並行。1セッションで混ぜない）
 - bot 側の改善: club-bot/docs/IMPROVEMENT_TASKS.md（G0〜G4。根拠は docs/IMPROVEMENT_REPORT.md）
-- ダッシュボード改良: club-bot/docs/DASHBOARD_TASKS.md（D0〜D3。根拠は同レポート P1-12）
+- ダッシュボード改良: club-bot/docs/development/DASHBOARD_TASKS.md（D0〜D3。根拠は同レポート P1-12）
 - 完了済み: club-bot/docs/FEATURE_TASKS.md / docs/PUBLIC_RELEASE_TASKS.md
 - 実装ループは /acm-bot-loop スキルの手順で回す（全テストパスまで自走）
 
@@ -128,12 +128,12 @@ D0-2 の完了後は Node も要る（**npm install はしない**。標準の `
 ```
 /acm-bot-loop
 
-club-bot/docs/DASHBOARD_TASKS.md を読み、未完了（チェックが入っていない）で
+club-bot/docs/development/DASHBOARD_TASKS.md を読み、未完了（チェックが入っていない）で
 最も若い番号のタスクを 1 つだけ実装して。【人間タスク】は飛ばす。
 
 ## 事前に読むもの（実装より先に）
 
-1. club-bot/docs/DASHBOARD_TASKS.md の「運用ルール」「全タスク共通の受入基準」
+1. club-bot/docs/development/DASHBOARD_TASKS.md の「運用ルール」「全タスク共通の受入基準」
    「この表に固有の受入基準」「デザイン方針」と、対象タスクの受入基準・検証・注意
 2. ClaudeVault の decisions/_index.md と gotchas/_index.md
    （/add-dir 済み。パスは C:\Users\yoshi\ClaudeVault\ClaudeVault\projects\acm_bot）
@@ -180,7 +180,7 @@ club-bot/docs/DASHBOARD_TASKS.md を読み、未完了（チェックが入っ�
 §A のプロンプトを貼る前に **Shift+Tab を2回**押してプランモードへ。
 
 ```
-club-bot/docs/DASHBOARD_TASKS.md の D0-2 を実装する前に、設計だけ立てて。
+club-bot/docs/development/DASHBOARD_TASKS.md の D0-2 を実装する前に、設計だけ立てて。
 
 現状 dashboard/static/app.js は 425 行あるがテストが1件も無く、CI も Python だけ。
 この状態で D1〜D3 を回すと「全テストパス」がフロントの変更を検証しない。
@@ -208,7 +208,7 @@ club-bot/docs/DASHBOARD_TASKS.md の D0-2 を実装する前に、設計だけ�
 **既存ギルドの設定値を動かす。ADR 0024 に直接触れる。**
 
 ```
-club-bot/docs/DASHBOARD_TASKS.md の D2-1 を実装する前に、設計だけ立てて。
+club-bot/docs/development/DASHBOARD_TASKS.md の D2-1 を実装する前に、設計だけ立てて。
 
 - 既存ギルドの DB を壊さないマイグレーション手順
   （v番号・migrations/NNN の内容・_migrate_vNN_*() の中身・既存値の扱い）
@@ -237,7 +237,7 @@ D3 は「テストが緑」だけでは終わらない。**見た目の確認が
 ```
 /acm-bot-loop
 
-club-bot/docs/DASHBOARD_TASKS.md の <タスクID> を実装して。
+club-bot/docs/development/DASHBOARD_TASKS.md の <タスクID> を実装して。
 
 このタスクは見た目を変える。手順を次の順で進めること:
 
@@ -352,7 +352,7 @@ Vault のファイルは私が書くので、次の形で出力するだけで�
 ```
 /acm-bot-loop
 
-git status と現在のブランチ、club-bot/docs/DASHBOARD_TASKS.md の完了ログを確認して、
+git status と現在のブランチ、club-bot/docs/development/DASHBOARD_TASKS.md の完了ログを確認して、
 前回どこまで進んだかを把握してから続きを1タスク実装して。
 未コミットの作業が残っていれば、新しいタスクに入る前にそれを完成させる。
 
@@ -365,7 +365,7 @@ docs/IMPROVEMENT_TASKS.md（G0〜G4）のタスクには手を出さない。別
 **表そのものを見直す:**
 
 ```
-club-bot/docs/DASHBOARD_TASKS.md の Phase D<N> の受入基準を、実際のコード
+club-bot/docs/development/DASHBOARD_TASKS.md の Phase D<N> の受入基準を、実際のコード
 （dashboard/ と repositories/table_repository.py）と
 ClaudeVault の decisions/ ・ gotchas/ と突き合わせてレビューして。
 
@@ -392,7 +392,7 @@ for i in $(seq 1 4); do
   echo "=== iteration $i ==="
   claude -p --model opus --permission-mode acceptEdits \
     --add-dir /c/Users/yoshi/ClaudeVault/ClaudeVault/projects/acm_bot \
-    "/acm-bot-loop club-bot/docs/DASHBOARD_TASKS.md の未完了で最も若いタスク（【人間タスク】は除く）を
+    "/acm-bot-loop club-bot/docs/development/DASHBOARD_TASKS.md の未完了で最も若いタスク（【人間タスク】は除く）を
      1つだけ実装し、ruff と pytest（-rs 付き）が全パスするまで自走して。
      ClaudeVault の decisions/_index.md と gotchas/_index.md を先に読み、ADR に反する実装をしない。
      配信物に外部依存を足さない。完了したら表のチェックと完了ログを更新する。コミットはしない。

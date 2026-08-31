@@ -11,7 +11,7 @@ asyncpg は int8 の引数に float を渡しても DataError を投げるので
 そのあと bot 側の読み取りが壊れる（gotcha `progress-stops-after-dashboard-edit` と同型）。
 
 **number の既定を int にはできない。** 編集できる number 列は整数と実数が混在する:
-INTEGER が `tasks.priority` / `layer_records.minutes`、
+INTEGER が `layer_records.minutes`、
 REAL が `progress.sort_order` / `target_weight_g` / `actual_weight_g`。
 どちらを既定にしても他方が壊れるので、列ごとに宣言させる。
 """
@@ -60,7 +60,6 @@ def _column(table_key: str, name: str) -> Column:
     return next(c for c in get_spec(table_key).columns if c.name == name)
 
 
-PRIORITY = _column("tasks", "priority")  # INTEGER
 MINUTES = _column("layer_records", "minutes")  # INTEGER
 SORT_ORDER = _column("progress", "sort_order")  # REAL
 TARGET_WEIGHT = _column("progress", "target_weight_g")  # REAL
@@ -101,7 +100,6 @@ def test_editable_number_columns_are_a_mix_of_int_and_real():
         if c.type == "number" and c.editable
     }
     assert editable == {
-        ("tasks", "priority"): "int",
         ("layer_records", "minutes"): "int",
         ("progress", "sort_order"): "real",
         ("progress", "target_weight_g"): "real",
@@ -129,7 +127,7 @@ def test_number_type_on_a_non_number_column_is_rejected():
 # ---------------------------------------------------------------------
 @pytest.mark.parametrize(("raw", "expected"), [("3", 3), (3, 3), (" 4 ", 4), ("2.0", 2), (2.0, 2)])
 def test_integer_column_normalises_to_int(raw, expected):
-    got = _coerce(PRIORITY, raw)
+    got = _coerce(MINUTES, raw)
     assert got == expected
     assert isinstance(got, int)
 
@@ -138,21 +136,21 @@ def test_integer_column_normalises_to_int(raw, expected):
 def test_integer_column_rejects_fractions(raw):
     """丸めない。400 にして利用者に入れ直してもらう。"""
     with pytest.raises(InvalidValueError) as excinfo:
-        _coerce(PRIORITY, raw)
+        _coerce(MINUTES, raw)
     assert "整数" in str(excinfo.value)
 
 
 def test_integer_column_rejects_float_from_json_body():
-    """`{"priority": 2.7}` は文字列を経ないので、素通りの穴になっていた。"""
+    """`{"minutes": 30.5}` は文字列を経ないので、素通りの穴になっていた。"""
     with pytest.raises(InvalidValueError):
-        _coerce(PRIORITY, 2.7)
+        _coerce(MINUTES, 2.7)
     with pytest.raises(InvalidValueError):
         _coerce(MINUTES, 30.5)
 
 
 def test_integer_column_still_rejects_text():
     with pytest.raises(InvalidValueError):
-        _coerce(PRIORITY, "いちばん上")
+        _coerce(MINUTES, "さんじゅっぷん")
 
 
 # ---------------------------------------------------------------------
@@ -179,14 +177,14 @@ def test_real_column_rejects_text():
 # 既存の契約は変えない
 # ---------------------------------------------------------------------
 def test_empty_stays_none_for_both_kinds():
-    assert _coerce(PRIORITY, "") is None
+    assert _coerce(MINUTES, "") is None
     assert _coerce(SORT_ORDER, "") is None
-    assert _coerce(PRIORITY, None) is None
+    assert _coerce(MINUTES, None) is None
 
 
 def test_bool_is_still_accepted_as_0_or_1():
-    assert _coerce(PRIORITY, True) == 1
-    assert _coerce(PRIORITY, False) == 0
+    assert _coerce(MINUTES, True) == 1
+    assert _coerce(MINUTES, False) == 0
 
 
 # ---------------------------------------------------------------------
@@ -208,11 +206,12 @@ class _SpyDatabase(Database):
         return await super().execute(sql, params)
 
 
-async def _seed_task(db: Database) -> int:
+async def _seed_record(db: Database) -> int:
     cur = await db.execute(
-        "INSERT INTO tasks (guild_id, title, status, created_by, created_at, priority)"
-        " VALUES (?, ?, 'open', 'tester', '2026-01-01', 2)",
-        (G1, "主桁の積層"),
+        "INSERT INTO layer_records (guild_id, user_id, keta, layer_num,"
+        " started_at, ended_at, minutes)"
+        " VALUES (?, 'tester', '主桁', '3', '2026-01-01 10:00', '2026-01-01 10:02', 2)",
+        (G1,),
     )
     return cur.lastrowid
 
@@ -224,11 +223,11 @@ def test_update_row_passes_an_int_to_the_driver_for_integer_columns():
         db = _SpyDatabase(_tmp_db_path())
         await db.connect()
         try:
-            task_id = await _seed_task(db)
+            record_id = await _seed_record(db)
             repo = TableRepository(db)
             db.seen_params.clear()
 
-            assert await repo.update_row(G1, "tasks", task_id, {"priority": "3"}) is True
+            assert await repo.update_row(G1, "layer_records", record_id, {"minutes": "3"}) is True
 
             bound = db.seen_params[-1][0]
             assert bound == 3
@@ -244,13 +243,13 @@ def test_update_row_rejects_a_fraction_for_an_integer_column():
         db = Database(_tmp_db_path())
         await db.connect()
         try:
-            task_id = await _seed_task(db)
+            record_id = await _seed_record(db)
             repo = TableRepository(db)
             with pytest.raises(InvalidValueError):
-                await repo.update_row(G1, "tasks", task_id, {"priority": 2.7})
+                await repo.update_row(G1, "layer_records", record_id, {"minutes": 2.7})
 
             # 元の値のまま（部分書き込みが起きていない）
-            assert (await repo.get_row(G1, "tasks", task_id))["priority"] == 2
+            assert (await repo.get_row(G1, "layer_records", record_id))["minutes"] == 2
         finally:
             await db.close()
 
@@ -314,22 +313,22 @@ def test_editable_integer_columns_are_int4_in_postgres():
 def test_integer_column_rejects_values_outside_bigint(raw):
     """BIGINT に収まらない値は 400。asyncpg は int8 の範囲外で DataError を投げる。"""
     with pytest.raises(InvalidValueError) as excinfo:
-        _coerce(PRIORITY, raw)
+        _coerce(MINUTES, raw)
     assert "範囲を超えています" in str(excinfo.value)
 
 
 @pytest.mark.parametrize("raw", [INT32_MAX, INT32_MIN, str(INT32_MAX), str(INT32_MIN)])
 def test_integer_column_accepts_the_bigint_boundary(raw):
     """境界そのものは通す（1つ内側で切らない）。"""
-    got = _coerce(PRIORITY, raw)
+    got = _coerce(MINUTES, raw)
     assert got == int(raw)
     assert isinstance(got, int)
 
 
 def test_integer_range_check_does_not_break_the_equivalent_conversion():
     """G1-9 の「2.0 は 2 として受ける」を壊していないこと。"""
-    assert _coerce(PRIORITY, "2.0") == 2
-    assert _coerce(PRIORITY, 2.0) == 2
+    assert _coerce(MINUTES, "2.0") == 2
+    assert _coerce(MINUTES, 2.0) == 2
     # 2**30 は int4 に収まり float64 でも厳密なので、往復しても値が変わらない
     assert _coerce(MINUTES, float(2**30)) == 2**30
 
@@ -345,14 +344,14 @@ def test_float_just_outside_the_boundary_is_rejected_not_truncated():
     just_outside = float(INT32_MAX + 1)
     assert just_outside.is_integer(), "前提: 等価変換は通ってしまう形"
     with pytest.raises(InvalidValueError) as excinfo:
-        _coerce(PRIORITY, just_outside)
+        _coerce(MINUTES, just_outside)
     assert "範囲を超えています" in str(excinfo.value)
 
 
 def test_integer_column_rejects_infinity():
     """inf は「小数」ではなく「範囲外」として説明する。"""
     with pytest.raises(InvalidValueError) as excinfo:
-        _coerce(PRIORITY, "inf")
+        _coerce(MINUTES, "inf")
     assert "範囲を超えています" in str(excinfo.value)
 
 
@@ -421,12 +420,12 @@ def test_update_row_rejects_out_of_range_without_partial_write():
         db = Database(_tmp_db_path())
         await db.connect()
         try:
-            task_id = await _seed_task(db)
+            record_id = await _seed_record(db)
             repo = TableRepository(db)
             with pytest.raises(InvalidValueError):
-                await repo.update_row(G1, "tasks", task_id, {"priority": "9" * 30})
+                await repo.update_row(G1, "layer_records", record_id, {"minutes": "9" * 30})
 
-            assert (await repo.get_row(G1, "tasks", task_id))["priority"] == 2
+            assert (await repo.get_row(G1, "layer_records", record_id))["minutes"] == 2
         finally:
             await db.close()
 

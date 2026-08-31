@@ -1,4 +1,4 @@
-"""D2-1: `GUILD_NAME` → `CLUB_NAME` の統一（スキーマ v22）。
+"""D2-1: `GUILD_NAME` → `CLUB_NAME` の統一（スキーマ v24（開発時 v22 から採番し直し））。
 
 ダッシュボードは「サークル名」を `GUILD_NAME` キーで保存していたが、
 週次サマリー等が読むのは `CLUB_NAME`（config.py）。**保存しても反映されない**
@@ -75,7 +75,7 @@ async def _settings(db: Database, guild_id: int) -> dict[str, str]:
     return {r["setting_key"]: r["setting_value"] for r in rows}
 
 
-def test_v22_copies_guild_name_without_overwriting_club_name():
+def test_v24_copies_guild_name_without_overwriting_club_name():
     async def _main():
         path = _make_v21_db()
         db = Database(path)
@@ -104,7 +104,7 @@ def test_v22_copies_guild_name_without_overwriting_club_name():
     run(_main())
 
 
-def test_v22_migration_is_idempotent():
+def test_v24_migration_is_idempotent():
     """同じ移行を2回適用しても結果が変わらない（冪等）。"""
 
     async def _main():
@@ -113,7 +113,7 @@ def test_v22_migration_is_idempotent():
         await db.connect()
         try:
             before = await _settings(db, G_B)
-            await db._migrate_v22_club_name_key()
+            await db._migrate_v24_club_name_key()
             assert await _settings(db, G_B) == before
         finally:
             await db.close()
@@ -160,7 +160,7 @@ def _pg_dsn_or_skip() -> str:
 def test_pg_live_club_name_copy_sql_runs_on_postgres():
     """コピーの SQL が PostgreSQL でも同じ結果になること（D2-1）。
 
-    実 DB は既に v22 のため版ゲートで再実行されない。移行メソッドを直接
+    実 DB は既に v24 のため版ゲートで再実行されない。移行メソッドを直接
     呼び、(a)(b)(c) の3ケースが SQLite と同じ結果になることを確かめる。
     """
     dsn = _pg_dsn_or_skip()
@@ -184,7 +184,7 @@ def test_pg_live_club_name_copy_sql_runs_on_postgres():
                     row,
                 )
 
-            await db._migrate_v22_club_name_key()
+            await db._migrate_v24_club_name_key()
 
             a = await _settings(db, G_A)
             assert a["CLUB_NAME"] == "鳥人研" and a["GUILD_NAME"] == "鳥人研"

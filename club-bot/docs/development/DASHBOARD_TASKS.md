@@ -59,7 +59,7 @@
 
 | 版 | migration | タスク |
 |---|---|---|
-| v22 | `021_club_name_key.sql` | D2-1（`GUILD_NAME` → `CLUB_NAME`）。着手時の SCHEMA_VERSION が 21（G4 完了後）だったため v20 予約から繰り下げ |
+| v22 | `021_club_name_key.sql` | D2-1（`GUILD_NAME` → `CLUB_NAME`）。着手時の SCHEMA_VERSION が 21（G4 完了後）だったため v20 予約から繰り下げ。**【追記】main 側の v22（機能廃止）・v23（ui_style）と衝突したため、main へのマージ時に v24 / `023_club_name_key.sql` へ採番し直した** |
 
 着手時に `utils/db.py` の `SCHEMA_VERSION` の現在値を必ず読み直す。
 G3/G4 の進み方によっては番号がずれる。
@@ -721,6 +721,9 @@ P1-12 の「設定画面が無い」の行は `/settings` と `/summary` の**2�
 - **完了内容**: スキーマ **v22**（着手時の SCHEMA_VERSION が 21 だったため、表の
   v20 予約から繰り下げ）。`migrations/021_club_name_key.sql` ＋
   `utils/db.py::_migrate_v22_club_name_key()` ＋ `SCHEMA_VERSION = 22`。
+  **【追記】main 側が独自に v22（機能廃止）・v23（ui_style）を切ったため、
+  マージ時に v24 / `migrations/023_club_name_key.sql` /
+  `_migrate_v24_club_name_key()` へ採番し直した。**
   `INSERT ... SELECT ... WHERE NOT EXISTS` の1文で
   (a) `GUILD_NAME` だけ → コピー / (b) 両方 → 上書きしない / (c) 無し → 何もしない。
   `EDITABLE_SETTINGS` のキーを `CLUB_NAME` へ変更（既存の settings テストも新キーへ更新）。

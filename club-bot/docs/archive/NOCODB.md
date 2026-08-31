@@ -1,5 +1,11 @@
 # NocoDB 運用ガイド（レガシー）
 
+> **アーカイブです（[archive/README.md](README.md)）。**
+> 現在は使われていない構成、またはすでに完了した移行作業の記録で、
+> **現行構成のセットアップ手順ではありません。**
+> 新しく動かす場合は [`../SETUP.md`](../SETUP.md)、運用は
+> [`../OPERATION.md`](../OPERATION.md) を参照してください。
+
 > ⚠️ **この構成はレガシーです。** 外部の閲覧 UI 連携（NocoDB / Directus）は
 > 廃止され、現行の本番構成は PostgreSQL 単体
 > （`deploy/docker-compose.postgres.yml`）です。
@@ -131,7 +137,7 @@ NocoDB のグリッドビューにはフィルタ機能がある。各テーブ�
 | `v_team_summary` | 班ごとの所属人数・班長数（旧 team_summary 相当） | teams / members |
 | `v_todoist_status` | Todoist 連携状態（暗号文を含まない） | todoist_configs |
 
-SQL ビューをギルド別に作りたい場合は `docs/GUILD_VIEWS.sql` の雛形を
+SQL ビューをギルド別に作りたい場合は `docs/archive/GUILD_VIEWS.sql` の雛形を
 PostgreSQL 用に読み替えて使う（`v_<table>_g<guild_id>` 命名で
 `WHERE guild_id = <ID>` を固定）。
 

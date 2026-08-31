@@ -8,8 +8,8 @@
 - on_guild_join による新規ギルド自動セットアップ
 - グローバルエラーハンドラ
 
-班（teams）・技能タグ（skill_tags）は固定の初期値を投入せず、
-新規ギルドは空の状態で開始する。管理者が /team-add /skill-add で登録する。
+班（teams）は固定の初期値を投入せず、新規ギルドは空の状態で開始する。
+管理者が /team-add で登録する。
 """
 
 from __future__ import annotations
@@ -48,13 +48,12 @@ COGS = [
     "cogs.layer_tracking",
     "cogs.settings",  # 設定管理コグを追加
     "cogs.setup_wizard",  # /setup 設定ウィザードコグ
-    "cogs.teams",  # 班・技能タグ管理コグ
+    "cogs.teams",  # 班マスタ管理コグ
     "cogs.todoist_admin",  # Todoist トークン管理コグ
     "cogs.progress",  # 機体進捗管理コグ（DB 正本）
     "cogs.welcome",  # 新入生オンボーディング（既定 OFF）
     "cogs.me",  # /me 個人サマリー（既存クエリの合成のみ）
-    "cogs.inventory",  # /stock 資材・消耗品の在庫 ／ /tool 工具の貸出
-    "cogs.safety",  # /incident ヒヤリハット・事故報告
+    "cogs.inventory",  # /stock 資材・消耗品の在庫
 ]
 
 # on_guild_join / 起動時の自動セットアップで投入するギルド別デフォルト設定
@@ -219,6 +218,15 @@ class ClubBot(commands.Bot):
         except Exception:
             log.exception("DynamicItem の登録に失敗: cogs.welcome")
 
+        # 日程調整のボタン投票（候補ボタンとステータス選択）。
+        # こちらも登録を忘れると再起動後に投票ボードが無反応になる
+        try:
+            from cogs.schedule import VoteOptionButton, VoteStatusButton
+
+            self.add_dynamic_items(VoteOptionButton, VoteStatusButton)
+        except Exception:
+            log.exception("DynamicItem の登録に失敗: cogs.schedule")
+
         # スラッシュコマンドはグローバル登録に統一する。
         # 新規サーバーへ参加してもコマンド登録の追加作業は不要
         # （グローバル反映には最大1時間程度かかることがある。README 参照）。
@@ -251,8 +259,8 @@ class ClubBot(commands.Bot):
         そのため権限が後から付与されたギルドでは、次の起動時に (b) が
         再試行される。
 
-        班・技能タグの初期値は投入しない（新規ギルドは空で開始。
-        管理者が /team-add /skill-add で登録する）。
+        班の初期値は投入しない（新規ギルドは空で開始。
+        管理者が /team-add で登録する）。
 
         戻り値は「ロールもログチャンネルも settings に揃ったか」。
         """

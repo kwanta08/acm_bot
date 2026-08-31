@@ -1,6 +1,11 @@
 # 新機能タスク管理（/help・データ削除・重量管理・大会逆算・年度替わり）
 
-`docs/PUBLIC_RELEASE_TASKS.md` に続く第2の管理表。公開配布の準備が一巡した後に着手する
+> **内部の作業用ドキュメントです（[development/README.md](README.md)）。**
+> 書かれた時点のスナップショットで、現在のコードとは食い違う記述を含みます。
+> **現状の仕様の根拠には使えません。** 使い方は [`../GUIDE.md`](../GUIDE.md)、
+> 運用は [`../OPERATION.md`](../OPERATION.md) を参照してください。
+
+`docs/development/PUBLIC_RELEASE_TASKS.md` に続く第2の管理表。公開配布の準備が一巡した後に着手する
 5機能を、`/acm-bot-loop` で1タスクずつ回すために分解したもの。
 
 ## 運用ルール

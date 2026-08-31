@@ -12,7 +12,6 @@ from dashboard.db import get_database
 from dashboard.security import ScopedGuild
 from repositories.member_repository import MemberRepository
 from repositories.progress_repository import ProgressRepository
-from repositories.task_repository import TaskRepository
 
 router = APIRouter(prefix="/api/guilds/{guild_id}")
 
@@ -39,6 +38,5 @@ async def guild_summary(scope: ScopedGuild):
             "members": len(member_rows),
             "teams": len(team_rows),
             "progress_nodes": await progress.count_nodes(),
-            "open_tasks": len(await scope.bind(TaskRepository(db)).list_tasks(status="open")),
         },
     }

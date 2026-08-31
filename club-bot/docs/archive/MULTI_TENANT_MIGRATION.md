@@ -1,5 +1,11 @@
 # マルチテナント化 移行ドキュメント
 
+> **アーカイブです（[archive/README.md](README.md)）。**
+> 現在は使われていない構成、またはすでに完了した移行作業の記録で、
+> **現行構成のセットアップ手順ではありません。**
+> 新しく動かす場合は [`../SETUP.md`](../SETUP.md)、運用は
+> [`../OPERATION.md`](../OPERATION.md) を参照してください。
+
 discord.py 製 club-bot を「1プロセスで複数ギルドを安全に扱うマルチテナント
 仕様」へ改修した際の変更内容・設計判断・移行手順をまとめる。
 
@@ -14,7 +20,7 @@ discord.py 製 club-bot を「1プロセスで複数ギルドを安全に扱う�
 | bot.py | `on_guild_join` 自動セットアップ実装。起動時に参加中全ギルドへ初期チーム投入・コマンド同期 |
 | tests | `tests/test_multi_tenant.py` 追加（2ギルド分離・マイグレーション検証） |
 | migrations | `migrations/001_add_guild_id.sql`（手動移行用） |
-| docs | `docs/GUILD_VIEWS.sql`（NocoDB 向けギルド別ビュー雛形） |
+| docs | `docs/archive/GUILD_VIEWS.sql`（NocoDB 向けギルド別ビュー雛形） |
 
 `services/`（sheets_service / schedule_service / layer_tracking_service /
 todoist_service）と Google Sheets 関連設定項目（spreadsheet_id, sheet_tasks
@@ -177,7 +183,7 @@ GUILD_ID 未設定時は環境変数のみで動作する。
 
 ### 手動移行
 
-[`migrations/001_add_guild_id.sql`](../migrations/001_add_guild_id.sql) を使用:
+[`migrations/001_add_guild_id.sql`](../../migrations/001_add_guild_id.sql) を使用:
 
 ```bash
 cp data/club.db data/club.db.bak
@@ -249,7 +255,7 @@ sqlite3 data/club.db \
    `user_version` を 2 に更新する（冪等。何度起動しても安全）。
 3. ログに `スキーマバージョンを 2 に更新しました` と出れば完了。
 
-**手動**: [`migrations/002_guild_foundation.sql`](../migrations/002_guild_foundation.sql) を使用:
+**手動**: [`migrations/002_guild_foundation.sql`](../../migrations/002_guild_foundation.sql) を使用:
 
 ```bash
 cp data/club.db data/club.db.bak
@@ -270,6 +276,12 @@ PRAGMA user_version;  -- 2 が返ること
 
 ## 10. 003 マイグレーション: 班・技能タグの DB 管理化（スキーマバージョン 3）
 
+> **注記（スキーマバージョン 22）**: この節で導入した技能タグ
+> （`skill_tags` テーブル・`members.skills` 列・`/skill-*`・`/member skill *`）は
+> のちに廃止しました。現在の実装には存在しません。
+> 詳細は [`migrations/021_remove_features.sql`](../../migrations/021_remove_features.sql)。
+> 以下は当時の記録として残しています。
+
 ### 変更内容
 
 | レイヤ | 変更 |
@@ -287,7 +299,7 @@ PRAGMA user_version;  -- 2 が返ること
 `utils/db.py` の `_migrate_v3_teams_skills()` がカラム存在を確認してから
 追加し、ロールマップをバックフィルしたうえで `user_version` を 3 に更新する。
 
-**手動**: [`migrations/003_teams_skills.sql`](../migrations/003_teams_skills.sql)
+**手動**: [`migrations/003_teams_skills.sql`](../../migrations/003_teams_skills.sql)
 を使用する（DDL のみ。バックフィルは Bot 起動時に行われる）:
 
 ```bash

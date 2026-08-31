@@ -739,7 +739,8 @@ def test_summary_response_shape_is_stable():
     try:
         body = client.get(f"/api/guilds/{GUILD_A}/summary").json()
         assert set(body) == {"guild", "viewer", "counts"}
-        assert set(body["counts"]) == {"members", "teams", "progress_nodes", "open_tasks"}
+        # open_tasks はタスクの Todoist 一本化（v22 の機能廃止）で外れた
+        assert set(body["counts"]) == {"members", "teams", "progress_nodes"}
         for value in body["counts"].values():
             assert isinstance(value, int)
         viewer = body["viewer"]
