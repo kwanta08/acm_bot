@@ -89,5 +89,5 @@ Bot トークンをダッシュボードが保持する構成に変わった場�
 
 ## 根拠
 
-- `docs/PUBLIC_RELEASE_TASKS.md` P2-3（【最重要】）
+- `docs/development/PUBLIC_RELEASE_TASKS.md` P2-3（【最重要】）
 - `dashboard/security.py`、`tests/test_dashboard_scope.py`

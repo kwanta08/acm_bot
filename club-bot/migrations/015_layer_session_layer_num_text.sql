@@ -28,7 +28,7 @@
 --   psql "$DATABASE_URL" -f migrations/015_layer_session_layer_num_text.sql
 --
 -- 注意:
---   - docs/GUILD_VIEWS.sql の雛形から layer_sessions を参照するビュー
+--   - docs/archive/GUILD_VIEWS.sql の雛形から layer_sessions を参照するビュー
 --     （v_layer_sessions_g<guild_id> 等）を手動作成している場合、列の型変更が
 --     ビュー依存で失敗する（cannot alter type of a column used by a view）。
 --     これは **bot 起動時の自動適用でも同じ**で、該当ビューがあると起動に

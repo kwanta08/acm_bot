@@ -1,8 +1,13 @@
 # club-bot 改善提案レポート
 
+> **内部の作業用ドキュメントです（[development/README.md](README.md)）。**
+> 書かれた時点のスナップショットで、現在のコードとは食い違う記述を含みます。
+> **現状の仕様の根拠には使えません。** 使い方は [`../GUIDE.md`](../GUIDE.md)、
+> 運用は [`../OPERATION.md`](../OPERATION.md) を参照してください。
+
 作成日: 2026-08-20 / 対象: `acm_bot` リポジトリ（`club-bot/` 配下 約32,000行 / 89スラッシュコマンド / 18テーブル / FastAPI ダッシュボード）
 
-`docs/FEATURE_TASKS.md`（F0〜F6）と `docs/PUBLIC_RELEASE_TASKS.md` はいずれも未完了タスクが実質ゼロ（残るは【人間タスク】の P0-5 のみ）です。本レポートは**その先**を扱います。
+`docs/development/FEATURE_TASKS.md`（F0〜F6）と `docs/development/PUBLIC_RELEASE_TASKS.md` はいずれも未完了タスクが実質ゼロ（残るは【人間タスク】の P0-5 のみ）です。本レポートは**その先**を扱います。
 
 ---
 

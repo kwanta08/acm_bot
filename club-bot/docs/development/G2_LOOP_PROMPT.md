@@ -1,15 +1,23 @@
 # Claude Code で「パッチの検証 → G2 実装」を回すための入力
 
+> **これは内部の作業手順です（[development/README.md](README.md)）。**
+> Bot の使い方ではありません。使い方は [`../GUIDE.md`](../GUIDE.md) を参照してください。
+>
+> 文中の `<開発ノートのパス>` は、開発者のローカルにある設計判断・既知の落とし穴の
+> メモ置き場を指します。**このリポジトリには含まれません。** 手元に無い場合は
+> `--add-dir` の手順ごと読み飛ばしてください（公開すべき設計判断は
+> [`../adr/`](../adr/) にあります）。`<リポジトリのパス>` は各自のクローン先です。
+
 ターミナルで Claude Code を起動して、以下を順に貼るだけの形にしてあります。
-`docs/IMPROVEMENT_LOOP_PROMPT.md` の続きで、**今回の状況（パッチ13枚が未適用）専用**です。
+`docs/development/IMPROVEMENT_LOOP_PROMPT.md` の続きで、**今回の状況（パッチ13枚が未適用）専用**です。
 
 ---
 
 ## 0. 起動（毎回これ）
 
 ```bash
-cd /c/Users/yoshi/acm_bot
-claude --model opus --add-dir /c/Users/yoshi/ClaudeVault/ClaudeVault/projects/acm_bot
+cd ~/acm_bot
+claude --model opus --add-dir <開発ノートのパス>/projects/acm_bot
 ```
 
 `--add-dir` を忘れると ADR と gotcha を読めず、既に「やらない」と決めたことを実装します。
@@ -22,7 +30,7 @@ claude --model opus --add-dir /c/Users/yoshi/ClaudeVault/ClaudeVault/projects/ac
 > Windows 上では最初からきれいでした。`core.autocrlf false` を設定すると**逆に壊れます**。
 
 ```powershell
-cd C:\Users\yoshi\acm_bot
+cd <リポジトリのパス>
 
 git config --local --unset core.autocrlf          # 初版の手順を実行してしまった場合の取り消し
 if (Test-Path .git\index.lock) { Remove-Item .git\index.lock }
@@ -62,7 +70,7 @@ _patches/ にあるパッチ13枚（別のエージェントが origin/main の 
 
 - 手元のブランチは origin/main より古い。git fetch origin 済みの origin/main を基点にする
 - 内容の説明は _patches/APPLY.md にある。ただし**説明を信用せず、実際の diff で確認**すること
-- ADR と gotcha は ClaudeVault（/add-dir 済み）にある。
+- ADR と gotcha は 開発ノート（/add-dir 済み）にある。
   decisions/_index.md と gotchas/_index.md を先に読む
 
 ## 手順
@@ -106,7 +114,7 @@ _patches/ にあるパッチ13枚（別のエージェントが origin/main の 
 `DEFAULT_PROGRESS_CHANNEL_ID` → `DEFAULT_TASK_CHANNEL_ID` の3段フォールバックを入れ、
 送信先が無いときに `bot.log_to_channel` へ1行出すようにしている。
 
-ClaudeVault の 0023-silent-when-nothing-is-wrong.md を読み、
+開発ノート の 0023-silent-when-nothing-is-wrong.md を読み、
 **「遅延が無い週は沈黙する」という決定を壊していないか**を確認する。
 （作成者の主張: ADR の「影響範囲」に書かれた3段フォールバックが実装されていなかっただけで、
  沈黙の条件は変えていない。#bot-log は運用者向けなので部員の注意力を消費しない）
@@ -150,12 +158,12 @@ ClaudeVault の 0023-silent-when-nothing-is-wrong.md を読み、
 
 ```
 指摘が無かったので、このブランチ（fix/verify-patches）を fix/improvement-g0-g1 に
-リネームして、docs/IMPROVEMENT_TASKS.md の G0-2 / G0-4 / G1-1〜G1-7 にチェックを入れ、
+リネームして、docs/development/IMPROVEMENT_TASKS.md の G0-2 / G0-4 / G1-1〜G1-7 にチェックを入れ、
 完了ログへ「完了内容 / 設計判断 / 次タスクへの申し送り」を追記して。
 
 申し送りには必ず次を含めること:
 - G1-8（deploy.yml）は origin/main の 4dc33c9 で解決済みだったため、レポートの P0-7 は取り下げ
-- ClaudeVault の gotcha 3件（progress-subtree-disappears /
+- 開発ノート の gotcha 3件（progress-subtree-disappears /
   progress-stops-after-dashboard-edit / test-asserts-permission-but-decorator-missing）は
   unfixed タグを外せる
 - fix/code-audit-v2 の残り3コミット（13f5451 / d9996e7 / a3b97e4）は main に反映済みのため
@@ -175,15 +183,15 @@ ClaudeVault の 0023-silent-when-nothing-is-wrong.md を読み、
 ```
 /acm-bot-loop
 
-club-bot/docs/IMPROVEMENT_TASKS.md の Phase G2 のうち、未完了で最も若い番号のタスクを
+club-bot/docs/development/IMPROVEMENT_TASKS.md の Phase G2 のうち、未完了で最も若い番号のタスクを
 1つだけ実装して。
 
 ## 事前に読むもの（実装より先に）
 
 1. IMPROVEMENT_TASKS.md の「運用ルール」「全タスク共通の受入基準」
    「この表に固有の受入基準」と、対象タスクの受入基準・検証・注意
-2. ClaudeVault の decisions/_index.md と gotchas/_index.md
-   （/add-dir 済み。C:\Users\yoshi\ClaudeVault\ClaudeVault\projects\acm_bot）
+2. 開発ノート の decisions/_index.md と gotchas/_index.md
+   （/add-dir 済み。<開発ノートのパス>\projects\acm_bot）
 3. 対象タスクの「注意」に ADR 番号や gotcha 名があれば、その本文も読む
 
 ## 手順
@@ -225,7 +233,7 @@ club-bot/docs/IMPROVEMENT_TASKS.md の Phase G2 のうち、未完了で最も�
 **G2-1 は必ず**（削除の挙動を変えるため）。Shift+Tab を2回押してから:
 
 ```
-club-bot/docs/IMPROVEMENT_TASKS.md の G2-1 を実装する前に、設計だけ立てて。
+club-bot/docs/development/IMPROVEMENT_TASKS.md の G2-1 を実装する前に、設計だけ立てて。
 
 - ConfirmView をどこに置くか（utils/views.py 新設か、season.py から切り出すか）
 - /progress remove のプレビューに何を出すか（配下の件数だけか、名前も出すか）
@@ -248,7 +256,7 @@ Task ツールで general-purpose エージェントを1つ立て、次を調べ
      README.md・docs/ と実装の矛盾
 
  (2) 設計判断との衝突:
-     C:\Users\yoshi\ClaudeVault\ClaudeVault\projects\acm_bot\decisions\_index.md を読み、
+     <開発ノートのパス>\projects\acm_bot\decisions\_index.md を読み、
      この変更が既存の ADR に反していないか。特に 0008 / 0016 / 0021 / 0022 / 0023 / 0024
 
  (3) テストが嘘をついていないか:
@@ -263,7 +271,7 @@ Task ツールで general-purpose エージェントを1つ立て、次を調べ
 ## 3. セッションの最後に必ず1回
 
 ```
-このセッションで確定した内容を ClaudeVault へ書く材料をまとめて。
+このセッションで確定した内容を 開発ノート へ書く材料をまとめて。
 Vault のファイルは私が書くので、次の形で出力するだけでよい。
 
 1. 【ADR が必要か】新しい設計判断をしたか。したなら

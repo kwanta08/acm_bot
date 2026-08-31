@@ -1,6 +1,14 @@
 # Claude Code（Opus 5）で回すための起動プロンプト
 
-`docs/FEATURE_TASKS.md` を Claude Code で 1 タスクずつ実装するための入力集。
+> **これは内部の作業手順です（[development/README.md](README.md)）。**
+> Bot の使い方ではありません。使い方は [`../GUIDE.md`](../GUIDE.md) を参照してください。
+>
+> 文中の `<開発ノートのパス>` は、開発者のローカルにある設計判断・既知の落とし穴の
+> メモ置き場を指します。**このリポジトリには含まれません。** 手元に無い場合は
+> `--add-dir` の手順ごと読み飛ばしてください（公開すべき設計判断は
+> [`../adr/`](../adr/) にあります）。`<リポジトリのパス>` は各自のクローン先です。
+
+`docs/development/FEATURE_TASKS.md` を Claude Code で 1 タスクずつ実装するための入力集。
 Cowork（チャット）ではなく **ターミナルの Claude Code で実装する**前提で書いてある。
 
 ---
@@ -20,7 +28,7 @@ Claude Code が自動で読むのは `CLAUDE.md`。このリポジトリの規�
 @AGENTS.md
 
 ## 実装タスク
-- 進行中の機能実装は club-bot/docs/FEATURE_TASKS.md の表に従う
+- 進行中の機能実装は club-bot/docs/development/FEATURE_TASKS.md の表に従う
 - 実装ループは /acm-bot-loop スキルの手順で回す（全テストパスまで自走）
 
 ## 作業ディレクトリ
@@ -31,7 +39,7 @@ Claude Code が自動で読むのは `CLAUDE.md`。このリポジトリの規�
 ### 0-2. 起動と依存
 
 ```bash
-cd /c/Users/yoshi/acm_bot          # Git Bash。PowerShell なら cd C:\Users\yoshi\acm_bot
+cd ~/acm_bot          # Git Bash。PowerShell なら cd <リポジトリのパス>
 claude --model opus
 
 # セッション内で（初回のみ）
@@ -80,7 +88,7 @@ claude --model opus
 ```
 /acm-bot-loop
 
-club-bot/docs/FEATURE_TASKS.md を読み、未完了（チェックが入っていない）で
+club-bot/docs/development/FEATURE_TASKS.md を読み、未完了（チェックが入っていない）で
 最も若い番号のタスクを 1 つだけ実装して。
 
 手順:
@@ -90,7 +98,7 @@ club-bot/docs/FEATURE_TASKS.md を読み、未完了（チェックが入って�
 4. 受入基準を満たす**失敗するテストを先に書く**（tests/ に新規ファイル）
 5. 最小の実装 → cd club-bot && python -m ruff check . && python -m pytest tests/ -q
    → 失敗を分類して自己修正、を全パスまで繰り返す
-6. 全パス後、docs/FEATURE_TASKS.md の該当タスクにチェックを入れ、
+6. 全パス後、docs/development/FEATURE_TASKS.md の該当タスクにチェックを入れ、
    完了ログへ「完了内容 / 設計判断 / 次タスクへの申し送り」を1行追記する
 7. SKILL.md §2 の形式（変更内容 / 検証 / 残課題）で報告する
 
@@ -112,7 +120,7 @@ club-bot/docs/FEATURE_TASKS.md を読み、未完了（チェックが入って�
 ```
 /acm-bot-loop
 
-club-bot/docs/FEATURE_TASKS.md の Phase F3（重量管理）を F3-1 から F3-4 まで通しで実装して。
+club-bot/docs/development/FEATURE_TASKS.md の Phase F3（重量管理）を F3-1 から F3-4 まで通しで実装して。
 
 - タスクごとに ruff + pytest を回し、緑になってから次へ進む（まとめて実装して一度に検証しない）
 - 各タスク完了時に表のチェックと完了ログを更新する
@@ -132,14 +140,14 @@ context が 30% を切ったら /compact せず、その時点までの結果を
 
 ```bash
 # Git Bash
-cd /c/Users/yoshi/acm_bot
+cd ~/acm_bot
 git worktree add ../acm_bot_loop -b feat/feature-tasks
 cd ../acm_bot_loop
 
 for i in $(seq 1 5); do
   echo "=== iteration $i ==="
   claude -p --model opus --permission-mode acceptEdits \
-    "/acm-bot-loop club-bot/docs/FEATURE_TASKS.md の未完了で最も若いタスクを1つだけ実装し、
+    "/acm-bot-loop club-bot/docs/development/FEATURE_TASKS.md の未完了で最も若いタスクを1つだけ実装し、
      ruff と pytest が全パスするまで自走して。完了したら表のチェックと完了ログを更新する。
      コミットはしない。停止条件に当たったら STOPPED: と理由を出力して終了する。" \
     || break
@@ -152,7 +160,7 @@ PowerShell なら:
 ```powershell
 1..5 | ForEach-Object {
   claude -p --model opus --permission-mode acceptEdits `
-    "/acm-bot-loop club-bot/docs/FEATURE_TASKS.md の未完了で最も若いタスクを1つだけ実装し、ruff と pytest が全パスするまで自走して。完了したら表のチェックと完了ログを更新する。コミットはしない。"
+    "/acm-bot-loop club-bot/docs/development/FEATURE_TASKS.md の未完了で最も若いタスクを1つだけ実装し、ruff と pytest が全パスするまで自走して。完了したら表のチェックと完了ログを更新する。コミットはしない。"
 }
 ```
 
@@ -190,7 +198,7 @@ F2-4（全テーブル削除）と F5-2（メンバー status 移行）の後は
 ```
 /acm-bot-loop
 
-git status と現在のブランチ、club-bot/docs/FEATURE_TASKS.md の完了ログを確認して、
+git status と現在のブランチ、club-bot/docs/development/FEATURE_TASKS.md の完了ログを確認して、
 前回どこまで進んだかを把握してから続きを1タスク実装して。
 未コミットの作業が残っていれば、新しいタスクに入る前にそれを完成させる。
 ```
@@ -198,7 +206,7 @@ git status と現在のブランチ、club-bot/docs/FEATURE_TASKS.md の完了�
 **実装前に表そのものを見直す:**
 
 ```
-club-bot/docs/FEATURE_TASKS.md の Phase F<N> の受入基準を、実際のコード
+club-bot/docs/development/FEATURE_TASKS.md の Phase F<N> の受入基準を、実際のコード
 （cogs/ repositories/ utils/db.py services/）と突き合わせてレビューして。
 実現不可能・二重定義・既存機能と重複している項目を指摘し、表の修正案を出す。
 実装はまだしない。

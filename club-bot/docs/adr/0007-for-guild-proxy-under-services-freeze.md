@@ -12,7 +12,7 @@ superseded_by: 0009
 
 ## 文脈
 
-マルチテナント改修（`docs/MULTI_TENANT_MIGRATION.md`）で、全リポジトリの公開メソッドは
+マルチテナント改修（`docs/archive/MULTI_TENANT_MIGRATION.md`）で、全リポジトリの公開メソッドは
 `guild_id: int` を第1引数に必須化し、全 SQL に `WHERE guild_id = ?` を付けた。
 
 一方この改修では `services/` が変更対象から外されていた。`services/` は `guild_id` を
@@ -51,6 +51,6 @@ Cog 側は `LayerTrackingService(self.session_repo.for_guild(gid), ...)` のよ�
 
 ## 根拠
 
-- `docs/MULTI_TENANT_MIGRATION.md` §「リポジトリの guild_id 強制と services 互換」
+- `docs/archive/MULTI_TENANT_MIGRATION.md` §「リポジトリの guild_id 強制と services 互換」
 - `repositories/base.py`（`for_guild` / `GuildBoundRepository`）
 - 制約の理由について 2026-08-20 に判断者へ確認 — 記憶・記録ともに無し

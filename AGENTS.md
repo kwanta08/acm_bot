@@ -15,12 +15,15 @@
 1. **main ブランチへ直接コミットしない**。作業中の feature ブランチでのみコミットする
 2. **秘密情報をコミットしない**: .env の実値、DISCORD_TOKEN、Todoist トークン、
    Google サービスアカウント JSON。設定例は .env.example のみ編集する
-3. **マルチテナント原則の維持**: 新しいデータ・設定は必ず guild_id スコープ。
+3. **公開リポジトリとして扱う**。個人名・メールアドレス・ローカルの絶対パス
+   （`C:\Users\...` 等）・サーバーのホスト名や IP・実在のギルドIDを、
+   コードにもドキュメントにも書かない。例示は `<...>` や `example.com` を使う
+4. **マルチテナント原則の維持**: 新しいデータ・設定は必ず guild_id スコープ。
    グローバル状態・単一ギルド前提のコードを新設しない
-4. **後方互換性**: 既存ギルドの DB を壊す変更には必ずマイグレーション
+5. **後方互換性**: 既存ギルドの DB を壊す変更には必ずマイグレーション
    （migrations/ または utils/db.py の _migrate()）を同時に実装する
-5. コミットメッセージは Conventional Commits（feat:/fix:/refactor:/docs:/chore:）
-6. **完了前に必ず club-bot/tests/ を実行**し、全パスを確認する。
+6. コミットメッセージは Conventional Commits（feat:/fix:/refactor:/docs:/chore:）
+7. **完了前に必ず club-bot/tests/ を実行**し、全パスを確認する。
    失敗したら自分で修正して再実行する。パスするまで完了とみなさない
 
 ## コーディング規約
@@ -33,7 +36,10 @@
 - コマンドは interaction.guild.id でスコープし、DM 実行は拒否する
 - Discord API 呼び出しは discord.HTTPException を捕捉し、
   あるギルドでの失敗が他ギルドに影響しないようにする
-- ドキュメント（README.md, docs/）と実装が矛盾したら両方更新する
+- ドキュメント（README.md, club-bot/docs/）と実装が矛盾したら両方更新する。
+  ドキュメントの地図は club-bot/docs/README.md。**docs/ 直下は利用者・運用者向けの
+  製品ドキュメント専用**で、作業用の表やレポートは docs/development/、
+  旧構成の記録は docs/archive/ に置く
 
 ## 作業の進め方
 1. 指示されたタスクの Acceptance Criteria を確認する
