@@ -733,8 +733,10 @@ Docker で動かす場合は `deploy/docker-compose.dashboard.yml`
 - 表示・編集は**セッションで検証済みの `guild_id`** に固定される。
   他サーバーのデータは URL を書き換えても取得できない（403）
 - 参照・編集できるテーブルと列はホワイトリスト方式
-  （`repositories/table_repository.py`）。`settings` や
-  `todoist_configs` は表グリッドの対象外
+  （`repositories/table_repository.py`）。`todoist_configs` は表グリッドの対象外。
+  `settings` と `audit_log` は載るが、`TableSpec.min_level` で
+  それぞれ L4 / L3 以上に絞られる（ダッシュボードのレベルは L4/L2/L1 の
+  3 段階なので、どちらも実質「サーバー管理権限を持つ人だけ」）
 - **権限まわりの列は Web から編集できない**。`teams` のロール ID 3 列と
   `members.is_leader` は読み取り専用（`editable=False`）。
   `member_role_id` / `secondary_role_id` は `cogs/members._sync_roles()` がそのまま

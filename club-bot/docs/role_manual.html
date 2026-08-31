@@ -98,6 +98,7 @@
   .chapter-head .lv { font-size: 9.5pt; letter-spacing: 2.5px; opacity: .9; }
   .chapter-head h1 { font-size: 22pt; font-weight: 700; line-height: 1.4; margin: 2px 0 4px; }
   .chapter-head .who { font-size: 10.5pt; opacity: .95; line-height: 1.75; }
+  .chapter-head strong { color: #fff; }
   .lv1 { background: linear-gradient(120deg, #2f9e6b 0%, #46b487 100%); }
   .lv2 { background: linear-gradient(120deg, #2f7fd1 0%, #4f9ee0 100%); }
   .lv3 { background: linear-gradient(120deg, #d97f14 0%, #eda23f 100%); }
@@ -263,6 +264,7 @@
       <li><strong>第2章　班長</strong> <span class="badge b2">L2</span><span class="sub">　― 日程を決める・タスクと進捗を回す</span></li>
       <li><strong>第3章　幹部</strong> <span class="badge b3">L3</span><span class="sub">　― 名簿を整える・ログを確認する</span></li>
       <li><strong>第4章　Bot管理者</strong> <span class="badge b4">L4</span><span class="sub">　― 最初の設定・年度替わり・データ管理</span></li>
+      <li><strong>第5章　Web ダッシュボード</strong><span class="sub">　― ブラウザで表を見る・直す（任意の機能）</span></li>
       <li><strong>付録</strong><span class="sub">　― 自動で届く通知・困ったとき・全コマンド早見表</span></li>
     </ol>
   </div>
@@ -382,7 +384,7 @@
       <circle cx="34" cy="66" r="11" fill="#048a81"/>
       <text x="34" y="70" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">B</text>
       <text x="54" y="61" font-size="10.5" font-weight="700" fill="#0b4f6c">日程調整をつくりました</text>
-      <text x="54" y="79" font-size="9.5" fill="#5d7481">7/3(金) 19:00 — ✅ ❓ ❌ で答えてください</text>
+      <text x="54" y="79" font-size="9.5" fill="#5d7481">候補①〜③ — 下のボタンから答えてください</text>
       <!-- 見ている人アイコン -->
       <g>
         <circle cx="40" cy="122" r="13" fill="#cfe3d9"/><circle cx="40" cy="118" r="4.6" fill="#2f9e6b"/>
@@ -434,60 +436,78 @@
   <h2>0-3　出欠は「ボタンを押す」だけ。コマンドは要りません</h2>
   <p>
     日程調整の投票は、<strong>コマンドを打つ必要がありません。</strong>
-    投稿されたメッセージの下にある絵文字を押すだけです。候補日ごとに1つのメッセージが投稿されます。
+    候補がまとめて1つの<strong>投票ボード</strong>として投稿されるので、
+    下に並んだ<strong>候補のボタンを押す → 出てきた選択肢から答えを選ぶ</strong>、の2段階だけです。
   </p>
 
   <div class="figure">
-    <svg viewBox="0 0 700 190" xmlns="http://www.w3.org/2000/svg"
+    <svg viewBox="0 0 700 262" xmlns="http://www.w3.org/2000/svg"
          font-family="Zen Maru Gothic, sans-serif">
-      <rect x="0" y="6" width="700" height="176" rx="9" fill="#ffffff" stroke="#d5e0e5"/>
-      <!-- メッセージ -->
-      <rect x="20" y="20" width="450" height="56" rx="7" fill="#f3f8f9" stroke="#048a81"/>
-      <circle cx="42" cy="48" r="12" fill="#048a81"/>
-      <text x="42" y="52" font-size="10.5" font-weight="700" fill="#fff" text-anchor="middle">B</text>
-      <text x="64" y="43" font-size="11" font-weight="700" fill="#0b4f6c">候補① 7月3日(金) 19:00</text>
-      <text x="64" y="62" font-size="9.6" fill="#5d7481">参加できるかを、下の絵文字から1つ押してください</text>
+      <defs>
+        <marker id="aVote" markerWidth="9" markerHeight="9" refX="8.5" refY="4.5" orient="auto">
+          <path d="M0 0 L9 4.5 L0 9 Z" fill="#9fb0b8"/>
+        </marker>
+      </defs>
 
-      <!-- リアクションボタン -->
-      <g>
-        <rect x="20" y="88" width="66" height="30" rx="8" fill="#e8f2fb" stroke="#2f7fd1" stroke-width="1.6"/>
-        <text x="40" y="109" font-size="14" text-anchor="middle">✅</text>
-        <text x="66" y="108" font-size="11" font-weight="700" fill="#2f7fd1" text-anchor="middle">4</text>
+      <!-- 投票ボード -->
+      <text x="14" y="16" font-size="10.6" font-weight="700" fill="#5d7481">① 投票ボード（みんなに見える）</text>
+      <rect x="14" y="24" width="330" height="182" rx="8" fill="#f3f8f9" stroke="#048a81" stroke-width="1.5"/>
+      <circle cx="38" cy="48" r="12" fill="#048a81"/>
+      <text x="38" y="52" font-size="10.5" font-weight="700" fill="#fff" text-anchor="middle">B</text>
+      <text x="60" y="46" font-size="11" font-weight="700" fill="#0b4f6c">6月度 定例ミーティング</text>
+      <text x="60" y="63" font-size="9.4" fill="#5d7481">締切 7/1(水) 23:59</text>
+      <!-- 候補ごとの集計 -->
+      <text x="32" y="88"  font-size="9.6" fill="#23303a">候補① 7/3(金) 19:00　　✅4　❓1　❌2</text>
+      <text x="32" y="107" font-size="9.6" fill="#23303a">候補② 7/4(土) 19:00　　✅6　❓0　❌1</text>
+      <text x="32" y="126" font-size="9.6" fill="#23303a">候補③ 7/5(日) 13:00　　✅2　❓3　❌2</text>
+      <!-- 候補ボタン -->
+      <text x="32" y="150" font-size="9.2" fill="#9aa3ab">↓ 答えたい候補のボタンを押す</text>
+      <rect x="32" y="158" width="92" height="28" rx="6" fill="#2f7fd1"/>
+      <text x="78" y="176" font-size="9.8" font-weight="700" fill="#fff" text-anchor="middle">候補① 7/3</text>
+      <rect x="132" y="158" width="92" height="28" rx="6" fill="#4a5b66"/>
+      <text x="178" y="176" font-size="9.8" font-weight="700" fill="#fff" text-anchor="middle">候補② 7/4</text>
+      <rect x="232" y="158" width="92" height="28" rx="6" fill="#4a5b66"/>
+      <text x="278" y="176" font-size="9.8" font-weight="700" fill="#fff" text-anchor="middle">候補③ 7/5</text>
+      <text x="32" y="199" font-size="9" fill="#9aa3ab">候補が26件以上あるとボードは複数に分かれます</text>
 
-        <rect x="96" y="88" width="66" height="30" rx="8" fill="#f6f7f8" stroke="#dbdee1"/>
-        <text x="116" y="109" font-size="14" text-anchor="middle">❓</text>
-        <text x="142" y="108" font-size="11" fill="#5d7481" text-anchor="middle">1</text>
+      <line x1="348" y1="112" x2="382" y2="112" stroke="#9fb0b8" stroke-width="1.8" marker-end="url(#aVote)"/>
+      <text x="365" y="104" font-size="9" font-weight="700" fill="#5d7481" text-anchor="middle">押す</text>
 
-        <rect x="172" y="88" width="66" height="30" rx="8" fill="#f6f7f8" stroke="#dbdee1"/>
-        <text x="192" y="109" font-size="14" text-anchor="middle">❌</text>
-        <text x="218" y="108" font-size="11" fill="#5d7481" text-anchor="middle">2</text>
-      </g>
-      <text x="20" y="139" font-size="9.6" fill="#5d7481">
-        青く光っているのが<tspan font-weight="700" fill="#2f7fd1">自分が押したもの</tspan>。数字は人数です。
+      <!-- ステータス選択 -->
+      <text x="388" y="16" font-size="10.6" font-weight="700" fill="#2f7fd1">② 答えを選ぶ（自分にだけ見える）</text>
+      <rect x="388" y="24" width="298" height="182" rx="8" fill="#f4f7fb" stroke="#2f7fd1" stroke-width="1.5"/>
+      <text x="406" y="48" font-size="10.4" font-weight="700" fill="#2467ab">候補① 7/3(金) 19:00</text>
+      <text x="406" y="65" font-size="9.4" fill="#5d7481">参加できるかを選んでください</text>
+      <rect x="406" y="76" width="262" height="26" rx="6" fill="#ffffff" stroke="#2f7fd1" stroke-width="1.6"/>
+      <text x="422" y="94" font-size="12">✅</text>
+      <text x="446" y="94" font-size="10" font-weight="700" fill="#23303a">参加できる</text>
+      <rect x="406" y="108" width="262" height="26" rx="6" fill="#ffffff" stroke="#dbdee1"/>
+      <text x="422" y="126" font-size="12">❓</text>
+      <text x="446" y="126" font-size="10" fill="#23303a">まだ分からない</text>
+      <rect x="406" y="140" width="262" height="26" rx="6" fill="#ffffff" stroke="#dbdee1"/>
+      <text x="422" y="158" font-size="12">❌</text>
+      <text x="446" y="158" font-size="10" fill="#23303a">参加できない</text>
+      <rect x="406" y="172" width="262" height="26" rx="6" fill="#f6f7f8" stroke="#dbdee1"/>
+      <text x="446" y="190" font-size="10" fill="#5d7481">回答を取り消す</text>
+
+      <text x="14" y="230" font-size="9.8" fill="#5d7481">
+        1つの候補につき答えは1つだけ。<tspan font-weight="700" fill="#23303a">選び直すと前の答えは上書きされます</tspan>。
+        全部の候補に答えて構いません。
       </text>
-      <text x="20" y="160" font-size="9.6" fill="#5d7481">
-        押し直すと前のものは<tspan font-weight="700">自動で外れます</tspan>（1つの候補につき1つだけ）。
+      <text x="14" y="250" font-size="9.8" fill="#5d7481">
+        締切の1時間前になっても答えていない人には、<tspan font-weight="700" fill="#23303a">Bot から DM が届きます</tspan>。
+        早めに ❓ でもいいので押しましょう。
       </text>
-
-      <!-- 意味の凡例 -->
-      <line x1="290" y1="86" x2="290" y2="168" stroke="#e3eaed" stroke-width="1.4"/>
-      <text x="312" y="100" font-size="14">✅</text><text x="338" y="100" font-size="10.5" fill="#23303a">参加できる</text>
-      <text x="312" y="126" font-size="14">❓</text><text x="338" y="126" font-size="10.5" fill="#23303a">まだ分からない</text>
-      <text x="312" y="152" font-size="14">❌</text><text x="338" y="152" font-size="10.5" fill="#23303a">参加できない</text>
-
-      <line x1="470" y1="86" x2="470" y2="168" stroke="#e3eaed" stroke-width="1.4"/>
-      <text x="492" y="100" font-size="10.5" font-weight="700" fill="#b76c0d">答えないと…</text>
-      <text x="492" y="122" font-size="9.6" fill="#5d7481">締切の1時間前に、未回答の人へ</text>
-      <text x="492" y="140" font-size="9.6" fill="#5d7481">Bot から DM が届きます。</text>
-      <text x="492" y="160" font-size="9.6" fill="#5d7481">早めに ❓ でもいいので押しましょう。</text>
     </svg>
-    <div class="figcap">図0-4　出欠の答え方。絵文字はサークルごとに変更されている場合があります。</div>
+    <div class="figcap">図0-4　出欠の答え方。ボタンの絵文字はサークルごとに変更されている場合があります。</div>
   </div>
 
   <div class="box note">
-    <span class="t">絵文字が ✅❓❌ と違うことがあります</span>
-    管理者がサークル独自の絵文字に変えられるためです。意味の並び順は同じで、
-    左から「参加できる・分からない・できない」です。
+    <span class="t">サークルによっては、昔ながらの「リアクション方式」のことがあります</span>
+    候補日ごとに1つずつメッセージが投稿され、その下の ✅ ❓ ❌ を直接押す方式です。
+    管理者が <code>/settings_set key:SCHEDULE_UI_STYLE value:reaction</code> を設定している場合にこうなります。
+    <strong>どちらでも意味は同じ</strong>で、左から「参加できる・まだ分からない・参加できない」です。
+    絵文字自体もサークル独自のものに変更できます。
   </div>
 </div>
 
@@ -603,7 +623,7 @@
         <circle cx="113" cy="44" r="20" fill="#2f9e6b"/>
         <text x="113" y="51" font-size="17" text-anchor="middle">✅</text>
         <text x="113" y="86" font-size="12.5" font-weight="700" fill="#1e7a51" text-anchor="middle">出欠に答える</text>
-        <text x="113" y="108" font-size="10" fill="#5d7481" text-anchor="middle">投票メッセージの絵文字を押す</text>
+        <text x="113" y="108" font-size="10" fill="#5d7481" text-anchor="middle">投票ボードのボタンを押す</text>
         <text x="113" y="132" font-size="10.5" font-weight="700" fill="#23303a" text-anchor="middle">コマンド不要</text>
       </g>
       <g>
@@ -880,8 +900,8 @@
       <!-- 2 -->
       <circle cx="58" cy="92" r="10" fill="#9fb0b8"/>
       <text x="58" y="96" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">2</text>
-      <text x="84" y="88" font-size="11.5" font-weight="700" fill="#23303a">部員が絵文字で答える</text>
-      <text x="84" y="106" font-size="9.8" fill="#5d7481">✅ 参加 / ❓ 未定 / ❌ 不参加 を押すだけ。コマンドは要りません。</text>
+      <text x="84" y="88" font-size="11.5" font-weight="700" fill="#23303a">部員がボタンで答える</text>
+      <text x="84" y="106" font-size="9.8" fill="#5d7481">候補ボタン → ✅参加 / ❓未定 / ❌不参加 を選ぶだけ。コマンドは要りません。</text>
       <rect x="586" y="78" width="60" height="19" rx="9.5" fill="#9fb0b8"/>
       <text x="616" y="92" font-size="9.6" font-weight="700" fill="#fff" text-anchor="middle">部員</text>
 
@@ -1223,6 +1243,8 @@
     コマンドを実行できるかどうかは、<strong>Discord のロール</strong>だけで決まります。
     実際に班長として操作できるようにするには、管理者に
     <code>/set_role</code>（班長ロール）へ追加してもらってください。
+    <strong>ただし Web ダッシュボード（第5章）では逆で、この班長フラグのほうが編集権限の根拠になります。</strong>
+    両方を使うサークルでは、班長には<strong>ロールとフラグの両方</strong>を付けてください。
   </div>
 
   <div class="figure">
@@ -1528,6 +1550,304 @@
     変更が効くのは<strong>これから作る日程調整から</strong>です。投稿済みの投票は変わりません。
     設定した絵文字を消した場合は、自動で ✅❓❌ に戻ります。
   </div>
+</div>
+
+<!-- ============================= 第5章 Web ダッシュボード ============================= -->
+<div class="page">
+  <div class="chapter-head" style="background: linear-gradient(120deg, #0b4f6c 0%, #2f7fd1 100%);">
+    <div class="lv">CHAPTER 5 — WEB DASHBOARD</div>
+    <h1>Web ダッシュボード</h1>
+    <div class="who">
+      Discord の外から、<strong>ブラウザで表を見る・直す</strong>ための画面です。<br>
+      サークルによっては使っていないこともあります（任意の機能です）。
+    </div>
+  </div>
+
+  <h2>5-1　これは何のためのもの？</h2>
+  <p>
+    Discord のコマンドは「1件ずつ」の操作が得意ですが、
+    <strong>一覧をまとめて眺めたり、何十件も直したり</strong>するのは苦手です。
+    ダッシュボードはそこを補う<strong>表計算ソフトのような画面</strong>です。
+    Bot とは別のプログラムですが、<strong>見ているデータは同じ</strong>なので、
+    どちらで直しても両方に反映されます。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 126" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <rect x="2" y="10" width="330" height="106" rx="10" fill="#f3f8f9" stroke="#048a81" stroke-width="1.5"/>
+      <text x="167" y="34" font-size="11.5" font-weight="700" fill="#0b4f6c" text-anchor="middle">Discord のコマンド</text>
+      <text x="167" y="56" font-size="10" fill="#23303a" text-anchor="middle">1件ずつ記録する・その場で答える</text>
+      <text x="167" y="76" font-size="10" fill="#23303a" text-anchor="middle">通知を受け取る</text>
+      <text x="167" y="100" font-size="9.6" font-weight="700" fill="#1e7a51" text-anchor="middle">ふだんの作業はこちら</text>
+
+      <rect x="368" y="10" width="330" height="106" rx="10" fill="#f4f7fb" stroke="#2f7fd1" stroke-width="1.5"/>
+      <text x="533" y="34" font-size="11.5" font-weight="700" fill="#2467ab" text-anchor="middle">Web ダッシュボード</text>
+      <text x="533" y="56" font-size="10" fill="#23303a" text-anchor="middle">一覧を並べて見る・まとめて直す</text>
+      <text x="533" y="76" font-size="10" fill="#23303a" text-anchor="middle">CSV に書き出す</text>
+      <text x="533" y="100" font-size="9.6" font-weight="700" fill="#2467ab" text-anchor="middle">見直し・集計はこちら</text>
+
+      <text x="350" y="66" font-size="13" font-weight="700" fill="#9aa3ab" text-anchor="middle">＋</text>
+    </svg>
+    <div class="figcap">図5-1　役割の違い。どちらも同じデータを見ているので、使い分けるだけです。</div>
+  </div>
+
+  <h2>5-2　使いはじめる</h2>
+  <p>
+    <strong>アカウントを新しく作る必要はありません。</strong>
+    サークルの管理者から教えてもらった URL を開き、<strong>「Discord でログイン」</strong>を押すだけです。
+    パスワードをダッシュボードへ入力することはありません（Discord の画面で許可するだけです）。
+    ログインすると、<strong>自分が入っているサーバーだけ</strong>が選択肢に出ます。
+  </p>
+
+  <div class="box warn">
+    <span class="t">URL はサークルごとに違います</span>
+    このBotを使っているサークルが、それぞれ自分のところで動かす仕組みです。
+    <strong>URL が配られていなければ、そのサークルはダッシュボードを使っていません。</strong>
+    Discord のコマンドだけで全部の機能が使えるので、無くても困りません。
+  </div>
+
+</div>
+
+<div class="page">
+  <h2>5-3　画面の見かた</h2>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 322" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <rect x="4" y="8" width="692" height="306" rx="10" fill="#ffffff" stroke="#c9d5da" stroke-width="1.5"/>
+
+      <!-- ブラウザのバー -->
+      <path d="M4 18 a10 10 0 0 1 10 -10 h672 a10 10 0 0 1 10 10 v18 h-692 z" fill="#eceff1"/>
+      <circle cx="24" cy="26" r="4.5" fill="#d5dade"/>
+      <circle cx="39" cy="26" r="4.5" fill="#d5dade"/>
+      <circle cx="54" cy="26" r="4.5" fill="#d5dade"/>
+      <rect x="72" y="18" width="300" height="16" rx="8" fill="#ffffff"/>
+      <text x="84" y="30" font-size="8.6" fill="#9aa3ab">https://（サークルごとの URL）</text>
+
+      <!-- アプリのヘッダ -->
+      <line x1="4" y1="36" x2="696" y2="36" stroke="#dde4e8"/>
+      <text x="20" y="58" font-size="11" font-weight="700" fill="#0b4f6c">サークル名 ダッシュボード</text>
+      <rect x="404" y="44" width="150" height="20" rx="5" fill="#f1f5f7" stroke="#cdd8dd"/>
+      <text x="414" y="58" font-size="9" fill="#23303a">サーバーを選ぶ ▾</text>
+      <rect x="562" y="44" width="60" height="20" rx="5" fill="#f1f5f7" stroke="#cdd8dd"/>
+      <text x="572" y="58" font-size="9" fill="#23303a">テーマ</text>
+      <rect x="630" y="44" width="52" height="20" rx="5" fill="#f1f5f7" stroke="#cdd8dd"/>
+      <text x="640" y="58" font-size="9" fill="#23303a">アカ…</text>
+      <line x1="4" y1="72" x2="696" y2="72" stroke="#dde4e8"/>
+
+      <!-- サイドバー -->
+      <rect x="4" y="72" width="150" height="242" fill="#f7fafb"/>
+      <line x1="154" y1="72" x2="154" y2="314" stroke="#dde4e8"/>
+      <text x="18" y="92" font-size="9" font-weight="700" fill="#9aa3ab">表の種類</text>
+      <rect x="12" y="100" width="134" height="20" rx="5" fill="#2f7fd1"/>
+      <text x="24" y="114" font-size="9.4" font-weight="700" fill="#fff">出欠回答</text>
+      <text x="24" y="136" font-size="9.4" fill="#23303a">メンバー</text>
+      <text x="24" y="156" font-size="9.4" fill="#23303a">班</text>
+      <text x="24" y="176" font-size="9.4" fill="#23303a">日程調整</text>
+      <text x="24" y="196" font-size="9.4" fill="#23303a">桁巻き積層記録</text>
+      <text x="24" y="216" font-size="9.4" fill="#23303a">機体進捗</text>
+      <text x="24" y="236" font-size="9.4" fill="#23303a">在庫（品目）</text>
+      <text x="24" y="256" font-size="9.4" fill="#9aa3ab">…ほか</text>
+      <text x="18" y="292" font-size="8.4" fill="#9aa3ab">スマホでは画面の下に</text>
+      <text x="18" y="304" font-size="8.4" fill="#9aa3ab">横並びで出ます</text>
+
+      <!-- シートタブ -->
+      <text x="168" y="90" font-size="9" font-weight="700" fill="#9aa3ab">シートタブ（予定ごと）</text>
+      <rect x="168" y="96" width="118" height="20" rx="10" fill="#e8f2fb" stroke="#2f7fd1"/>
+      <text x="227" y="110" font-size="9" font-weight="700" fill="#2467ab" text-anchor="middle">6月度 定例MTG</text>
+      <rect x="292" y="96" width="106" height="20" rx="10" fill="#f1f5f7" stroke="#cdd8dd"/>
+      <text x="345" y="110" font-size="9" fill="#5d7481" text-anchor="middle">春合宿の日程</text>
+      <rect x="404" y="96" width="96" height="20" rx="10" fill="#f1f5f7" stroke="#cdd8dd"/>
+      <text x="452" y="110" font-size="9" fill="#5d7481" text-anchor="middle">機体審査会</text>
+      <text x="512" y="110" font-size="9" fill="#9aa3ab">…</text>
+
+      <!-- ツールバー -->
+      <rect x="168" y="126" width="180" height="20" rx="5" fill="#ffffff" stroke="#cdd8dd"/>
+      <text x="178" y="140" font-size="8.8" fill="#9aa3ab">🔍 この表を検索</text>
+      <rect x="356" y="126" width="96" height="20" rx="5" fill="#f1f5f7" stroke="#cdd8dd"/>
+      <text x="365" y="140" font-size="8.8" fill="#23303a">表示件数: 50 ▾</text>
+      <rect x="566" y="126" width="116" height="20" rx="5" fill="#1e7a51"/>
+      <text x="624" y="140" font-size="8.8" font-weight="700" fill="#fff" text-anchor="middle">CSV をダウンロード</text>
+
+      <!-- 表 -->
+      <rect x="168" y="158" width="514" height="22" fill="#0b4f6c"/>
+      <text x="180" y="173" font-size="8.8" fill="#fff">候補日時</text>
+      <text x="300" y="173" font-size="8.8" fill="#fff">参加</text>
+      <text x="392" y="173" font-size="8.8" fill="#fff">不参加</text>
+      <text x="484" y="173" font-size="8.8" fill="#fff">未定</text>
+      <text x="576" y="173" font-size="8.8" fill="#fff">未回答</text>
+      <g font-size="8.6" fill="#23303a">
+        <rect x="168" y="180" width="514" height="22" fill="#f5f9fa"/>
+        <text x="180" y="195">2026-07-03 19:00:00</text>
+        <text x="300" y="195">参加 (4)</text>
+        <text x="392" y="195">不参加 (2)</text>
+        <text x="484" y="195">未定 (1)</text>
+        <text x="576" y="195">未回答 (3)</text>
+        <rect x="168" y="202" width="514" height="22" fill="#ffffff"/>
+        <text x="180" y="217">2026-07-04 19:00:00</text>
+        <text x="300" y="217">参加 (6)</text>
+        <text x="392" y="217">不参加 (1)</text>
+        <text x="484" y="217">未定 (0)</text>
+        <text x="576" y="217">未回答 (3)</text>
+        <rect x="168" y="224" width="514" height="22" fill="#f5f9fa"/>
+        <text x="180" y="239">2026-07-05 13:00:00</text>
+        <text x="300" y="239">参加 (2)</text>
+        <text x="392" y="239">不参加 (2)</text>
+        <text x="484" y="239">未定 (3)</text>
+        <text x="576" y="239">未回答 (3)</text>
+      </g>
+      <rect x="168" y="158" width="514" height="88" fill="none" stroke="#cdd8dd"/>
+      <text x="168" y="264" font-size="8.6" fill="#5d7481">セルの中には、その人たちの表示名が縦に並びます（人数は先頭の数字）。</text>
+      <text x="168" y="280" font-size="8.6" fill="#5d7481">✎ が付いた列はクリックして直せます。直した記録は必ず操作ログに残ります。</text>
+      <text x="168" y="300" font-size="8.6" fill="#9aa3ab">※ 画面はイメージです。表の名前や並びはサークルの設定によって変わります。</text>
+    </svg>
+    <div class="figcap">図5-2　画面の構成。左で「表の種類」、上のタブで「どの予定か」を選びます。</div>
+  </div>
+
+  <h2>5-4　ダッシュボードの権限は「3段階」</h2>
+  <p>
+    <strong>ここが Discord とは違うので注意してください。</strong>
+    ダッシュボードは Bot のトークンを持たないため、<strong>Discord のロールを読めません</strong>。
+    そのため権限の決め方が Discord のコマンドとは異なり、3段階になります。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 292" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <defs>
+        <marker id="aMap" markerWidth="9" markerHeight="9" refX="8.5" refY="4.5" orient="auto">
+          <path d="M0 0 L9 4.5 L0 9 Z" fill="#9fb0b8"/>
+        </marker>
+        <marker id="aMapR" markerWidth="9" markerHeight="9" refX="8.5" refY="4.5" orient="auto">
+          <path d="M0 0 L9 4.5 L0 9 Z" fill="#c1554f"/>
+        </marker>
+      </defs>
+      <text x="144" y="20" font-size="10.6" font-weight="700" fill="#5d7481" text-anchor="middle">Discord のコマンド</text>
+      <text x="552" y="20" font-size="10.6" font-weight="700" fill="#5d7481" text-anchor="middle">Web ダッシュボード</text>
+      <rect x="20" y="32" width="248" height="40" rx="7" fill="#8250c4"/>
+      <text x="38" y="58" font-size="11" font-weight="700" fill="#fff">L4　Bot管理者</text>
+      <text x="346" y="45" font-size="9" font-weight="700" fill="#5d7481" text-anchor="middle">サーバー管理権限がある</text>
+      <line x1="274" y1="52" x2="418" y2="52" stroke="#9fb0b8" stroke-width="1.7" marker-end="url(#aMap)"/>
+      <rect x="424" y="32" width="256" height="40" rx="7" fill="#8250c4"/>
+      <text x="444" y="58" font-size="11" font-weight="700" fill="#fff">編集 ＋ サーバー設定</text>
+      <rect x="20" y="84" width="248" height="40" rx="7" fill="#e08b1e"/>
+      <text x="38" y="110" font-size="11" font-weight="700" fill="#fff">L3　幹部</text>
+      <text x="346" y="97" font-size="9" font-weight="700" fill="#a83f3a" text-anchor="middle">対応する段が無い</text>
+      <line x1="274" y1="104" x2="418" y2="104" stroke="#c1554f" stroke-width="1.7" stroke-dasharray="5 4" marker-end="url(#aMapR)"/>
+      <rect x="424" y="84" width="256" height="40" rx="7" fill="#2f9e6b"/>
+      <text x="444" y="110" font-size="11" font-weight="700" fill="#fff">閲覧のみ</text>
+      <rect x="20" y="136" width="248" height="40" rx="7" fill="#2f7fd1"/>
+      <text x="38" y="162" font-size="11" font-weight="700" fill="#fff">L2　班長</text>
+      <text x="346" y="149" font-size="9" font-weight="700" fill="#5d7481" text-anchor="middle">名簿の班長フラグがある</text>
+      <line x1="274" y1="156" x2="418" y2="156" stroke="#9fb0b8" stroke-width="1.7" marker-end="url(#aMap)"/>
+      <rect x="424" y="136" width="256" height="40" rx="7" fill="#2f7fd1"/>
+      <text x="444" y="162" font-size="11" font-weight="700" fill="#fff">編集できる</text>
+      <rect x="20" y="188" width="248" height="40" rx="7" fill="#2f9e6b"/>
+      <text x="38" y="214" font-size="11" font-weight="700" fill="#fff">L1　一般メンバー</text>
+      <text x="346" y="201" font-size="9" font-weight="700" fill="#5d7481" text-anchor="middle">サーバーに入っている</text>
+      <line x1="274" y1="208" x2="418" y2="208" stroke="#9fb0b8" stroke-width="1.7" marker-end="url(#aMap)"/>
+      <rect x="424" y="188" width="256" height="40" rx="7" fill="#2f9e6b"/>
+      <text x="444" y="214" font-size="11" font-weight="700" fill="#fff">閲覧のみ</text>
+      <rect x="20" y="240" width="660" height="44" rx="7" fill="#fdf4f4" stroke="#e0a3a3" stroke-width="1.4"/>
+      <text x="38" y="260" font-size="9.6" fill="#23303a">
+        <tspan font-weight="700" fill="#a83f3a">幹部（L3）にだけ、対応する段がありません。</tspan>
+        ダッシュボードは Discord のロールを読めないため、
+      </text>
+      <text x="38" y="276" font-size="9.6" fill="#23303a">
+        幹部ロールを持っているだけでは「閲覧のみ」です（サーバー管理権限か名簿の班長フラグがあれば別です）。
+      </text>
+    </svg>
+    <div class="figcap">図5-3　Discord とダッシュボードの権限の対応。幹部の扱いだけがずれます。</div>
+  </div>
+
+</div>
+
+<div class="page">
+  <h3>何を持っていると、どちらで何ができるか</h3>
+  <table>
+    <tr><th style="width:34%;">持っているもの</th><th>Discord のコマンド</th><th>ダッシュボード</th></tr>
+    <tr><td>Discord の班長ロール</td><td>班長として使える</td><td>閲覧のみ</td></tr>
+    <tr><td>名簿の班長フラグ</td><td>権限は増えない</td><td>編集できる</td></tr>
+    <tr><td>サーバー管理権限</td><td>Bot管理者として使える</td><td>編集 ＋ 設定変更</td></tr>
+  </table>
+
+  <div class="box warn">
+    <span class="t">「班長なのに編集できない」とき</span>
+    ダッシュボードの編集権限は<strong>名簿の班長フラグ</strong>（<code>/member set-leader</code>）で決まり、
+    Discord の班長ロールではありません。<strong>第3章の図3-3 とは逆の関係</strong>です。
+    両方を使うサークルでは、班長に<strong>ロールとフラグの両方</strong>を付けてください。
+  </div>
+
+  <h2>5-5　見られる表</h2>
+  <p>
+    次の表を見られます。<strong>ここに無いもの（Todoist のトークンなど）は画面に出ません。</strong>
+  </p>
+
+  <table>
+    <tr><th style="width:26%;">表</th><th>内容</th><th style="width:22%;">見られる人</th></tr>
+    <tr><td>メンバー</td><td>名簿。表示名・主所属班・副所属班・メモなど</td><td>全員</td></tr>
+    <tr><td>班</td><td>班の一覧と通知チャンネル</td><td>全員</td></tr>
+    <tr><td>日程調整</td><td>予定のタイトル・場所・締切・締切済みかどうか</td><td>全員</td></tr>
+    <tr><td>出欠回答</td><td>予定ごとのシート。候補日時 × 参加／不参加／未定／未回答</td><td>全員</td></tr>
+    <tr><td>桁巻き積層記録</td><td>桁ごとのシート。誰がいつ何層巻いたか</td><td>全員</td></tr>
+    <tr><td>桁マスタ</td><td>登録されている桁名</td><td>全員</td></tr>
+    <tr><td>機体進捗</td><td>進捗ノードの一覧（担当・状態・進捗率・重量）</td><td>全員</td></tr>
+    <tr><td>進捗の履歴</td><td>進捗率の推移の記録</td><td>全員</td></tr>
+    <tr><td>節目（マイルストーン）</td><td>ノードごとの期限</td><td>全員</td></tr>
+    <tr><td>在庫（品目）</td><td>資材の品目と残数・閾値</td><td>全員</td></tr>
+    <tr><td>在庫の増減</td><td>いつ誰が何をいくつ使ったか</td><td>全員</td></tr>
+    <tr><td>年度</td><td>年度の一覧</td><td>全員</td></tr>
+    <tr><td>操作ログ</td><td>誰がいつ何を変えたかの記録</td><td><strong>サーバー管理権限のみ</strong></td></tr>
+    <tr><td>サーバー設定</td><td><code>/setup</code> などで保存した設定値</td><td><strong>サーバー管理権限のみ</strong></td></tr>
+  </table>
+
+  <div class="box note">
+    <span class="t">人の名前は「表示名」で出ます</span>
+    Discord の内部 ID（長い数字）ではなく、<strong>そのサーバーでの表示名</strong>で表示されます。
+    班も <code>kouzou</code> のような英字キーではなく<strong>班名</strong>（例: 構造班）で出ます。
+    日時はすべて<strong>日本時間（秒まで）</strong>です。
+  </div>
+
+</div>
+
+<div class="page">
+  <h2>5-6　直す・探す・書き出す</h2>
+
+  <table>
+    <tr><th style="width:22%;">やりたいこと</th><th>操作</th></tr>
+    <tr><td><strong>直す</strong></td><td><strong>✎</strong> が付いた列のセルをクリックして書き換え、保存します。変更は<strong>必ず操作ログに残ります</strong>（Discord では <code>/report changes</code> で確認できます）</td></tr>
+    <tr><td><strong>探す</strong></td><td>検索欄に入力すると、その表の中を絞り込めます。<strong>検索は DB に入っている値に対して行われる</strong>ため、表示名では引っかからないことがあります</td></tr>
+    <tr><td><strong>並べ替える</strong></td><td>列の見出しをクリックします</td></tr>
+    <tr><td><strong>書き出す</strong></td><td>「CSV をダウンロード」。<strong>画面と同じ表示（名前・日本時間）で、表示件数に関わらず全件</strong>出ます。シートを開いているときは、そのシートの分だけです</td></tr>
+    <tr><td><strong>見やすくする</strong></td><td>テーマをライト／ダークから選べます。スマホでは表の種類が画面下に並びます</td></tr>
+  </table>
+
+  <div class="box warn">
+    <span class="t">Web から変えられない列があります</span>
+    <strong>班とロールの紐付け</strong>（3つのロール ID の列）と、
+    <strong>名簿の班長フラグ</strong>は読み取り専用です。
+    ここを書き換えられると、Bot の権限で誰にでもロールを付けられてしまうためです。
+    変更は Discord 側の <code>/team-role</code>（Bot管理者）と
+    <code>/member set-leader</code>（幹部以上）から行ってください。
+  </div>
+
+  <div class="box tip">
+    <span class="t">完全なバックアップが欲しいときは Discord から</span>
+    CSV は「画面で見たとおり」を書き出すものです。
+    <strong>移行やバックアップのために生のデータが欲しい</strong>ときは、
+    Discord で <code>/data export</code>（Bot管理者）を使ってください。
+    全テーブルを ZIP でまとめて受け取れます。
+  </div>
+
+  <h2>5-7　安全のしくみ</h2>
+  <table>
+    <tr><th style="width:32%;">気になること</th><th>どうなっているか</th></tr>
+    <tr><td>他のサークルのデータは見える？</td><td><strong>見えません。</strong> URL を書き換えても、ログイン時に確認できたサーバー以外は拒否されます</td></tr>
+    <tr><td>Bot を乗っ取られない？</td><td>ダッシュボードは <strong>Bot のトークンを持っていません</strong>。Discord へメッセージを送ることもできません</td></tr>
+    <tr><td>パスワードは渡すの？</td><td>渡しません。Discord のログイン画面で許可するだけです</td></tr>
+    <tr><td>班長を外したのに編集できる？</td><td>班長フラグの変更は<strong>すぐ反映されます</strong>。ただしサーバーからの退会と「サーバー管理権限」の付け外しは、最大24時間ほど古い状態が残ります（ログインし直せば即時です）</td></tr>
+  </table>
 </div>
 
 <!-- ============================= 付録 ============================= -->
