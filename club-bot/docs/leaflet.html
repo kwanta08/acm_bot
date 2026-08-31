@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>鳥人間サークル 統合運営 Discord Bot — 紹介リーフレット</title>
+<style>
+  /* Zen Maru Gothic（SIL OFL）。PDF 生成時はローカル導入分を使い、
+     ブラウザで開いたときだけ Google Fonts から取得する（local() を先に置く）。 */
+  @font-face {
+    font-family: 'Zen Maru Gothic'; font-style: normal; font-weight: 400; font-display: swap;
+    src: local('Zen Maru Gothic'), local('ZenMaruGothic-Regular'),
+         url(https://fonts.gstatic.com/s/zenmarugothic/v19/o-0SIpIxzW5b-RxT-6A8jWAtCp-k7Q.ttf) format('truetype');
+  }
+  @font-face {
+    font-family: 'Zen Maru Gothic'; font-style: normal; font-weight: 500; font-display: swap;
+    src: local('Zen Maru Gothic Medium'), local('ZenMaruGothic-Medium'),
+         url(https://fonts.gstatic.com/s/zenmarugothic/v19/o-0XIpIxzW5b-RxT-6A8jWAtCp-cGWtCPA.ttf) format('truetype');
+  }
+  @font-face {
+    font-family: 'Zen Maru Gothic'; font-style: normal; font-weight: 700; font-display: swap;
+    src: local('Zen Maru Gothic Bold'), local('ZenMaruGothic-Bold'),
+         url(https://fonts.gstatic.com/s/zenmarugothic/v19/o-0XIpIxzW5b-RxT-6A8jWAtCp-cUW1CPA.ttf) format('truetype');
+  }
+
+  @page { size: A4; margin: 0; }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --navy:     #0a3a50;
+    --base:     #0b5f7d;
+    --accent:   #0f9b8e;
+    --accent-l: #7fe0d3;
+    --sky:      #eaf5f8;
+    --ink:      #22333d;
+    --ink-soft: #5f7784;
+    --line:     #dbe7ec;
+  }
+
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+  body {
+    font-family: 'Zen Maru Gothic', 'Noto Sans JP', sans-serif;
+    color: var(--ink);
+    font-size: 9.2pt;
+    line-height: 1.65;
+    background: #fff;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    width: 210mm; height: 296.8mm;
+    position: relative; overflow: hidden;
+    page-break-after: always;
+  }
+  .page:last-child { page-break-after: auto; }
+  .pad { padding: 0 14mm; }
+
+  /* ============ 表紙ヒーロー ============ */
+  .hero {
+    position: relative; height: 65mm; color: #fff;
+    background: linear-gradient(152deg, #073448 0%, #0b5f7d 48%, #12897f 100%);
+    padding: 9mm 14mm 0;
+    overflow: hidden;
+  }
+  .hero-art { position: absolute; right: 0; top: 0; width: 96mm; height: 65mm; opacity: .9; }
+  .hero-copy { position: relative; z-index: 2; }
+  .kicker {
+    display: inline-block; font-size: 8pt; font-weight: 500; letter-spacing: 2.2px;
+    border: 1.2px solid rgba(255,255,255,.55); border-radius: 999px;
+    padding: 1.2mm 4mm; margin-bottom: 3.2mm;
+  }
+  .hero h1 { font-size: 21pt; font-weight: 700; line-height: 1.32; letter-spacing: .5px; }
+  .hero h1 .em { color: var(--accent-l); }
+  .hero .lead { font-size: 9.2pt; line-height: 1.6; margin-top: 2.8mm; max-width: 132mm; opacity: .95; }
+  .chips { display: flex; gap: 2mm; margin-top: 3.6mm; flex-wrap: wrap; }
+  .chip {
+    background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.32);
+    border-radius: 999px; padding: 1.2mm 3.6mm; font-size: 8.2pt; font-weight: 500;
+  }
+  .chip.solid { background: var(--accent-l); border-color: var(--accent-l); color: #06413b; font-weight: 700; }
+
+  /* ============ 見出し ============ */
+  .sec { margin-top: 5mm; }
+  .sec-h { display: flex; align-items: baseline; gap: 3mm; margin-bottom: 3.6mm; }
+  .sec-h h2 { font-size: 13pt; font-weight: 700; color: var(--navy); letter-spacing: .3px; }
+  .sec-h .en { font-size: 7.6pt; letter-spacing: 2px; color: var(--accent); font-weight: 500; }
+  .sec-h::before {
+    content: ''; width: 3.4mm; height: 3.4mm; border-radius: 1.2mm;
+    background: var(--accent); flex: none; align-self: center;
+  }
+
+  /* ============ 集約ダイアグラム ============ */
+  .gather { display: flex; align-items: center; gap: 4mm; }
+  .scatter { flex: 1; display: flex; flex-wrap: wrap; gap: 2.2mm; }
+  .scatter .s {
+    background: #f4f7f8; border: 1px dashed #c3d1d7; color: #7c8f99;
+    border-radius: 3mm; padding: 1.4mm 2.8mm; font-size: 7.8pt;
+  }
+  .arrow { flex: none; width: 16mm; text-align: center; color: var(--accent); }
+  .arrow .t { font-size: 7.4pt; font-weight: 700; letter-spacing: 1px; margin-top: 1mm; }
+  .hub {
+    flex: none; width: 84mm; background: #fff; border: 1.6px solid var(--accent);
+    border-radius: 4mm; padding: 3.4mm 3.8mm; box-shadow: 0 1.4mm 3.4mm rgba(11,95,125,.10);
+  }
+  .hub-h { display: flex; align-items: center; gap: 2.2mm; font-weight: 700; color: var(--navy); font-size: 10pt; margin-bottom: 2.8mm; }
+  .hub-h .dot { width: 6.4mm; height: 6.4mm; border-radius: 2mm; background: #5865f2; flex: none; position: relative; }
+  .hub-h .dot svg { position: absolute; inset: 1.1mm; }
+  .hub li { list-style: none; display: flex; gap: 2mm; align-items: center; font-size: 8.2pt; padding: .6mm 0; }
+  .hub li .k { color: var(--accent); font-weight: 700; font-size: 8.2pt; flex: none; width: 20mm; }
+  .hub li .v { color: var(--ink-soft); }
+
+  /* ============ 4つの特徴 ============ */
+  .reasons { display: grid; grid-template-columns: 1fr 1fr; gap: 3.4mm; }
+  .reason {
+    border: 1px solid var(--line); border-radius: 4mm; padding: 3mm 3.6mm;
+    background: linear-gradient(180deg, #fbfdfe 0%, #fff 100%);
+  }
+  .reason .ic {
+    width: 8.6mm; height: 8.6mm; border-radius: 2.6mm; background: var(--sky);
+    color: var(--base); display: flex; align-items: center; justify-content: center; margin-bottom: 2mm;
+  }
+  .reason h3 { font-size: 10pt; font-weight: 700; color: var(--navy); margin-bottom: 1.2mm; line-height: 1.45; }
+  .reason p { font-size: 8.1pt; color: var(--ink-soft); line-height: 1.55; }
+  .reason p b { color: var(--ink); font-weight: 700; }
+
+  /* ============ 3ステップ ============ */
+  .steps { display: flex; gap: 3mm; }
+  .step {
+    flex: 1; background: var(--sky); border-radius: 4mm; padding: 3mm 3.4mm; position: relative;
+  }
+  .step .n {
+    width: 7.6mm; height: 7.6mm; border-radius: 999px; background: var(--base); color: #fff;
+    font-size: 9.4pt; font-weight: 700; display: flex; align-items: center; justify-content: center;
+    margin-bottom: 2.4mm;
+  }
+  .step h4 { font-size: 9.6pt; font-weight: 700; color: var(--navy); margin-bottom: 1.4mm; }
+  .step p { font-size: 7.9pt; color: var(--ink-soft); line-height: 1.55; }
+  .step code, code.cmd {
+    font-family: 'Zen Maru Gothic', monospace; background: #fff; border: 1px solid #cfe1e6;
+    border-radius: 1.6mm; padding: .3mm 1.4mm; color: var(--base); font-weight: 700; font-size: 8.2pt;
+  }
+  .step .arw { position: absolute; right: -2.4mm; top: 50%; color: var(--accent); z-index: 3; }
+
+  /* ============ フッター ============ */
+  .foot {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 13mm;
+    background: var(--navy); color: rgba(255,255,255,.86); font-size: 8pt;
+    display: flex; align-items: center; justify-content: space-between; padding: 0 14mm;
+  }
+  .foot b { color: #fff; font-weight: 700; }
+
+  /* 連絡先バンド（裏面） */
+  .cta {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 20mm;
+    background: var(--navy); color: rgba(255,255,255,.84);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 14mm; gap: 6mm;
+  }
+  .cta .l { font-size: 8pt; line-height: 1.45; }
+  .cta .l .hl {
+    display: block; font-size: 12pt; font-weight: 700; color: #fff;
+    letter-spacing: .3px; margin-top: 1mm;
+  }
+  .cta .l .hl .id { color: var(--accent-l); }
+  .cta .r { font-size: 7.4pt; text-align: right; line-height: 1.5; }
+  .cta .r b { color: #fff; font-weight: 700; font-size: 8.2pt; }
+
+  /* ============ 2ページ目 ============ */
+  .p2top { background: var(--navy); color: #fff; padding: 4mm 14mm 3.6mm; }
+  .p2top h2 { font-size: 14pt; font-weight: 700; letter-spacing: .4px; }
+  .p2top p { font-size: 9pt; opacity: .82; margin-top: 1.6mm; }
+
+  .feat { display: grid; grid-template-columns: 1fr 1fr; gap: 1.4mm 4.5mm; }
+  .f { display: flex; gap: 2.4mm; align-items: flex-start; padding: .9mm 0; border-bottom: 1px solid var(--line); }
+  .f .ic { width: 7.6mm; height: 7.6mm; border-radius: 2.2mm; background: var(--sky); color: var(--base);
+           display: flex; align-items: center; justify-content: center; flex: none; margin-top: .4mm; }
+  .f .tx { min-width: 0; }
+  .f .nm { font-size: 9pt; font-weight: 700; color: var(--navy); line-height: 1.4; }
+  .f .nm .cm { font-size: 7.8pt; color: var(--accent); font-weight: 500; margin-left: 1.4mm; }
+  .f .ds { font-size: 7.7pt; color: var(--ink-soft); line-height: 1.5; }
+
+  /* パイプライン図 */
+  .pipe {
+    display: flex; align-items: stretch; gap: 0; background: var(--sky);
+    border-radius: 4mm; padding: 3mm 4mm;
+  }
+  .pipe .box { flex: 1; text-align: center; }
+  .pipe .box .cap { font-size: 7.4pt; color: var(--accent); font-weight: 700; letter-spacing: .6px; }
+  .pipe .box .bd {
+    background: #fff; border: 1px solid #c9dee4; border-radius: 3mm; padding: 2.2mm 2mm;
+    margin-top: 1.2mm; min-height: 11.5mm; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 1mm;
+  }
+  .pipe .box .t1 { font-size: 8.8pt; font-weight: 700; color: var(--navy); line-height: 1.4; }
+  .pipe .box .t2 { font-size: 7.6pt; color: var(--ink-soft); line-height: 1.45; }
+  .pipe .sep { flex: none; width: 9mm; display: flex; align-items: center; justify-content: center; color: var(--accent); padding-top: 5mm; }
+  .bars { width: 100%; }
+  .bar { display: flex; align-items: center; gap: 1.4mm; font-size: 7pt; color: var(--ink-soft); }
+  .bar .lb { width: 12mm; text-align: right; flex: none; }
+  .bar .tr { flex: 1; height: 2.2mm; background: #e2edf1; border-radius: 999px; overflow: hidden; }
+  .bar .fl { height: 100%; background: var(--accent); border-radius: 999px; }
+  .bar .pc { width: 8mm; flex: none; font-weight: 700; color: var(--base); }
+
+  /* ============ ダッシュボードのモック（実画面に合わせた配色） ============ */
+  .win {
+    --p: #0071e3; --wbg: #e8eef6; --wink: #1d2230; --wmute: #5b6472; --wline: #d7dfea;
+    border: 1px solid #c9d5e2; border-radius: 3.4mm; overflow: hidden;
+    box-shadow: 0 1.6mm 4mm rgba(11,95,125,.12); background: #fff;
+  }
+  .win .bar0 { background: #eef2f7; padding: 1.3mm 3mm; display: flex; align-items: center; gap: 1.6mm; border-bottom: 1px solid #dde5ee; }
+  .win .bar0 .d { width: 2mm; height: 2mm; border-radius: 999px; background: #c3d0dd; }
+  .win .bar0 .url { flex: 1; background: #fff; border: 1px solid #dde5ee; border-radius: 999px; font-size: 6.8pt; color: #8b98a8; padding: .4mm 2.4mm; margin-left: 1.6mm; }
+
+  .ui { display: flex; background: var(--wbg); padding: 1.8mm; gap: 2mm; }
+  .side {
+    flex: none; width: 34mm; background: rgba(255,255,255,.82); border: 1px solid rgba(255,255,255,.9);
+    border-radius: 3mm; padding: 1.8mm 1.6mm; box-shadow: 0 1mm 2.6mm rgba(20,40,70,.10);
+    display: flex; flex-direction: column; gap: 1mm;
+  }
+  .side .brand { font-size: 6.8pt; font-weight: 700; color: var(--wink); padding: 0 1.2mm 1mm; }
+  .side .gpill, .side .nav-i, .side .theme {
+    font-size: 6.3pt; border-radius: 2mm; padding: .8mm 1.8mm; color: var(--wmute);
+  }
+  .side .gpill { background: #fff; border: 1px solid var(--wline); display: flex; justify-content: space-between; }
+  .side .nav { display: flex; flex-direction: column; gap: .6mm; margin-top: .6mm; }
+  .side .nav-i { background: rgba(255,255,255,.7); border: 1px solid rgba(215,223,234,.7); }
+  .side .nav-i.on { background: #d6e8fb; border-color: #b9d8f7; color: var(--p); font-weight: 700; }
+  .side .foot2 { margin-top: auto; padding-top: 1.2mm; display: flex; flex-direction: column; gap: 1mm; }
+  .side .theme { background: #fff; border: 1px solid var(--wline); display: flex; justify-content: space-between; }
+  .side .acct { display: flex; align-items: center; gap: 1.4mm; font-size: 6.2pt; color: var(--wmute); }
+  .side .acct .av { width: 4.2mm; height: 4.2mm; border-radius: 999px; background: var(--p); color: #fff;
+                    display: flex; align-items: center; justify-content: center; font-size: 5.4pt; font-weight: 700; }
+
+  .wbody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1.3mm; }
+  .phead { display: flex; align-items: flex-end; justify-content: space-between; }
+  .phead .t { font-size: 8pt; font-weight: 700; color: var(--wink); }
+  .phead .d { font-size: 6.2pt; color: var(--wmute); }
+  .pill { font-size: 6.2pt; border: 1px solid var(--wline); background: #fff; color: var(--wmute); border-radius: 999px; padding: .8mm 2.2mm; }
+  .sheetbar { display: flex; gap: 1.2mm; }
+  .sheetbar span { font-size: 6.2pt; color: var(--wmute); background: rgba(255,255,255,.7); border-radius: 2mm; padding: .7mm 1.8mm; }
+  .sheetbar span.on { background: #d6e8fb; color: var(--p); font-weight: 700; }
+  .wtool { display: flex; align-items: center; gap: 1.4mm; font-size: 6.2pt; color: var(--wmute); }
+  .wtool .sb { flex: 1; background: #fff; border: 1px solid var(--wline); border-radius: 2mm; padding: .7mm 1.8mm; color: #9aa5b3; }
+  .wtool .bt { background: #fff; border: 1px solid var(--wline); border-radius: 2mm; padding: .7mm 1.6mm; }
+  .cards { display: flex; gap: 1.6mm; }
+  .mcard { flex: 1; background: #fff; border: 1px solid rgba(255,255,255,.9); border-radius: 2.6mm;
+           padding: 1.3mm 1.8mm; box-shadow: 0 1mm 2.4mm rgba(20,40,70,.08); }
+  .mcard .l { font-size: 6pt; color: var(--wmute); }
+  .mcard .v { font-size: 9pt; font-weight: 700; color: var(--p); line-height: 1.25; }
+  .mcard .v.teal { color: #12897f; }
+  .mcard .mb { height: 1.3mm; border-radius: 999px; background: #e3eaf3; overflow: hidden; margin-top: .6mm; }
+  .mcard .mb i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #4ba3f0, var(--p)); }
+  .mcard .mb i.teal { background: linear-gradient(90deg, #7fd8c6, #12897f); }
+  .wgrid { background: #fff; border-radius: 2.6mm; overflow: hidden; box-shadow: 0 1mm 2.4mm rgba(20,40,70,.08); }
+  .wgrid table { width: 100%; border-collapse: collapse; font-size: 6.2pt; }
+  .wgrid th { text-align: left; color: var(--wmute); font-weight: 700; padding: .8mm 1.8mm; border-bottom: 1px solid var(--wline); white-space: nowrap; }
+  .wgrid td { padding: .8mm 1.8mm; color: var(--wink); border-bottom: 1px solid #eef2f7; white-space: nowrap; }
+  .wgrid tr:nth-child(even) td { background: #f6f9fc; }
+  .wgrid .c { color: var(--p); font-weight: 700; }
+  .wgrid .m { color: var(--wmute); }
+
+  .dash-notes { display: grid; grid-template-columns: 1fr 1fr; gap: .5mm 5mm; margin-top: 2.2mm; }
+  .dash-notes li { list-style: none; font-size: 8pt; line-height: 1.5; color: var(--ink); padding-left: 4.4mm; position: relative; }
+  .dash-notes li::before {
+    content: ''; position: absolute; left: 0; top: 1.4mm; width: 2.4mm; height: 2.4mm;
+    border-radius: .8mm; background: var(--accent-l); border: 1.2px solid var(--accent);
+  }
+  .dash-notes li b { color: var(--navy); font-weight: 700; }
+
+  /* 安心（1行の帯） */
+  .safe {
+    display: flex; align-items: center; gap: 3mm; background: var(--sky);
+    border-radius: 3.4mm; padding: 2.2mm 3.6mm; margin-top: 3.4mm;
+  }
+  .safe .hd { flex: none; font-size: 8.6pt; font-weight: 700; color: var(--navy); }
+  .safe .it { flex: 1; font-size: 7.6pt; color: var(--ink-soft); line-height: 1.45; border-left: 1px solid #bcd7de; padding-left: 3mm; }
+  .safe .it b { display: block; color: var(--navy); font-size: 8pt; }
+
+  .note { font-size: 7.4pt; color: var(--ink-soft); margin-top: 2mm; line-height: 1.5; }
+</style>
+</head>
+<body>
+
+<!-- ==================== 1ページ目 ==================== -->
+<section class="page">
+
+  <div class="hero">
+    <svg class="hero-art" viewBox="0 0 340 234" fill="none" preserveAspectRatio="xMaxYMin slice">
+      <defs>
+        <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#ffffff" stop-opacity=".30"/>
+          <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+        </radialGradient>
+        <pattern id="dots" width="13" height="13" patternUnits="userSpaceOnUse">
+          <circle cx="2" cy="2" r="1.5" fill="#ffffff" opacity=".22"/>
+        </pattern>
+      </defs>
+      <circle cx="252" cy="52" r="126" fill="url(#glow)"/>
+      <rect x="150" y="16" width="182" height="104" fill="url(#dots)"/>
+      <g stroke="#ffffff" fill="none" opacity=".18">
+        <circle cx="286" cy="176" r="54" stroke-width="1.4"/>
+        <circle cx="286" cy="176" r="86" stroke-width="1.4"/>
+      </g>
+    </svg>
+
+    <div class="hero-copy">
+      <div class="kicker">FOR HUMAN-POWERED AIRCRAFT CLUBS</div>
+      <h1>その運営、<span class="em">Discord の中だけ</span>で<br>回せます。</h1>
+      <p class="lead">
+        日程調整・タスク・桁巻き積層・機体進捗。バラバラだった記録を、<br>
+        部員が毎日開いている場所へまとめる運営 Bot です。
+      </p>
+      <div class="chips">
+        <span class="chip solid">導入は15分</span>
+        <span class="chip">VPS もトークンも不要</span>
+        <span class="chip">MIT ライセンスの OSS</span>
+        <span class="chip">サーバーごとにデータを分離</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="pad">
+
+    <!-- 集約図 -->
+    <div class="sec" style="margin-top:6mm">
+      <div class="sec-h"><h2>バラバラの運営を、1か所に集めます</h2><span class="en">ALL IN DISCORD</span></div>
+      <div class="gather">
+        <div class="scatter">
+          <span class="s">日程調整の外部サービス</span>
+          <span class="s">出欠の手集計</span>
+          <span class="s">紙の作業日誌</span>
+          <span class="s">桁巻きのスプレッドシート</span>
+          <span class="s">Todoist</span>
+          <span class="s">進捗は誰も知らない</span>
+          <span class="s">代替わりで作り直し</span>
+        </div>
+        <div class="arrow">
+          <svg width="100%" viewBox="0 0 40 26" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 13 H32"/><path d="M24 5 L34 13 L24 21"/>
+          </svg>
+          <div class="t">1つに</div>
+        </div>
+        <div class="hub">
+          <div class="hub-h">
+            <span class="dot">
+              <svg viewBox="0 0 24 24" fill="#fff"><path d="M19.6 5.9A16 16 0 0 0 15.7 4.7l-.3.6a15 15 0 0 1 3.4 1.1c-3.6-1.7-7.9-1.7-11.6 0a15 15 0 0 1 3.4-1.1l-.3-.6c-1.4.2-2.7.6-3.9 1.2C3 9.4 2.4 12.8 2.7 16.1a16 16 0 0 0 4.9 2.5l.9-1.4a10 10 0 0 1-1.6-.8l.4-.3c3.1 1.4 6.5 1.4 9.5 0l.4.3c-.5.3-1.1.6-1.7.8l.9 1.4c1.8-.5 3.5-1.4 4.9-2.5.4-3.8-.6-7.2-2.7-10.2ZM9.3 14.1c-.9 0-1.7-.9-1.7-1.9s.8-1.9 1.7-1.9 1.7.9 1.7 1.9-.7 1.9-1.7 1.9Zm5.4 0c-.9 0-1.7-.9-1.7-1.9s.8-1.9 1.7-1.9 1.7.9 1.7 1.9-.7 1.9-1.7 1.9Z"/></svg>
+            </span>
+            あなたのサークルの Discord
+          </div>
+          <ul>
+            <li><span class="k">/schedule</span><span class="v">ボタン投票 → 自動締切 → 告知</span></li>
+            <li><span class="k">/task</span><span class="v">班へ配って追いかける</span></li>
+            <li><span class="k">/layer</span><span class="v">積層記録・作業時間は自動計算</span></li>
+            <li><span class="k">/progress</span><span class="v">機体 → パーツ → 部品 を集計</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4つの特徴 -->
+    <div class="sec">
+      <div class="sec-h"><h2>この Bot の4つの特徴</h2><span class="en">HOW IT WORKS</span></div>
+      <div class="reasons">
+        <div class="reason">
+          <div class="ic">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 3v10"/><path d="M8.5 6.5 12 3l3.5 3.5"/><path d="M4 14v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/>
+            </svg>
+          </div>
+          <h3>入れるのは15分。VPS もトークンも要らない</h3>
+          <p><b>招待URLを踏んで <code class="cmd">/setup</code> を実行するだけ</b>。サーバーの用意も設定ファイルの編集も、更新作業もありません。</p>
+        </div>
+        <div class="reason">
+          <div class="ic">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <ellipse cx="12" cy="5.5" rx="6" ry="2.5"/><path d="M6 5.5v13a6 2.5 0 0 0 12 0v-13"/><path d="M6 12a6 2.5 0 0 0 12 0"/>
+            </svg>
+          </div>
+          <h3>鳥人間の言葉が、そのままコマンド</h3>
+          <p>桁巻き・積層・主桁・機体。<b>用語を汎用語へ言い換えません</b>。新入生にも何のコマンドかが説明なしで伝わります。</p>
+        </div>
+        <div class="reason">
+          <div class="ic">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M5 4v16"/><path d="M12 4v16"/><path d="M19 4v16"/><circle cx="5" cy="9" r="2"/><circle cx="12" cy="15" r="2"/><circle cx="19" cy="8" r="2"/>
+            </svg>
+          </div>
+          <h3>サークルの形は、そのままでいい</h3>
+          <p>班名・桁名・機体構成・チャンネルに<b>初期値はありません</b>。すべて Discord 上から、あなたのサークルが決めます。</p>
+        </div>
+        <div class="reason">
+          <div class="ic">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="4" y="10" width="16" height="10" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><path d="M12 14v2.5"/>
+            </svg>
+          </div>
+          <h3>メッセージの本文は読みません</h3>
+          <p><b>MESSAGE CONTENT 特権インテントを要求しない設計</b>。データもサーバー単位で完全に分かれています。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3ステップ -->
+    <div class="sec">
+      <div class="sec-h"><h2>はじめかたは3ステップ</h2><span class="en">GET STARTED</span></div>
+      <div class="steps">
+        <div class="step">
+          <div class="n">1</div>
+          <h4>招待する</h4>
+          <p><b>X の DM で招待URLをお渡しします</b>。開いてサーバーを選ぶだけ。権限は最小限で、Administrator は求めません。</p>
+          <svg class="arw" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+        </div>
+        <div class="step">
+          <div class="n">2</div>
+          <h4><code>/setup</code> を実行</h4>
+          <p>通知チャンネル・ロール・サークル名を選び、班名をカンマ区切りで入力。<b>班とロールがまとめて作られます</b>。</p>
+          <svg class="arw" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+        </div>
+        <div class="step">
+          <div class="n">3</div>
+          <h4>使い始める</h4>
+          <p><code>/schedule create</code> で最初の日程調整を。役割別の取扱説明書つきなので、引き継ぎも読むだけです。</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- 安心（1行の帯） -->
+    <div class="safe">
+      <span class="hd">安心して<br>使えます</span>
+      <span class="it"><b>本文を読まない</b>メッセージ本文と DM を読む権限を持ちません</span>
+      <span class="it"><b>サーバー単位で分離</b>設定も通知も他サーバーから見えません</span>
+      <span class="it"><b>トークンは渡さない</b>Todoist の鍵は各サーバーで暗号化保存</span>
+      <span class="it"><b>やめるのも自由</b>キックで停止し、30日後に自動削除</span>
+    </div>
+
+  </div>
+
+  <div class="foot">
+    <span><b>鳥人間サークル 統合運営 Discord Bot</b>　discord.py 2.x / Python 3.10+ / MIT License</span>
+    <span>X: <b>@kwa_2me</b>　/　github.com/kwanta08/acm_bot</span>
+  </div>
+</section>
+
+<!-- ==================== 2ページ目 ==================== -->
+<section class="page">
+
+  <div class="p2top">
+    <h2>できること</h2>
+    <p>毎日つかうものから、年に数回のものまで。すべて Discord のスラッシュコマンドで。</p>
+  </div>
+
+  <div class="pad" style="padding-top:5mm">
+
+    <div class="feat">
+      <div class="f">
+        <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17"/><path d="M8 3v4"/><path d="M16 3v4"/><path d="M9 15l2 2 4-4"/></svg></span>
+        <span class="tx"><span class="nm">日程調整<span class="cm">/schedule</span></span>
+        <span class="ds">全候補を1つの投票ボードに集約。締切で自動集計し、未回答者へ催促 DM。</span></span>
+      </div>
+      <div class="f">
+        <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.5h4"/><path d="M4 12h4"/><path d="M4 17.5h4"/><path d="M11 6.5h9"/><path d="M11 12h9"/><path d="M11 17.5h9"/></svg></span>
+        <span class="tx"><span class="nm">タスク管理<span class="cm">/task /today</span></span>
+        <span class="ds">期限つきタスクを班へ配って追いかける。正本は Todoist なので、いまの運用のまま Discord から。</span></span>
+      </div>
+      <div class="f">
+        <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="7" cy="12" rx="2.5" ry="6"/><path d="M7 6h10"/><path d="M7 18h10"/><ellipse cx="17" cy="12" rx="2.5" ry="6"/><path d="M11 7.5v9"/><path d="M14 7v10"/></svg></span>
+        <span class="tx"><span class="nm">桁巻き積層記録<span class="cm">/layer</span></span>
+        <span class="ds">誰が・どの桁の・何層目を・何分。<b>start → end の2コマンド</b>で作業時間は自動計算。</span></span>
+      </div>
+      <div class="f">
+        <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="8.5" y="3" width="7" height="4.5" rx="1.2"/><rect x="3" y="16.5" width="6" height="4.5" rx="1.2"/><rect x="15" y="16.5" width="6" height="4.5" rx="1.2"/><path d="M12 7.5v4.5"/><path d="M6 16.5v-2.2h12v2.2"/></svg></span>
+        <span class="tx"><span class="nm">機体進捗管理<span class="cm">/progress</span></span>
+        <span class="ds">機体 → パーツ → 部品 のツリーを子から親へ再帰的に集計。積層記録と Todoist から反映。</span></span>
+      </div>
+      <div class="f">
+        <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16"/><path d="M6 20h12"/><path d="M4.5 8h15"/><path d="M4.5 8 2 14h5Z"/><path d="M19.5 8 17 14h5Z"/></svg></span>
+        <span class="tx"><span class="nm">重量管理<span class="cm">/weight</span></span>
+        <span class="ds">目標重量と実測重量をツリーで積み上げ、超過の大きい順に表示。重量は成績に直結します。</span></span>
+      </div>
+      <div class="f">
+        <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M6 21V3"/><path d="M6 4h11l-2.2 3.6L17 11H6"/></svg></span>
+        <span class="tx"><span class="nm">大会からの逆算<span class="cm">/milestone /countdown</span></span>
+        <span class="ds">大会日と節目から必要ペースを逆算。<b>遅れがある週だけ</b>月曜に通知します。</span></span>
+      </div>
+      <div class="f">
+        <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.2"/><path d="M3 19c0-3.2 2.7-5 6-5s6 1.8 6 5"/><circle cx="17.5" cy="9.5" r="2.4"/><path d="M15.5 14.4c3 .2 5 1.9 5 4.6"/></svg></span>
+        <span class="tx"><span class="nm">班・メンバー管理<span class="cm">/team-* /member</span></span>
+        <span class="ds">班の作成とロール紐付け、班をまたいだ支援候補の検索、新入生オンボーディング。</span></span>
+      </div>
+      <div class="f">
+        <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5 12 3.5l8.5 4v9L12 20.5 3.5 16.5Z"/><path d="M3.5 7.5 12 11.5l8.5-4"/><path d="M12 11.5v9"/></svg></span>
+        <span class="tx"><span class="nm">資材の在庫<span class="cm">/stock</span></span>
+        <span class="ds">消耗品の増減を記録し、発注閾値を割った朝だけ通知。「気づいたら無い」を防ぎます。</span></span>
+      </div>
+      <div class="f">
+        <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 1 1-2.5-5.8"/><path d="M20 3v5h-5"/></svg></span>
+        <span class="tx"><span class="nm">代替わり<span class="cm">/season</span></span>
+        <span class="ds">卒業者の仕分け・班長フラグの一括リセット・年度スナップショット。<b>記録は消しません</b>。</span></span>
+      </div>
+      <div class="f">
+        <span class="ic"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v10"/><path d="M8 9.5 12 13.5l4-4"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg></span>
+        <span class="tx"><span class="nm">持ち出しと削除<span class="cm">/data</span></span>
+        <span class="ds">主要14テーブルを ZIP（CSV 群）で export。<b>データは自分で削除できます</b>（取り消し可）。</span></span>
+      </div>
+    </div>
+
+    <!-- パイプライン -->
+    <div class="sec" style="margin-top:6mm">
+      <div class="sec-h"><h2>桁を1本巻くと、機体の進捗が動く</h2><span class="en">AUTO AGGREGATION</span></div>
+      <div class="pipe">
+        <div class="box">
+          <div class="cap">RECORD</div>
+          <div class="bd">
+            <div class="t1">/layer start → end</div>
+            <div class="t2">主桁1・5層目<br>作業 92分（自動計算）</div>
+          </div>
+        </div>
+        <div class="sep">
+          <svg width="20" height="14" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h18"/><path d="M15 3l6 5-6 5"/></svg>
+        </div>
+        <div class="box">
+          <div class="cap">SYNC · 20分ごと</div>
+          <div class="bd">
+            <div class="t1">自動で集計</div>
+            <div class="t2">積層記録と Todoist を<br>進捗ツリーへ反映</div>
+          </div>
+        </div>
+        <div class="sep">
+          <svg width="20" height="14" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h18"/><path d="M15 3l6 5-6 5"/></svg>
+        </div>
+        <div class="box">
+          <div class="cap">VIEW</div>
+          <div class="bd">
+            <div class="bars">
+              <div class="bar"><span class="lb">1号機</span><span class="tr"><span class="fl" style="width:62%"></span></span><span class="pc">62%</span></div>
+              <div class="bar"><span class="lb">主翼</span><span class="tr"><span class="fl" style="width:71%"></span></span><span class="pc">71%</span></div>
+              <div class="bar"><span class="lb">主桁</span><span class="tr"><span class="fl" style="width:84%"></span></span><span class="pc">84%</span></div>
+              <div class="bar"><span class="lb">尾翼</span><span class="tr"><span class="fl" style="width:35%"></span></span><span class="pc">35%</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="sep">
+          <svg width="20" height="14" viewBox="0 0 24 16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 8h18"/><path d="M15 3l6 5-6 5"/></svg>
+        </div>
+        <div class="box">
+          <div class="cap">ALERT</div>
+          <div class="bd">
+            <div class="t1">遅れた節目だけ通知</div>
+            <div class="t2">毎週月曜の朝に<br>必要ペースを逆算</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ダッシュボード -->
+    <div class="sec" style="margin-top:6mm">
+      <div class="sec-h"><h2>Web ダッシュボード</h2><span class="en">BROWSER · OPTIONAL</span></div>
+
+      <div class="win">
+        <div class="bar0"><span class="d"></span><span class="d"></span><span class="d"></span><span class="url">https://dashboard.example.com</span></div>
+        <div class="ui">
+          <aside class="side">
+            <div class="brand">鳥人間サークル運営 Bot</div>
+            <div class="gpill"><span>〇〇サークル</span><span>▼</span></div>
+            <div class="nav">
+              <div class="nav-i">メンバー</div>
+              <div class="nav-i">班</div>
+              <div class="nav-i">日程調整</div>
+              <div class="nav-i on">出欠回答</div>
+              <div class="nav-i">桁巻き積層記録</div>
+              <div class="nav-i">機体進捗</div>
+              <div class="nav-i">設定</div>
+            </div>
+            <div class="foot2">
+              <div class="theme"><span>テーマ</span><span>システム ▼</span></div>
+              <div class="acct"><span class="av">や</span><span>やまだ</span></div>
+            </div>
+          </aside>
+
+          <div class="wbody">
+            <div class="phead">
+              <span><span class="t">出欠回答</span><br><span class="d">予定ごとに、誰が答えて誰が未回答かを一覧する</span></span>
+              <span class="pill">CSV をダウンロード</span>
+            </div>
+            <div class="sheetbar">
+              <span class="on">全体ミーティング</span><span>主翼班 定例</span><span>テストフライト</span>
+            </div>
+            <div class="wtool">
+              <span class="sb">検索</span><span class="bt">前へ</span><span>1〜200 件 / 全 320 件</span><span class="bt">次へ</span><span class="bt">行の高さ: 標準</span>
+            </div>
+            <div class="cards">
+              <div class="mcard"><div class="l">参加</div><div class="v">14</div></div>
+              <div class="mcard"><div class="l">不参加</div><div class="v">3</div></div>
+              <div class="mcard"><div class="l">未回答</div><div class="v">5</div></div>
+              <div class="mcard"><div class="l">回答率</div><div class="v teal">77%</div><div class="mb"><i class="teal" style="width:77%"></i></div></div>
+            </div>
+            <div class="wgrid">
+              <table>
+                <tr><th>候補日時</th><th>参加</th><th>不参加</th><th>未定</th><th>未回答</th></tr>
+                <tr>
+                  <td>2026-09-05 18:00:00</td>
+                  <td><span class="c">参加 (8)</span> 山田 / 佐藤 …</td>
+                  <td><span class="c">(1)</span> 田中</td>
+                  <td><span class="c">(2)</span> 高橋 …</td>
+                  <td><span class="c">(3)</span> 渡辺 …</td>
+                </tr>
+                <tr>
+                  <td>2026-09-06 13:00:00</td>
+                  <td><span class="c">参加 (11)</span> 山田 / 田中 …</td>
+                  <td><span class="c">(0)</span> <span class="m">—</span></td>
+                  <td><span class="c">(1)</span> 鈴木</td>
+                  <td><span class="c">(2)</span> 中村 …</td>
+                </tr>
+                <tr>
+                  <td>2026-09-12 18:00:00</td>
+                  <td><span class="c">参加 (9)</span> 佐藤 / 鈴木 …</td>
+                  <td><span class="c">(2)</span> 小林 …</td>
+                  <td><span class="c">(0)</span> <span class="m">—</span></td>
+                  <td><span class="c">(3)</span> 伊藤 …</td>
+                </tr>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <ul class="dash-notes">
+        <li><b>Discord でログインするだけ</b>。新しいアカウントは要りません</li>
+        <li>表の切り替えは<b>サイドバー</b>（スマホでは画面下の Dock）</li>
+        <li>出欠回答は予定ごと、桁巻きは桁ごとの<b>シートタブ</b>で切り替え</li>
+        <li><b>検索・列ヘッダでの並べ替え・ページング</b>で目的の行にすぐ届く</li>
+        <li><b>班長以上はセルをその場で編集</b>。回答率や進捗は<b>指標カード</b>で</li>
+        <li><b>ライト / ダーク / システム</b>のテーマ切替。スマホでも使えます</li>
+      </ul>
+
+      <p class="note">
+        ※ 人物は ID ではなく<b>サーバーでの表示名</b>、日時は<b>日本時間</b>で表示し、CSV は全件出力します。任意機能なので動かさなくても Bot は通常どおり動きます（別プロセスなので <b>Web が落ちても Discord は止まりません</b>）。<b>表示・編集できるのは自分のサーバーのデータだけ</b>です。
+      </p>
+    </div>
+
+  </div>
+
+  <div class="cta">
+    <span class="l">公開しました。導入のご相談・招待URLのご依頼は、お気軽にどうぞ
+      <span class="hl">X の DM へ　<span class="id">@kwa_2me</span></span>
+    </span>
+    <span class="r">取扱説明書・利用規約・プライバシーポリシー<br><b>github.com/kwanta08/acm_bot</b></span>
+  </div>
+</section>
+
+</body>
+</html>
