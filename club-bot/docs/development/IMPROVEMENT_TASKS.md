@@ -1,7 +1,12 @@
 # 改善タスク管理（G0〜G4）
 
-`docs/PUBLIC_RELEASE_TASKS.md` → `docs/FEATURE_TASKS.md` に続く第3の管理表。
-根拠は `docs/IMPROVEMENT_REPORT.md`（2026-08-20 の全コード分析）。
+> **内部の作業用ドキュメントです（[development/README.md](README.md)）。**
+> 書かれた時点のスナップショットで、現在のコードとは食い違う記述を含みます。
+> **現状の仕様の根拠には使えません。** 使い方は [`../GUIDE.md`](../GUIDE.md)、
+> 運用は [`../OPERATION.md`](../OPERATION.md) を参照してください。
+
+`docs/development/PUBLIC_RELEASE_TASKS.md` → `docs/development/FEATURE_TASKS.md` に続く第3の管理表。
+根拠は `docs/development/IMPROVEMENT_REPORT.md`（2026-08-20 の全コード分析）。
 `/acm-bot-loop` で1タスクずつ回すために分解してある。
 
 ## 運用ルール
@@ -28,11 +33,11 @@
 
 ## この表に固有の受入基準
 
-- **ADR に反する変更をしない。** 既存の設計判断（ClaudeVault `projects/acm_bot/decisions/`）と
+- **ADR に反する変更をしない。** 既存の設計判断（開発ノート `projects/acm_bot/decisions/`）と
   衝突する場合は、実装せず完了ログに「ADR NNNN と衝突。判断を仰ぐ」と書いて止まる
 - **ADR を更新・失効させるタスクには、そのことをタスク本文に明記してある。**
   該当タスクの完了ログには、新しい ADR の草案（文脈 / 選択肢 / 決定 / 理由 / 影響範囲 / 覆す条件）を書く
-- 修正した不具合が ClaudeVault の gotcha に載っている場合、完了ログにノート名を書く（人間が `unfixed` タグを外す）
+- 修正した不具合が 開発ノート の gotcha に載っている場合、完了ログにノート名を書く（人間が `unfixed` タグを外す）
 
 ## スキーマバージョンの割り当て（衝突防止）
 
@@ -62,7 +67,7 @@
       - **注意**: エージェントにやらせない。`git checkout -- .` は取り返しがつかない
 
 - [x] **G0-2** `fix/code-audit-v2` を main（または現行ブランチ）へ取り込む。
-      未マージのまま放置されており、**ClaudeVault の gotcha 3件が「いま踏むと未修正」のままになっている**。
+      未マージのまま放置されており、**開発ノート の gotcha 3件が「いま踏むと未修正」のままになっている**。
       現行コードで未適用であることを確認済み（`descendant_ids` 不在 / `InvalidValueError` 不在 /
       `cogs/progress.py:1106` が `@require(Level.L2)` のまま）。
       - 含まれるコミット: `8b9c0f4`（ダッシュボードの値検証と CSV 出力）/ `1b741d1`（`/progress edit` の子孫親付け防止）/
@@ -73,7 +78,7 @@
         `cogs/progress.py` の `progress_setup` が `@require_manage_guild_or(...)` になっている
       - **検証**: `tests/test_permissions.py` が「ヘルパ」ではなく `bot.tree` を走査してコマンドの
         権限を検査していること（`2d044ce` の回帰テスト）を目視で確認する
-      - **申し送り**: 取り込み後、`docs/IMPROVEMENT_REPORT.md` の P1-12「値の検証がサーバー側に無い」と
+      - **申し送り**: 取り込み後、`docs/development/IMPROVEMENT_REPORT.md` の P1-12「値の検証がサーバー側に無い」と
         「CSV が500行で切り捨て」が解消済みか再確認し、残っていれば G1 に起票する
       - **gotcha**: `progress-subtree-disappears` / `progress-stops-after-dashboard-edit` /
         `test-asserts-permission-but-decorator-missing`（いずれも `unfixed` タグを外せる）
@@ -89,7 +94,7 @@
   - 当初 `CLUB_TEST_PG_DSN=... pytest tests/test_dashboard_edit.py` で検証すると書いていたが、
     **このテストは `CLUB_TEST_PG_DSN` を一度も読まず SQLite 決め打ち**のため、
     実行しても PG 経路は1行も通らない（緑が出ても「測れていない」だけ）。検証方法を差し替えた
-  - `docs/IMPROVEMENT_REPORT.md` の P0-8 は【要検証】から**確定**へ格上げ
+  - `docs/development/IMPROVEMENT_REPORT.md` の P0-8 は【要検証】から**確定**へ格上げ
   - 申し送り: G1-0 として起票
 
 - [x] **G0-4** `ruff check .` の既存エラー13件を解消する。
@@ -211,7 +216,7 @@
       指摘の根拠にした `deploy.yml` は手元の `feat/dashboard-ui-fixes` にあった `fd86fb7`（08-06 / 30行）で、
       `origin/main` 版（43行）には `dashboard/requirements.txt` の install、
       `club-bot-dashboard.service` の restart、`ReadWritePaths` 用ディレクトリ作成まで入っている。
-      **分析前に `git fetch` していなかったのが原因**（`docs/IMPROVEMENT_REPORT.md` の P0-7 も取り下げ）。
+      **分析前に `git fetch` していなかったのが原因**（`docs/development/IMPROVEMENT_REPORT.md` の P0-7 も取り下げ）。
       - **残る作業**: 「restart 前に `pg_dump -Fc` を取る」の追記（`docs/DASHBOARD_SETUP.md` §11 /
         `docs/OPERATION.md` §6）は未実施。申し送りから **G3-7** として再起票する（G3-7 で実施済み）
       - 以下は取り下げた元の記述:
@@ -451,7 +456,7 @@
       通知表（GUIDE.md:360-368）に `weekly_milestone_alert` / `daily_purge` /
       `cogs/progress.py:803` が無い。早見表（GUIDE.md:484-509）に `/help` `/setup-status`
       `/countdown` `/weight` `/milestone` `/season` `/data` が**全部無い**（`/weight` は全体で0ヒット）。
-      `docs/IMPROVEMENT_REPORT.md` の「reminders 定期ジョブ一覧」がそのまま使える。
+      `docs/development/IMPROVEMENT_REPORT.md` の「reminders 定期ジョブ一覧」がそのまま使える。
       - **受入**: GUIDE.md の通知表と早見表が実装と一致する。
         `tests/test_docs_commands.py`（現状 `docs/OPERATION.md` のみ検査）の対象に
         GUIDE.md の付録セクションを追加する
@@ -640,7 +645,7 @@
 | 部費・立替精算・会計管理 | 金銭記録の正本を bot が持つと欠損時の責任が運営者個人に及ぶ。実際の入出金は銀行・大学の会計ルール側にあり二重記帳になる。G4-8 の在庫から CSV を出す形が現実的 |
 | 機体設計値の汎用スペック管理 | 「設計値 vs 実測値」は `/weight` で実装済み。他の物理量へ広げると `progress_nodes` の列が際限なく増えるか汎用 EAV になり、ADR 0021（グラム固定・単位設定は作らない）に反する |
 | 汎用リアクションロール | G3-6 に完全に包含される。`teams.member_role_id` を使う限り別機能にする理由がない |
-| ダッシュボードのページング・検索・ソート・モバイル対応 | 効果は大きいがフロントの作り替えに近く、1タスクに割れない。G4 完了後に**別表**として起こす（`docs/IMPROVEMENT_REPORT.md` P1-12 の表がそのまま候補一覧） |
+| ダッシュボードのページング・検索・ソート・モバイル対応 | 効果は大きいがフロントの作り替えに近く、1タスクに割れない。G4 完了後に**別表**として起こす（`docs/development/IMPROVEMENT_REPORT.md` P1-12 の表がそのまま候補一覧） |
 | ダッシュボードのセッション短縮・ログ設定・advisory lock | 運用側の改善で、`/acm-bot-loop` のテスト駆動と相性が悪い。G0-3 の結果と併せて **人間が運用手順として** 対応する |
 
 ---
@@ -778,12 +783,12 @@ gotcha `test-asserts-permission-but-decorator-missing` と同型の嘘を防ぐ�
 指摘の根拠にした `deploy.yml` は手元の `feat/dashboard-ui-fixes` にあった `fd86fb7`（08-06 / 30行）。
 `origin/main` 版（43行）には `dashboard/requirements.txt` の install、
 `club-bot-dashboard.service` の restart、`ReadWritePaths` 用ディレクトリ作成まで入っている。
-**`docs/IMPROVEMENT_REPORT.md` の P0-7 も取り下げる。**
+**`docs/development/IMPROVEMENT_REPORT.md` の P0-7 も取り下げる。**
 原因は分析前に `git fetch origin` していなかったこと。
 → **今後 IMPROVEMENT_REPORT.md 系の分析を始める前に必ず `git fetch origin` し、
 `origin/main` を基点にすること。** 手元のブランチが main より古いと、修正済みの問題を再指摘する。
 
-**B. ClaudeVault の gotcha 3件は `unfixed` タグを外せる。**
+**B. 開発ノート の gotcha 3件は `unfixed` タグを外せる。**
 0001〜0003 で解消した。`gotchas/_index.md` の「いま踏むと未修正のもの（3件）」の節ごと削除できる。
 
 | ノート | 解消したコミット |
@@ -954,7 +959,7 @@ ADR 0006（本番は PostgreSQL）を踏まえると SQLite だけの CI は本�
   `test_pg_live_dashboard_edit_accepts_string_row_id` が HTTP 経路を PG で1往復する。
   受入基準3が求めていたのはこちらなので、実質的な担保はできている
 
-**E. `docs/IMPROVEMENT_REPORT.md` の P0-8 は解消済みにできる。**
+**E. `docs/development/IMPROVEMENT_REPORT.md` の P0-8 は解消済みにできる。**
 
 ### 2026-08-21 — G1-9（ブランチ `fix/g1-9`）
 
@@ -1527,7 +1532,7 @@ ADR 0017 の最小権限招待では `manage_channels` を要求しないため�
   案内が `/setup-status` を入口に指すのに、L3 判定の実体である `EXEC_ROLE_ID` を
   見ていなかった（「すべて設定済み」と出たサーバーで幹部が L3 を使えない形）
 - `README.md`（招待直後に何が起きるか・`/setup` の項目）/ `docs/GUIDE.md` Step 1 /
-  `docs/MULTI_TENANT_MIGRATION.md` §5 を実装に合わせた。GUIDE の復旧手順は
+  `docs/archive/MULTI_TENANT_MIGRATION.md` §5 を実装に合わせた。GUIDE の復旧手順は
   案内文と同じ順序・同じ但し書きに揃えている
 
 #### 設計判断
@@ -1837,7 +1842,7 @@ G3-2 に混ぜると ADR 0014 に反する。**G4-12 として起票した。**
 > **覆す条件**: 変更なし（ロール基準へ寄せたいときは、Bot トークンを Web 層へ置くのではなく
 > `discord_name_cache` に `role_member` 相当の同期を bot 側で足す）。
 
-**ClaudeVault の ADR 本文は編集していない。** 表の運用ルール（草案を完了ログに書く）に従った。
+**開発ノート の ADR 本文は編集していない。** 表の運用ルール（草案を完了ログに書く）に従った。
 
 #### 既存ギルドで何が変わるか
 
@@ -2715,7 +2720,7 @@ DB のテーブル名が食い違って混乱する。
 - **フルセットでだけ赤くなるテストの型を1つ踏んだ。**
   `unload_extension` を通る `tests/test_docs_commands.py` があるので、
   **Cog のモジュール変数へ `mock.patch` を当てるテストは書かない**。
-  差し替えるならインスタンス属性にする（ClaudeVault の gotcha 候補）
+  差し替えるならインスタンス属性にする（開発ノート の gotcha 候補）
 - `/me` は `aggregate_layer_stats`（G4-1）を再利用している。
   G4-5 のダイジェストも同じ関数を使う予定
 
@@ -2994,7 +2999,7 @@ ok率の分母も「対象回数」にすると回答率との積になり、
   そのときは案 A（書き込み経路への記録）へ移す
 - ノード数 × 日数が実運用で問題になる規模に育ったとき（保持期間の設計が必要になる）
 
-**根拠** — `docs/IMPROVEMENT_TASKS.md` G4-7、`migrations/017_progress_snapshots.sql`、
+**根拠** — `docs/development/IMPROVEMENT_TASKS.md` G4-7、`migrations/017_progress_snapshots.sql`、
 `services/milestone_service.py`（`snapshot_pace` の docstring に根拠を併記）
 
 ---

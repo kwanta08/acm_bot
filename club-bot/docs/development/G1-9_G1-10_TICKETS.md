@@ -1,6 +1,11 @@
 # G1-9 / G1-10 起票内容
 
-`docs/IMPROVEMENT_TASKS.md` の Phase G1 に追加してください。
+> **内部の作業用ドキュメントです（[development/README.md](README.md)）。**
+> 書かれた時点のスナップショットで、現在のコードとは食い違う記述を含みます。
+> **現状の仕様の根拠には使えません。** 使い方は [`../GUIDE.md`](../GUIDE.md)、
+> 運用は [`../OPERATION.md`](../OPERATION.md) を参照してください。
+
+`docs/development/IMPROVEMENT_TASKS.md` の Phase G1 に追加してください。
 G1-0 の完了ログ（申し送り B / C）から起票したものです。
 
 ---

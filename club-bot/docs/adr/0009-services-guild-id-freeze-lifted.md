@@ -22,7 +22,7 @@ superseded_by: —
 guild_id を暗黙注入することでその制約を回避していた。0007 で確認したとおり、
 **この制約には根拠の記録が無い**。
 
-NocoDB 移行設計（`docs/DESIGN_NOCODB_MULTITENANT.md`）にあたり、この前提を引き継ぐか
+NocoDB 移行設計（`docs/archive/DESIGN_NOCODB_MULTITENANT.md`）にあたり、この前提を引き継ぐか
 決める必要が生じた。同設計書は対象4件の2番目として
 **「guild_id によるマルチテナント化の完成（外部サービス設定のギルド分離）」**を掲げている。
 括弧内が要件の実体である — Todoist トークン等の外部サービス設定をサーバーごとに分離するには、
@@ -104,7 +104,7 @@ services 自身がギルドを識別できなければならない。`services/`
 
 ## 根拠
 
-- `docs/DESIGN_NOCODB_MULTITENANT.md` 冒頭（対象4件の2番目）
-- `docs/DESIGN_NOCODB_MULTITENANT.md` §2「既存『services/ 変更禁止』制約の扱い」
-- `docs/DESIGN_NOCODB_MULTITENANT.md` §7 R3〜R5
+- `docs/archive/DESIGN_NOCODB_MULTITENANT.md` 冒頭（対象4件の2番目）
+- `docs/archive/DESIGN_NOCODB_MULTITENANT.md` §2「既存『services/ 変更禁止』制約の扱い」
+- `docs/archive/DESIGN_NOCODB_MULTITENANT.md` §7 R3〜R5
 - 解除を求めた理由について 2026-08-20 に判断者へ確認 — 「マルチテナントを完成させるため」

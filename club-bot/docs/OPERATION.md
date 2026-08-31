@@ -770,7 +770,7 @@ A. はい。Todoist は `/todoist-setup` で登録しなければ自動的に無
 A. 常時同期は廃止されました。記録の正本は SQLite/PostgreSQL です
 （任意のエクスポート連携 `/set_sheet` `/sheet_sync` は利用できます）。
 旧 Sheets のデータは `scripts/migrate_sheets_to_db.py` で DB に取り込めます
-（[`NOCODB.md`](NOCODB.md) 6章）。
+（[`archive/NOCODB.md`](archive/NOCODB.md) 6章）。
 
 **Q. Bot を再起動すると進行中の投票や桁巻き作業は消えますか？**
 A. 消えません。投票はリアクションの raw イベントで再処理され、桁巻きセッションは

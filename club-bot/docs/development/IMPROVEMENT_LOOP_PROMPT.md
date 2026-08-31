@@ -1,10 +1,18 @@
 # Claude Code（Opus 5）で改善タスクを回すための起動プロンプト
 
-`docs/IMPROVEMENT_TASKS.md`（G0〜G4）を Claude Code で 1 タスクずつ実装するための入力集。
-`docs/FEATURE_LOOP_PROMPT.md` の続編。Cowork（チャット）ではなく
+> **これは内部の作業手順です（[development/README.md](README.md)）。**
+> Bot の使い方ではありません。使い方は [`../GUIDE.md`](../GUIDE.md) を参照してください。
+>
+> 文中の `<開発ノートのパス>` は、開発者のローカルにある設計判断・既知の落とし穴の
+> メモ置き場を指します。**このリポジトリには含まれません。** 手元に無い場合は
+> `--add-dir` の手順ごと読み飛ばしてください（公開すべき設計判断は
+> [`../adr/`](../adr/) にあります）。`<リポジトリのパス>` は各自のクローン先です。
+
+`docs/development/IMPROVEMENT_TASKS.md`（G0〜G4）を Claude Code で 1 タスクずつ実装するための入力集。
+`docs/development/FEATURE_LOOP_PROMPT.md` の続編。Cowork（チャット）ではなく
 **ターミナルの Claude Code で実装する**前提。
 
-**この表は ClaudeVault（Obsidian）の ADR / gotcha と密に結び付いている。**
+**この表は 開発ノート（リポジトリ外のローカルなメモ置き場）の ADR / gotcha と密に結び付いている。**
 `/add-dir` で Vault を読ませる手順を §0-3 に書いた。これを飛ばすと、
 既に「やらない」と決めたことを実装したり、未マージの修正を二重に書いたりする。
 
@@ -17,7 +25,7 @@
 現状 `git status` は 161 ファイルを変更ありと報告するが、実質差分は `CLAUDE.md` の7行だけ。
 
 ```bash
-cd /c/Users/yoshi/acm_bot
+cd ~/acm_bot
 git diff --stat | tail -1        # 155 files changed, 34877 insertions(+), 34870 deletions(-)
 git diff -w --stat | tail -1     # CLAUDE.md | 7 +++++++   ← 実質はこれだけ
 ```
@@ -59,22 +67,22 @@ git log --oneline main..fix/code-audit-v2
 # 13f5451 revert: PR #13 に混入したコード監査の修正2件を取り消す
 ```
 
-この3件は ClaudeVault で「**いま踏むと未修正**」として記録されているもの。
+この3件は 開発ノート で「**いま踏むと未修正**」として記録されているもの。
 マージ作業自体は Claude Code に投げてよい（§B のプロンプト）。
 
-### 0-3. ClaudeVault（Obsidian）を読ませる
+### 0-3. 開発ノート（リポジトリ外のローカルなメモ置き場）を読ませる
 
-ADR と gotcha は `C:\Users\yoshi\ClaudeVault\ClaudeVault\projects\acm_bot\` にある。
+ADR と gotcha は `<開発ノートのパス>\projects\acm_bot\` にある。
 Claude Code は既定で作業ディレクトリの外を読めないので、**セッション開始時に追加する**。
 
 ```bash
-claude --model opus --add-dir /c/Users/yoshi/ClaudeVault/ClaudeVault/projects/acm_bot
+claude --model opus --add-dir <開発ノートのパス>/projects/acm_bot
 ```
 
 すでにセッション中なら:
 
 ```
-/add-dir C:\Users\yoshi\ClaudeVault\ClaudeVault\projects\acm_bot
+/add-dir <開発ノートのパス>\projects\acm_bot
 ```
 
 読ませる順序（プロンプトに書いてあるので手で開く必要はない）:
@@ -97,14 +105,14 @@ Claude Code が自動で読むのは `CLAUDE.md`。実装タスクの参照先�
 @AGENTS.md
 
 ## 実装タスク
-- 進行中の改善実装は club-bot/docs/IMPROVEMENT_TASKS.md の表に従う
-  （根拠は club-bot/docs/IMPROVEMENT_REPORT.md）
-- 完了済み: club-bot/docs/FEATURE_TASKS.md（F0〜F6）/ docs/PUBLIC_RELEASE_TASKS.md
+- 進行中の改善実装は club-bot/docs/development/IMPROVEMENT_TASKS.md の表に従う
+  （根拠は club-bot/docs/development/IMPROVEMENT_REPORT.md）
+- 完了済み: club-bot/docs/development/FEATURE_TASKS.md（F0〜F6）/ docs/development/PUBLIC_RELEASE_TASKS.md
 - 実装ループは /acm-bot-loop スキルの手順で回す（全テストパスまで自走）
 
 ## 設計判断の正
-- ADR と既知のハマりどころは Obsidian の ClaudeVault にある
-  （/add-dir C:\Users\yoshi\ClaudeVault\ClaudeVault\projects\acm_bot）
+- ADR と既知のハマりどころは ローカルの開発ノート にある
+  （/add-dir <開発ノートのパス>\projects\acm_bot）
 - ADR に反する実装をしない。覆す必要があると判断したら実装せず報告する
 
 ## 作業ディレクトリ
@@ -122,7 +130,7 @@ Claude Code が自動で読むのは `CLAUDE.md`。実装タスクの参照先�
 （gotcha `dashboard-tests-silently-skipped`）。**skip を「緑」と数えない。**
 確認は `pytest tests/ -q -rs` で skip 理由を出す。
 
-`.claude/settings.local.json` は `docs/FEATURE_LOOP_PROMPT.md` §0-3 のものをそのまま使う。
+`.claude/settings.local.json` は `docs/development/FEATURE_LOOP_PROMPT.md` §0-3 のものをそのまま使う。
 `git commit` と `git push` は入れない。
 
 ---
@@ -138,15 +146,15 @@ Claude Code が自動で読むのは `CLAUDE.md`。実装タスクの参照先�
 ```
 /acm-bot-loop
 
-club-bot/docs/IMPROVEMENT_TASKS.md を読み、未完了（チェックが入っていない）で
+club-bot/docs/development/IMPROVEMENT_TASKS.md を読み、未完了（チェックが入っていない）で
 最も若い番号のタスクを 1 つだけ実装して。【人間タスク】は飛ばす。
 
 ## 事前に読むもの（実装より先に）
 
-1. club-bot/docs/IMPROVEMENT_TASKS.md の「運用ルール」「全タスク共通の受入基準」
+1. club-bot/docs/development/IMPROVEMENT_TASKS.md の「運用ルール」「全タスク共通の受入基準」
    「この表に固有の受入基準」と、対象タスクの受入基準・検証・注意
-2. ClaudeVault の decisions/_index.md と gotchas/_index.md
-   （/add-dir 済み。パスは C:\Users\yoshi\ClaudeVault\ClaudeVault\projects\acm_bot）
+2. 開発ノート の decisions/_index.md と gotchas/_index.md
+   （/add-dir 済み。パスは <開発ノートのパス>\projects\acm_bot）
 3. 対象タスクの「注意」に ADR 番号や gotcha 名が書いてあれば、その本文も読む
 
 ## 手順
@@ -165,7 +173,7 @@ club-bot/docs/IMPROVEMENT_TASKS.md を読み、未完了（チェックが入っ
 
 - **ADR に反する実装をしない。** 衝突したら実装せず
   「ADR NNNN と衝突。◯◯という理由で覆すべきだと考える」と書いて止まる
-- 修正した不具合が ClaudeVault の gotcha に載っていたら、完了ログにノート名を書く
+- 修正した不具合が 開発ノート の gotcha に載っていたら、完了ログにノート名を書く
 - 途中で私に確認を取らない。SKILL.md §4 の停止条件に当たったときだけ止まる
 - コミットはしない。ブランチを切るところまで
 - 1タスクの範囲外のファイルを触らない
@@ -199,7 +207,7 @@ git log --oneline main..fix/code-audit-v2 で内容を確認したうえで、
 4. 取り込み後に上の3つの grep が期待どおり変わっていることを確認する
 5. tests/test_permissions.py が「ヘルパを直接呼ぶ」のではなく bot.tree を走査して
    コマンドに権限デコレータが付いていることを検査しているかを目視で確認し、報告に書く
-6. docs/IMPROVEMENT_REPORT.md の P1-12 の表のうち
+6. docs/development/IMPROVEMENT_REPORT.md の P1-12 の表のうち
    「値の検証がサーバー側に無い」「CSV が500行で無言の切り捨て」が
    この取り込みで解消されたかを確認し、残っていれば
    IMPROVEMENT_TASKS.md の G1 に新タスクとして起票する
@@ -220,11 +228,11 @@ git log --oneline main..fix/code-audit-v2 で内容を確認したうえで、
 §A のプロンプトを貼る前に **Shift+Tab を2回**押してプランモードへ。
 
 ```
-club-bot/docs/IMPROVEMENT_TASKS.md の <タスクID> を実装する前に、設計だけ立てて。
+club-bot/docs/development/IMPROVEMENT_TASKS.md の <タスクID> を実装する前に、設計だけ立てて。
 
 - 既存ギルドの DB を壊さないマイグレーション手順（v番号・up の内容・既存値の扱い）
 - 触る ADR があれば、その番号と「なぜ覆す必要があるか」
-  （ClaudeVault の decisions/ を読んで、元の判断の理由と『覆す条件』に照らすこと）
+  （開発ノート の decisions/ を読んで、元の判断の理由と『覆す条件』に照らすこと）
 - 後方互換のために何を「既定 OFF」にするか
 - テストで固定する不変条件
 
@@ -251,7 +259,7 @@ Task ツールで general-purpose エージェントを1つ立て、次を調べ
      README.md・docs/ と実装の矛盾
 
  (2) 設計判断との衝突:
-     C:\Users\yoshi\ClaudeVault\ClaudeVault\projects\acm_bot\decisions\_index.md を読み、
+     <開発ノートのパス>\projects\acm_bot\decisions\_index.md を読み、
      この変更が既存の ADR に反していないかを確認せよ。
      特に 0008（guild_id を型で封じる）/ 0016（ホワイトリスト）/
      0021・0022（分からないものを数字にしない）/ 0023（問題が無い週は沈黙する）/
@@ -269,12 +277,12 @@ Task ツールで general-purpose エージェントを1つ立て、次を調べ
 
 ---
 
-## E. 完了後に ClaudeVault へ記録する
+## E. 完了後に 開発ノート へ記録する
 
 **セッションの最後に必ず1回。** 記録しないと次のセッションが同じ調査からやり直す。
 
 ```
-このセッションで確定した内容を ClaudeVault へ書く材料をまとめて。
+このセッションで確定した内容を 開発ノート へ書く材料をまとめて。
 Vault のファイルは私が書くので、次の形で出力するだけでよい。
 
 1. 【ADR が必要か】
@@ -305,20 +313,20 @@ Vault のファイルは私が書くので、次の形で出力するだけで�
 ```
 /acm-bot-loop
 
-git status と現在のブランチ、club-bot/docs/IMPROVEMENT_TASKS.md の完了ログを確認して、
+git status と現在のブランチ、club-bot/docs/development/IMPROVEMENT_TASKS.md の完了ログを確認して、
 前回どこまで進んだかを把握してから続きを1タスク実装して。
 未コミットの作業が残っていれば、新しいタスクに入る前にそれを完成させる。
 
 git status が 100 ファイル以上を変更ありと報告する場合は、CRLF 汚染が再発している。
-実装に入らず、その旨だけ報告して止まって（docs/IMPROVEMENT_LOOP_PROMPT.md §0-1）。
+実装に入らず、その旨だけ報告して止まって（docs/development/IMPROVEMENT_LOOP_PROMPT.md §0-1）。
 ```
 
 **表そのものを見直す:**
 
 ```
-club-bot/docs/IMPROVEMENT_TASKS.md の Phase G<N> の受入基準を、実際のコード
+club-bot/docs/development/IMPROVEMENT_TASKS.md の Phase G<N> の受入基準を、実際のコード
 （cogs/ repositories/ utils/db.py services/ dashboard/）と
-ClaudeVault の decisions/ ・ gotchas/ と突き合わせてレビューして。
+開発ノート の decisions/ ・ gotchas/ と突き合わせてレビューして。
 
 - 既に実装済み・既にマージ済みで不要になった項目
 - ADR と衝突していて、そのままでは実装できない項目
@@ -334,17 +342,17 @@ ClaudeVault の decisions/ ・ gotchas/ と突き合わせてレビューして�
 **git worktree の中でだけ**やること。G0 を終えてから。
 
 ```bash
-cd /c/Users/yoshi/acm_bot
+cd ~/acm_bot
 git worktree add ../acm_bot_loop -b feat/improvement-tasks
 cd ../acm_bot_loop
 
 for i in $(seq 1 5); do
   echo "=== iteration $i ==="
   claude -p --model opus --permission-mode acceptEdits \
-    --add-dir /c/Users/yoshi/ClaudeVault/ClaudeVault/projects/acm_bot \
-    "/acm-bot-loop club-bot/docs/IMPROVEMENT_TASKS.md の未完了で最も若いタスク（【人間タスク】は除く）を
+    --add-dir <開発ノートのパス>/projects/acm_bot \
+    "/acm-bot-loop club-bot/docs/development/IMPROVEMENT_TASKS.md の未完了で最も若いタスク（【人間タスク】は除く）を
      1つだけ実装し、ruff と pytest（-rs 付き）が全パスするまで自走して。
-     ClaudeVault の decisions/_index.md と gotchas/_index.md を先に読み、ADR に反する実装をしない。
+     開発ノート の decisions/_index.md と gotchas/_index.md を先に読み、ADR に反する実装をしない。
      完了したら表のチェックと完了ログを更新する。コミットはしない。
      停止条件に当たったら STOPPED: と理由を出力して終了する。" \
     || break
@@ -365,5 +373,5 @@ done
 - Windows の pytest は `venv/Scripts/python.exe -m pytest tests/ -q -rs`
 - `.env` の実値は Claude Code に読ませない（`deny` 設定）
 - スキーマ版 v16〜v19 は表で予約済み。順序を入れ替えるときは番号も振り直す
-- **セッションの最後に §E を必ず回す。** ClaudeVault が腐ると、
+- **セッションの最後に §E を必ず回す。** 開発ノート が腐ると、
   「なぜそう決めたか」を次の代が誰も説明できなくなる
