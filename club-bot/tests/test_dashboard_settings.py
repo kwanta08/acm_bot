@@ -59,8 +59,8 @@ async def _seed(db_path: str) -> None:
         await GuildRepository(db).ensure(GUILD_A, "A大学")
         await GuildRepository(db).ensure(GUILD_B, "B大学")
         settings = SettingsRepository(db)
-        await settings.set(GUILD_A, "GUILD_NAME", "A大学 鳥人間")
-        await settings.set(GUILD_B, "GUILD_NAME", "B大学 鳥人間")
+        await settings.set(GUILD_A, "CLUB_NAME", "A大学 鳥人間")
+        await settings.set(GUILD_B, "CLUB_NAME", "B大学 鳥人間")
         # ダッシュボードから触れてはいけない値
         await settings.set(GUILD_A, "TODOIST_API_TOKEN_LEGACY", "secret-token")
     finally:
@@ -109,14 +109,44 @@ def test_read_settings_lists_whitelist_only():
     try:
         body = client.get(f"/api/guilds/{GUILD_A}/settings").json()
         keys = {s["key"] for s in body["settings"]}
-        assert "GUILD_NAME" in keys
+        assert "CLUB_NAME" in keys
         assert "PROGRESS_DEFAULT_CHANNEL_ID" in keys
         # 機密値になりうるキーは一覧にも値にも出ない
         assert "TODOIST_API_TOKEN_LEGACY" not in keys
         assert "secret-token" not in client.get(f"/api/guilds/{GUILD_A}/settings").text
         assert body["can_edit"] is True
         current = {s["key"]: s["value"] for s in body["settings"]}
-        assert current["GUILD_NAME"] == "A大学 鳥人間"
+        assert current["CLUB_NAME"] == "A大学 鳥人間"
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_l1_sees_role_ids_masked():
+    """L1 にはロール ID の実値を返さない（既存仕様。D2-2 の画面が依存する）。
+
+    値を伏せても「設定済みかどうか」は分かる（「（設定済み）」）。
+    """
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+
+    async def _set_role() -> None:
+        db = Database(db_path)
+        await db.connect()
+        try:
+            await SettingsRepository(db).set(GUILD_A, "ADMIN_ROLE_ID", "999888777")
+        finally:
+            await db.close()
+
+    asyncio.run(_set_role())
+    client = _client(db_path, permissions="0")
+    try:
+        body = client.get(f"/api/guilds/{GUILD_A}/settings").json()
+        assert body["can_edit"] is False
+        by_key = {s["key"]: s for s in body["settings"]}
+        assert by_key["ADMIN_ROLE_ID"]["value"] == "（設定済み）"
+        assert "999888777" not in str(body)
+        # 未設定のロールは空のまま（設定済みかどうかは分かる）
+        assert by_key["EXEC_ROLE_ID"]["value"] == ""
     finally:
         client.__exit__(None, None, None)
 
@@ -128,16 +158,16 @@ def test_admin_can_update_settings():
     try:
         res = client.patch(
             f"/api/guilds/{GUILD_A}/settings",
-            json={"GUILD_NAME": "A大学 人力飛行機部", "PROGRESS_DEFAULT_CHANNEL_ID": "12345"},
+            json={"CLUB_NAME": "A大学 人力飛行機部", "PROGRESS_DEFAULT_CHANNEL_ID": "12345"},
         )
         assert res.status_code == 200
     finally:
         client.__exit__(None, None, None)
 
-    assert asyncio.run(_setting(db_path, GUILD_A, "GUILD_NAME")) == "A大学 人力飛行機部"
+    assert asyncio.run(_setting(db_path, GUILD_A, "CLUB_NAME")) == "A大学 人力飛行機部"
     assert asyncio.run(_setting(db_path, GUILD_A, "PROGRESS_DEFAULT_CHANNEL_ID")) == "12345"
     # 他サーバーには影響しない
-    assert asyncio.run(_setting(db_path, GUILD_B, "GUILD_NAME")) == "B大学 鳥人間"
+    assert asyncio.run(_setting(db_path, GUILD_B, "CLUB_NAME")) == "B大学 鳥人間"
 
 
 def test_non_admin_cannot_update():
@@ -146,11 +176,11 @@ def test_non_admin_cannot_update():
     client = _client(db_path, permissions="0")  # サーバー管理権限なし
     try:
         assert client.get(f"/api/guilds/{GUILD_A}/settings").json()["can_edit"] is False
-        res = client.patch(f"/api/guilds/{GUILD_A}/settings", json={"GUILD_NAME": "書き換え"})
+        res = client.patch(f"/api/guilds/{GUILD_A}/settings", json={"CLUB_NAME": "書き換え"})
         assert res.status_code == 403
     finally:
         client.__exit__(None, None, None)
-    assert asyncio.run(_setting(db_path, GUILD_A, "GUILD_NAME")) == "A大学 鳥人間"
+    assert asyncio.run(_setting(db_path, GUILD_A, "CLUB_NAME")) == "A大学 鳥人間"
 
 
 def test_unknown_keys_are_rejected():
@@ -189,12 +219,12 @@ def test_empty_value_deletes_setting():
     client = _client(db_path)
     try:
         assert (
-            client.patch(f"/api/guilds/{GUILD_A}/settings", json={"GUILD_NAME": ""}).status_code
+            client.patch(f"/api/guilds/{GUILD_A}/settings", json={"CLUB_NAME": ""}).status_code
             == 200
         )
     finally:
         client.__exit__(None, None, None)
-    assert asyncio.run(_setting(db_path, GUILD_A, "GUILD_NAME")) is None
+    assert asyncio.run(_setting(db_path, GUILD_A, "CLUB_NAME")) is None
 
 
 def test_settings_change_is_audited():
@@ -202,7 +232,7 @@ def test_settings_change_is_audited():
     asyncio.run(_seed(db_path))
     client = _client(db_path)
     try:
-        client.patch(f"/api/guilds/{GUILD_A}/settings", json={"GUILD_NAME": "新しい名前"})
+        client.patch(f"/api/guilds/{GUILD_A}/settings", json={"CLUB_NAME": "新しい名前"})
     finally:
         client.__exit__(None, None, None)
 
@@ -228,10 +258,10 @@ def test_other_guild_settings_are_forbidden():
         assert client.get(f"/api/guilds/{GUILD_B}/settings").status_code == 403
         assert (
             client.patch(
-                f"/api/guilds/{GUILD_B}/settings", json={"GUILD_NAME": "乗っ取り"}
+                f"/api/guilds/{GUILD_B}/settings", json={"CLUB_NAME": "乗っ取り"}
             ).status_code
             == 403
         )
     finally:
         client.__exit__(None, None, None)
-    assert asyncio.run(_setting(db_path, GUILD_B, "GUILD_NAME")) == "B大学 鳥人間"
+    assert asyncio.run(_setting(db_path, GUILD_B, "CLUB_NAME")) == "B大学 鳥人間"

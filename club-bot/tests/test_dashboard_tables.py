@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
 import tempfile
 from urllib.parse import parse_qs, urlparse
@@ -269,6 +270,50 @@ def test_read_table_returns_columns_and_rows():
         client.__exit__(None, None, None)
 
 
+def test_offset_paging_returns_correct_rows():
+    """`offset` 付きリクエストが正しい行を返す（D1-1）。
+
+    フロントのページャは limit / offset を組み立てて送るだけなので、
+    サーバー側の切り出しが正しいことをここで固定する。
+    """
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+
+    async def _more_nodes() -> None:
+        db = Database(db_path)
+        await db.connect()
+        try:
+            progress = ProgressRepository(db)
+            # 表示順に並ぶよう sort_order を振る（order_by は sort_order, node_id）
+            for i in range(2, 6):
+                await progress.upsert_node(
+                    GUILD_A, f"m{i}", name=f"A大学のノード{i}",
+                    sort_order=float(i), now_text=NOW,
+                )
+        finally:
+            await db.close()
+
+    asyncio.run(_more_nodes())
+    client = _logged_in_client(db_path)
+    try:
+        first = client.get(f"/api/guilds/{GUILD_A}/tables/progress?limit=2&offset=0").json()
+        second = client.get(f"/api/guilds/{GUILD_A}/tables/progress?limit=2&offset=2").json()
+        assert first["total"] == 5
+        assert second["total"] == 5
+        assert len(first["rows"]) == 2
+        assert len(second["rows"]) == 2
+        # ページが重ならず、並び順どおりに続いている
+        ids_first = [r["progress_node_id"] for r in first["rows"]]
+        ids_second = [r["progress_node_id"] for r in second["rows"]]
+        assert not set(ids_first) & set(ids_second)
+        names = [r["name"] for r in first["rows"] + second["rows"]]
+        assert names == ["A大学の機体", "A大学のノード2", "A大学のノード3", "A大学のノード4"]
+        assert second["offset"] == 2
+        assert second["limit"] == 2
+    finally:
+        client.__exit__(None, None, None)
+
+
 def test_every_table_returns_only_own_guild_rows():
     """全テーブルで他ギルドの行が1件も返らないこと。"""
     db_path = _tmp_db_path()
@@ -279,6 +324,222 @@ def test_every_table_returns_only_own_guild_rows():
             res = client.get(f"/api/guilds/{GUILD_A}/tables/{key}")
             assert res.status_code == 200, key
             assert "B大学" not in res.text, f"{key} に他ギルドのデータが混入"
+    finally:
+        client.__exit__(None, None, None)
+
+
+# ---------------------------------------------------------------------
+# 検索（D1-2）。ホワイトリスト列（TableSpec.searchable）だけを OR 検索する
+# ---------------------------------------------------------------------
+def test_search_filters_rows_and_total():
+    """部分一致でヒットし、total にも効く。"""
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+
+    async def _more() -> None:
+        db = Database(db_path)
+        await db.connect()
+        try:
+            members = MemberRepository(db)
+            await members.upsert_member(GUILD_A, "u-rib", "主翼のリブ切り出し係")
+            await members.upsert_member(GUILD_A, "u-keta", "尾翼の桁巻き係")
+        finally:
+            await db.close()
+
+    asyncio.run(_more())
+    client = _logged_in_client(db_path)
+    try:
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/members?q=主翼").json()
+        assert body["total"] == 1
+        assert [r["display_name"] for r in body["rows"]] == ["主翼のリブ切り出し係"]
+        # ヒットしない語は 0 件（エラーにしない）
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/members?q=存在しない語").json()
+        assert body["total"] == 0
+        assert body["rows"] == []
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_search_escapes_like_wildcards():
+    """検索語の % / _ はワイルドカードとして扱わない。"""
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+
+    async def _more() -> None:
+        db = Database(db_path)
+        await db.connect()
+        try:
+            members = MemberRepository(db)
+            await members.upsert_member(GUILD_A, "u-1", "進捗50%の報告")
+            await members.upsert_member(GUILD_A, "u-2", "進捗5割の報告")
+            await members.upsert_member(GUILD_A, "u-3", "main_spar の検査")
+            await members.upsert_member(GUILD_A, "u-4", "mainXspar の検査")
+        finally:
+            await db.close()
+
+    asyncio.run(_more())
+    client = _logged_in_client(db_path)
+    try:
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/members?q=50%25").json()
+        assert [r["display_name"] for r in body["rows"]] == ["進捗50%の報告"]
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/members?q=main_spar").json()
+        assert [r["display_name"] for r in body["rows"]] == ["main_spar の検査"]
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_search_does_not_match_unsearchable_columns():
+    """searchable に無い列（作成者 ID 等）は検索対象外。"""
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    client = _logged_in_client(db_path)
+    try:
+        # user_id は USER_ID（"42"）だが、searchable に無いのでヒットしない
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/members?q=42").json()
+        assert body["total"] == 0
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_search_applies_to_csv_export():
+    """画面と CSV の中身がずれない（?q= が export.csv にも効く）。"""
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+
+    async def _more() -> None:
+        db = Database(db_path)
+        await db.connect()
+        try:
+            await MemberRepository(db).upsert_member(GUILD_A, "u-rib", "主翼のリブ切り出し係")
+        finally:
+            await db.close()
+
+    asyncio.run(_more())
+    client = _logged_in_client(db_path)
+    try:
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/members/export.csv?q=主翼")
+        assert res.status_code == 200
+        assert "主翼のリブ切り出し係" in res.text
+        assert "A大学の部員" not in res.text
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_search_on_unsearchable_table_is_rejected():
+    """検索対象列の無い表への ?q= は 400（黙って全件を返さない）。"""
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    client = _logged_in_client(db_path)
+    try:
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/schedule_votes?q=x")
+        assert res.status_code == 400
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_searchable_columns_are_whitelisted_text_columns():
+    """searchable はその表の列に限られ、DDL 上 TEXT の列だけを指す。
+
+    PostgreSQL では lower(整数列) が型エラーになる（SQLite は通る）ため、
+    定義の時点で TEXT 以外を排除しておく（G1-0 と同型の事故の予防）。
+    """
+    from utils.db import TABLE_DDL
+
+    for spec in TABLES.values():
+        assert set(spec.searchable) <= set(spec.column_names), spec.key
+        ddl = TABLE_DDL[spec.table]
+        for name in spec.searchable:
+            m = re.search(rf"^\s*{name}\s+(\w+)", ddl, flags=re.MULTILINE)
+            assert m, f"{spec.key}.{name} が DDL に見つからない"
+            assert m.group(1) == "TEXT", f"{spec.key}.{name} は TEXT 列ではない: {m.group(1)}"
+
+
+# ---------------------------------------------------------------------
+# ソート（D1-3）。ORDER BY はバインドできないため、列名は必ず
+# TableSpec 側のホワイトリストから取る
+# ---------------------------------------------------------------------
+def _seed_sortable_nodes(db_path: str) -> None:
+    async def _more() -> None:
+        db = Database(db_path)
+        await db.connect()
+        try:
+            progress = ProgressRepository(db)
+            await progress.upsert_node(
+                GUILD_A, "n-i", name="い", manual_progress=0.2, now_text=NOW)
+            await progress.upsert_node(
+                GUILD_A, "n-a", name="あ", manual_progress=0.3, now_text=NOW)
+            # manual_progress NULL の行（NULL の並び順の検査に使う。
+            # _seed の m1 も NULL なので NULL は計2行になる）
+            await progress.upsert_node(GUILD_A, "n-u", name="う", now_text=NOW)
+        finally:
+            await db.close()
+
+    asyncio.run(_more())
+
+
+def test_sort_by_allowed_column():
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    _seed_sortable_nodes(db_path)
+    client = _logged_in_client(db_path)
+    try:
+        # SQLite の既定コレーションは UTF-8 バイト順（ASCII が仮名より先）
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/progress?sort=name&dir=asc").json()
+        names = [r["name"] for r in body["rows"]]
+        assert names == ["A大学の機体", "あ", "い", "う"]
+        body = client.get(f"/api/guilds/{GUILD_A}/tables/progress?sort=name&dir=desc").json()
+        assert [r["name"] for r in body["rows"]] == ["う", "い", "あ", "A大学の機体"]
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_sort_nulls_are_always_last():
+    """NULL は昇順・降順とも末尾（SQLite / PostgreSQL で揃える）。"""
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    _seed_sortable_nodes(db_path)
+    client = _logged_in_client(db_path)
+    try:
+        for direction in ("asc", "desc"):
+            body = client.get(
+                f"/api/guilds/{GUILD_A}/tables/progress?sort=manual_progress&dir={direction}"
+            ).json()
+            values = [r["manual_progress"] for r in body["rows"]]
+            assert values[-2:] == [None, None], (direction, values)
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_sort_rejects_unknown_column_and_bad_dir():
+    """許可外の列・不正な dir は 400（500 にしない）。"""
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    client = _logged_in_client(db_path)
+    try:
+        assert client.get(
+            f"/api/guilds/{GUILD_A}/tables/members?sort=guild_id"
+        ).status_code == 400
+        assert client.get(
+            f"/api/guilds/{GUILD_A}/tables/members?sort=display_name;DROP"
+        ).status_code == 400
+        assert client.get(
+            f"/api/guilds/{GUILD_A}/tables/members?sort=display_name&dir=up"
+        ).status_code == 400
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_sort_applies_to_csv_export():
+    db_path = _tmp_db_path()
+    asyncio.run(_seed(db_path))
+    _seed_sortable_nodes(db_path)
+    client = _logged_in_client(db_path)
+    try:
+        res = client.get(f"/api/guilds/{GUILD_A}/tables/progress/export.csv?sort=name&dir=asc")
+        assert res.status_code == 200
+        # 列順は TableSpec 準拠（name は5列目 = index 4）
+        lines = [line.split(",")[4] for line in res.text.splitlines()[1:]]
+        assert lines == ["A大学の機体", "あ", "い", "う"]
     finally:
         client.__exit__(None, None, None)
 
@@ -618,3 +879,110 @@ def test_csv_export_rejects_sheet_for_plain_table():
         assert res.status_code == 400
     finally:
         client.__exit__(None, None, None)
+
+
+# ---------------------------------------------------------------------
+# PostgreSQL 実機での検索（D1-2）
+#
+# SQLite の LIKE は既定で大文字小文字を区別しない（ASCII のみ）が、
+# PostgreSQL は区別する。`lower(col) LIKE lower(?)` の揃え方が実機で
+# 効いていることを、SQLite では検出できない大文字検索で確かめる。
+# CLUB_TEST_PG_DSN があるときだけ走る（gotcha `dashboard-tests-silently-skipped`）。
+# ---------------------------------------------------------------------
+async def _pg_database_name(dsn: str) -> str:
+    import asyncpg
+
+    con = await asyncpg.connect(dsn)
+    try:
+        return await con.fetchval("SELECT current_database()")
+    finally:
+        await con.close()
+
+
+def _pg_dsn_or_skip() -> str:
+    dsn = os.getenv("CLUB_TEST_PG_DSN")
+    if not dsn:
+        pytest.skip("CLUB_TEST_PG_DSN 未設定（テスト専用 DB の DSN を指定してください）")
+    name = asyncio.run(_pg_database_name(dsn))
+    if "test" not in name.lower():
+        pytest.skip(f"安全のためテスト専用 DB でのみ実行します（接続先: {name}）")
+    return dsn
+
+
+async def _pg_reset_rows(dsn: str) -> None:
+    """このテストが使うギルドの行だけ消す（他の行には触らない）。"""
+    db = Database("./unused.db", database_url=dsn)
+    await db.connect()
+    try:
+        for table in ("progress_nodes", "members", "guilds"):
+            for guild_id in (GUILD_A, GUILD_B):
+                await db.execute(f"DELETE FROM {table} WHERE guild_id = ?", (guild_id,))
+    finally:
+        await db.close()
+
+
+def test_pg_live_search_is_case_insensitive_and_escaped():
+    dsn = _pg_dsn_or_skip()
+    asyncio.run(_pg_reset_rows(dsn))
+
+    async def _main() -> None:
+        db = Database("./unused.db", database_url=dsn)
+        await db.connect()
+        try:
+            await GuildRepository(db).ensure(GUILD_A, "A大学")
+            members = MemberRepository(db)
+            await members.upsert_member(GUILD_A, "u-1", "Main_Spar の検査")
+            await members.upsert_member(GUILD_A, "u-2", "MainXSpar の検査")
+            await members.upsert_member(GUILD_A, "u-3", "進捗50%の報告")
+
+            repo = TableRepository(db)
+            # 大文字小文字を区別しない（PG の LIKE は素だと区別する）
+            rows = await repo.list_rows(GUILD_A, "members", q="main_spar")
+            assert [r["display_name"] for r in rows] == ["Main_Spar の検査"]
+            rows = await repo.list_rows(GUILD_A, "members", q="MAIN_SPAR")
+            assert [r["display_name"] for r in rows] == ["Main_Spar の検査"]
+            # % はワイルドカードとして扱わない
+            rows = await repo.list_rows(GUILD_A, "members", q="50%")
+            assert [r["display_name"] for r in rows] == ["進捗50%の報告"]
+            # total にも効く
+            assert await repo.count_rows(GUILD_A, "members", q="main_spar") == 1
+        finally:
+            await db.close()
+
+    asyncio.run(_main())
+
+
+def test_pg_live_sort_nulls_are_always_last():
+    """PG でも NULL が昇順・降順とも末尾に来ること（D1-3）。
+
+    PostgreSQL の既定は DESC で NULL が先頭（NULLS FIRST）。
+    `(col IS NULL), col` の書き方が実機で効いていることを確かめる
+    （SQLite は元々 DESC でも NULL が末尾なので、SQLite だけでは検出できない）。
+    """
+    dsn = _pg_dsn_or_skip()
+    asyncio.run(_pg_reset_rows(dsn))
+
+    async def _main() -> None:
+        db = Database("./unused.db", database_url=dsn)
+        await db.connect()
+        try:
+            await GuildRepository(db).ensure(GUILD_A, "A大学")
+            progress = ProgressRepository(db)
+            await progress.upsert_node(
+                GUILD_A, "n-low", name="低", manual_progress=0.25, now_text=NOW)
+            await progress.upsert_node(
+                GUILD_A, "n-high", name="高", manual_progress=0.75, now_text=NOW)
+            await progress.upsert_node(GUILD_A, "n-none", name="なし", now_text=NOW)
+
+            repo = TableRepository(db)
+            for direction, expected in (
+                ("asc", [0.25, 0.75, None]),
+                ("desc", [0.75, 0.25, None]),
+            ):
+                rows = await repo.list_rows(
+                    GUILD_A, "progress", sort="manual_progress", dir=direction)
+                assert [r["manual_progress"] for r in rows] == expected, direction
+        finally:
+            await db.close()
+
+    asyncio.run(_main())

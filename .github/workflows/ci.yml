@@ -135,3 +135,31 @@ jobs:
             exit 1
           fi
           echo "skip 0 件を確認しました"
+
+  # ---------------------------------------------------------------------
+  # フロント（ダッシュボードの static/lib/）の Node テスト（D0-2）
+  #
+  # npm パッケージ・package.json は使わない。Node 標準の test runner だけで
+  # 回す（配信物には1バイトも足さない。開発と CI 専用）。
+  # Node 22 を使う: static/lib/*.js は拡張子 .js の ES モジュールなので、
+  # package.json 無しで import するにはモジュール構文の自動判別
+  # （Node 22.7+ で既定有効）が要る。
+  # ---------------------------------------------------------------------
+  test-frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: club-bot
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # ディレクトリ引数（node --test tests_js/）は Node 24 で展開されなく
+      # なったため、グロブ形式で指定する（クォートで シェル展開を防ぎ、
+      # Node 自身にグロブさせる）
+      - name: Test (node --test)
+        run: node --test "tests_js/*.test.mjs"

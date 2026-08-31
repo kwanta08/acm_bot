@@ -276,3 +276,44 @@ def test_logout_clears_session():
 
         assert client.post("/auth/logout").status_code == 200
         assert client.get("/api/me").status_code == 401
+
+
+def test_session_max_age_defaults_to_24_hours():
+    """セッションの既定は 24 時間（D2-4）。
+
+    Cookie には所属ギルド一覧と manage_guild が焼き込まれるため、
+    退会・降格の反映がセッション寿命まで遅れる。7日は長すぎた。
+    権限レベル（L1〜L4）は毎リクエスト DB から引くので古くならない。
+    """
+    from dashboard.config import DEFAULT_SESSION_MAX_AGE, load_config
+
+    assert DEFAULT_SESSION_MAX_AGE == 24 * 60 * 60
+    assert load_config({}).session_max_age == 24 * 60 * 60
+
+
+def test_session_max_age_env_override_still_works():
+    """`DASHBOARD_SESSION_MAX_AGE` での上書きは維持する（D2-4）。"""
+    from dashboard.config import load_config
+
+    config = load_config({"DASHBOARD_SESSION_MAX_AGE": "604800"})
+    assert config.session_max_age == 604800
+
+
+def test_unauthenticated_401_response_shape_is_stable():
+    """401 の応答形が変わっていないこと（D1-6）。
+
+    フロントは `err.status`（数値）と JSON の `detail` で分岐する。
+    文言でのマッチはしないが、`detail` を持つ JSON であることは
+    ログイン導線への切り替えとエラー表示の前提になっている。
+    """
+    app = create_app(_config())
+    with TestClient(app) as client:
+        # /api/me は authenticated フラグの形（フロントは status だけを見る）
+        res = client.get("/api/me")
+        assert res.status_code == 401
+        assert res.json() == {"authenticated": False}
+        # スコープ必須の API は detail 付き JSON（エラー表示に使う）
+        res = client.get(f"/api/guilds/{10**17}/tables")
+        assert res.status_code == 401
+        body = res.json()
+        assert isinstance(body.get("detail"), str) and body["detail"]

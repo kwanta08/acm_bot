@@ -14,6 +14,7 @@ DB は bot と同じものを共有する（読み書きはすべて guild_id �
 
 from __future__ import annotations
 
+import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -30,7 +31,7 @@ from dashboard.routers import auth as auth_router
 from dashboard.routers import guilds as guilds_router
 from dashboard.routers import settings as settings_router
 from dashboard.routers import tables as tables_router
-from utils.logger import get_logger
+from utils.logger import get_logger, setup_logging
 
 log = get_logger("dashboard")
 
@@ -67,6 +68,15 @@ async def lifespan(app: FastAPI):
 
 def create_app(config: DashboardConfig | None = None) -> FastAPI:
     """アプリを組み立てる（テストでは config を差し替えられる）。"""
+    # INFO 以下のログを残す（D2-5）。bot と同じファイルを掴まないよう
+    # ダッシュボード専用のファイル名にする（RotatingFileHandler の
+    # ローテーション競合を避ける）。レベルは DASHBOARD_LOG_LEVEL で上書き可
+    level_name = os.environ.get("DASHBOARD_LOG_LEVEL", "").strip().upper()
+    level = getattr(logging, level_name, None) if level_name else None
+    setup_logging(
+        level=level if isinstance(level, int) else logging.INFO,
+        filename="dashboard.log",
+    )
     config = config or get_config()
     app = FastAPI(
         title="鳥人間サークル運営 Bot ダッシュボード",
