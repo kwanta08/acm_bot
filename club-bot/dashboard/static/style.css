@@ -1,94 +1,199 @@
-/* ダッシュボードの最小スタイル（自己ホスト。外部 CDN に依存しない）
+/* ダッシュボードの Liquid Glass スタイル（自己ホスト。外部 CDN に依存しない）
  *
  * D0-3: 値はすべて :root のデザイントークンで定義し、ルール本体では
  * var() だけを参照する（検査: tests/test_dashboard_style_tokens.py）。
- * ダークテーマは prefers-color-scheme でトークンを再定義する
- * （明示切替 [data-theme] は D3-4 で追加する）。
+ * ダークテーマは prefers-color-scheme + 明示切替 [data-theme]（D3-4）で
+ * トークンを再定義する。
+ *
+ * フォントは woff2 を自己ホストする（ネットワーク遮断でも表示される）。
+ * - 見出し: 木漏れ日ゴシック（MODI 工場）
+ * - 本文・表: Zen Maru Gothic（SIL OFL 1.1。google-webfonts-helper 経由で取得）
  */
+
+@font-face {
+  font-family: "Komorebi Gothic";
+  src: url("/static/assets/fonts/komorebi-gothic.woff2") format("woff2"),
+       url("/static/assets/komorebi-gothic.ttf") format("truetype");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Zen Maru Gothic";
+  font-style: normal;
+  font-weight: 400;
+  src: url("/static/assets/fonts/zen-maru-gothic-v19-japanese_latin-regular.woff2") format("woff2");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Zen Maru Gothic";
+  font-style: normal;
+  font-weight: 500;
+  src: url("/static/assets/fonts/zen-maru-gothic-v19-japanese_latin-500.woff2") format("woff2");
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Zen Maru Gothic";
+  font-style: normal;
+  font-weight: 700;
+  src: url("/static/assets/fonts/zen-maru-gothic-v19-japanese_latin-700.woff2") format("woff2");
+  font-display: swap;
+}
+
 :root {
   /* --- 色（ライト） --- */
-  --bg: #ffffff;
-  --fg: #1f2328;
-  --muted: #656d76;
-  --border: #d8dee4;
-  /* アクセントは白文字と 4.88:1（WCAG AA。§色の受入条件で実測） */
-  --accent: #2f6fd0;
+  --bg: #e8eef6;                       /* ページ地色（背景画像の下） */
+  --fg: #1d2230;
+  /* muted はページ地色との実測コントラスト 5.0:1（AA。.55 では 3.7:1 だった） */
+  --muted: rgba(29, 34, 48, .7);
+  --border: rgba(15, 23, 42, .1);      /* 表ヘッダの区切り */
+  --row-border: rgba(15, 23, 42, .07); /* 行の区切り */
+  --row-alt: rgba(15, 23, 42, .03);    /* 偶数行のゼブラ */
+  --row-hover: rgba(15, 23, 42, .05);
+  --accent: #0071e3;
+  --accent-strong: #0a5cad;
   --accent-fg: #ffffff;
-  --row-alt: #f6f8fa;
+  --positive: #0d9e7a;
   --danger: #b42318;
 
+  /* --- ガラス面 --- */
+  --glass-bg: rgba(255, 255, 255, .3);           /* サイドバー・カード */
+  --glass-bg-dense: rgba(255, 255, 255, .44);    /* 表パネル */
+  --glass-pill: rgba(255, 255, 255, .2);         /* 非選択ピル */
+  --glass-pill-active: rgba(125, 200, 255, .38); /* 選択ピル */
+  --glass-shadow:
+    inset 0 0 0 .5px rgba(15, 23, 42, .08),
+    inset 0 1.5px 0 rgba(255, 255, 255, .95),
+    inset 0 16px 30px -16px rgba(255, 255, 255, .75),
+    inset 0 -12px 24px -16px rgba(125, 180, 255, .4),
+    0 14px 32px rgba(15, 23, 42, .1);
+  --pill-active-shadow:
+    inset 0 0 0 .5px rgba(0, 113, 227, .25),
+    inset 0 1.5px 0 rgba(255, 255, 255, .8),
+    0 6px 16px rgba(0, 113, 227, .16);
+  --control-shadow:
+    inset 0 0 0 .5px rgba(15, 23, 42, .12),
+    inset 0 1px 0 rgba(255, 255, 255, .55);
+  --dock-bg: rgba(255, 255, 255, .26);
+  --dock-shadow:
+    inset 0 0 0 .5px rgba(15, 23, 42, .1),
+    inset 0 1.5px 0 rgba(255, 255, 255, .8),
+    0 16px 40px rgba(15, 23, 42, .22);
+  --head-bg: rgba(255, 255, 255, .7);  /* sticky な表ヘッダ */
+  --input-bg: rgba(255, 255, 255, .55);
+  --shadow-card: 0 10px 24px rgba(15, 23, 42, .08);
+
+  /* --- 進捗バー --- */
+  --bar-track: rgba(15, 23, 42, .07);
+  --bar-blue: linear-gradient(90deg, rgba(90, 175, 250, .55), rgba(150, 220, 255, .45));
+  --bar-teal: linear-gradient(90deg, rgba(110, 225, 205, .55), rgba(80, 200, 165, .5));
+  --bar-glow: 0 0 14px rgba(0, 113, 227, .3);
+
+  /* --- 背景 --- */
+  --bg-overlay: transparent;           /* 背景画像の上に重ねる暗幕 */
+  --avatar-grad: linear-gradient(135deg, #0071e3, #30d1c4);
+  --avatar-fg: #ffffff;
+
   /* --- 余白スケール（4px 基準） --- */
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.25rem;
-  --space-6: 1.5rem;
-
-  /* --- 微調整の余白（既存レイアウトを保持する実測値） --- */
-  --pad-hairline: 0.15rem;
-  --pad-xs: 0.3rem;
-  --pad-s: 0.35rem;
-  --pad-cell-y: 0.4rem;
-  --pad-cell-x: 0.65rem;
-  --pad-control-x: 0.85rem;
-  --stack-m: 0.9rem;
-
-  /* --- タイポグラフィ --- */
-  --font-body: 15px;
-  --font-title: 1.05rem;
-  --font-s: 0.9rem;
-  --font-xs: 0.85rem;
-  --font-2xs: 0.8rem;
-  --font-em-s: 0.85em;
-  --font-card-value: 1.6rem;
-  --leading-body: 1.6;
-  --leading-names: 1.7;
-
-  /* --- 幅 --- */
-  --w-input-min: 8rem;
-  --w-settings-max: 36rem;
-  --w-card-min: 11rem;
-  --w-sidenav: 13rem;
-
-  /* --- 表の最大高さ（sticky ヘッダを効かせる。D3-5） --- */
-  --grid-max-h: 70vh;
-  --w-cell-min: 9rem;
-  --w-tab-max: 16rem;
-
-  /* --- 角丸（§デザイン方針の体系。D3 で参照をこちらへ移す） --- */
-  --radius-card: 16px;
-  --radius-control: 10px;
-  --radius-input: 8px;
-  /* 既存の見た目を保持している現行値（D3 で上の体系へ置き換える） */
-  --radius-legacy-s: 4px;
-  --radius-legacy-m: 6px;
-  --radius-legacy-l: 8px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --stack-m: 14px;
 
   /* --- 線 --- */
+  --hairline: .5px;
   --border-w: 1px;
   --border-w-strong: 2px;
 
-  /* --- 影（ダークでは影に頼らず境界線で面を分ける） --- */
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px -12px rgb(0 0 0 / 0.12);
+  /* --- 角丸（§デザイン方針: サイドバー24 / パネル20 / カード18 / ナビ13 / ピル999） --- */
+  --radius-sidebar: 24px;
+  --radius-panel: 20px;
+  --radius-card: 18px;
+  --radius-control: 13px;
+  --radius-input: 10px;
+  --radius-pill: 999px;
+  --radius-dock: 26px;
+  --radius-bar: 7px;
+  --radius-bar-mini: 3px;
 
-  /* --- モーション（120〜180ms。§デザイン方針） --- */
-  --motion-fast: 150ms;
+  /* --- ガラスのぼかし --- */
+  --glass-blur: 28px;
+  --glass-blur-dense: 40px;
+  --glass-blur-dock: 30px;
+  --glass-saturate: 200%;
 
-  /* --- タップ領域の最小サイズ（44×44px。D1-4 / D3-5） --- */
+  /* --- 幅・サイズ --- */
+  --w-sidebar: 236px;
+  --w-input-min: 128px;
+  --w-settings-max: 576px;
+  --w-tab-max: 256px;
+  --w-cell-min: 144px;
+  --w-chart-label: 160px;
+  --w-chart-val: 44px;
+  --avatar-size: 28px;
+  --icon-size: 20px;
+  --bar-h: 13px;
+  --bar-mini-h: 5px;
   --tap-min: 44px;
+  --grid-max-h: 70vh;
 
-  /* --- 押下時のシフト量（モーションは opacity と translateY のみ） --- */
-  --press-shift: 2px;
+  /* --- タイポグラフィ --- */
+  --font-body: 15px;
+  --font-brand: 14.5px;
+  --font-title: 20px;
+  --font-nav: 13.5px;
+  --font-s: 13px;
+  --font-xs: 12px;
+  --font-cell: 12.5px;
+  --font-desc: 12px;
+  --font-card-label: 11.5px;
+  --font-card-value: 26px;
+  --font-dock-label: 10.5px;
+  --tracking-tight: -0.01em;
+  --leading-body: 1.6;
+  --leading-names: 1.7;
+
+  /* --- 余白（コンポーネント個別） --- */
+  --pad-nav-y: 9px;
+  --pad-nav-x: 14px;
+  --pad-cell-y: 9px;
+  --pad-cell-x: 18px;
+  --pad-cell-dense-y: 3px;
+  --pad-card-y: 13px;
+  --pad-card-x: 16px;
+  --pad-control-y: 7px;
+  --pad-control-x: 14px;
+  --pad-dock-y: 9px;
+  --pad-dock-x: 14px;
+  --dock-gap: 6px;
+  --dock-item-gap: 2px;
+  --dock-bottom: 22px;
+  --dock-lift: -4px;
+  --dock-pad-b: 96px;
+
+  /* --- モーション --- */
+  --motion-fast: 150ms;
+  --dur-fluid: .45s;
+  --dur-grow: 1.1s;
+  --ease-fluid: cubic-bezier(.2, .8, .2, 1);
+  --press-shift: 1px;
+  --rise-shift: 10px;
+
+  /* --- z-index --- */
+  --z-bg: -2;
+  --z-overlay: -1;
+  --z-sticky: 1;
+  --z-dock: 10;
 
   /* --- sr-only の折りたたみサイズ --- */
   --sr-size: 1px;
-
-  /* --- z-index --- */
-  --z-sticky: 1;
 }
 
-/* ダークテーマ（D3-4）。3箇所で矛盾なく定義する:
+/* ダークテーマ。3箇所で矛盾なく定義する:
    1. :root                              … ライトの既定（上）
    2. @media + :root:not([data-theme="light"]) … OS がダーク、かつ明示ライトでない
    3. :root[data-theme="dark"]           … 明示ダーク（OS 設定より優先）
@@ -96,54 +201,122 @@
    色トークンの過不足を検査する） */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0d1117;
-    --fg: #e6edf3;
-    --muted: #9198a1;
-    --border: #30363d;
-    --accent: #2f6fd0;
-    --accent-fg: #ffffff;
-    --row-alt: #161b22;
+    --bg: #0c111c;
+    --fg: #eef1f8;
+    --muted: rgba(238, 241, 248, .65);
+    --border: rgba(255, 255, 255, .09);
+    --row-border: rgba(255, 255, 255, .06);
+    --row-alt: rgba(255, 255, 255, .035);
+    --row-hover: rgba(255, 255, 255, .05);
+    --accent: #5ac8fa;
+    --accent-strong: #9fd0ff;
+    --accent-fg: #0b1524;
+    --positive: #30d158;
     --danger: #ff7b72;
-    --shadow-card: none;
+    --glass-bg: rgba(26, 32, 46, .34);
+    --glass-bg-dense: rgba(22, 27, 39, .48);
+    --glass-pill: rgba(255, 255, 255, .06);
+    --glass-pill-active: rgba(100, 180, 255, .22);
+    --glass-shadow:
+      inset 0 0 0 .5px rgba(0, 0, 0, .45),
+      inset 0 1.5px 0 rgba(255, 255, 255, .24),
+      inset 0 16px 30px -16px rgba(160, 210, 255, .2),
+      inset 0 -12px 24px -16px rgba(10, 132, 255, .18),
+      0 14px 32px rgba(0, 0, 0, .4);
+    --pill-active-shadow:
+      inset 0 0 0 .5px rgba(140, 200, 255, .35),
+      inset 0 1.5px 0 rgba(255, 255, 255, .25),
+      0 6px 18px rgba(10, 132, 255, .18);
+    --control-shadow:
+      inset 0 0 0 .5px rgba(255, 255, 255, .14),
+      inset 0 1px 0 rgba(255, 255, 255, .08);
+    --dock-bg: rgba(26, 32, 46, .5);
+    --dock-shadow:
+      inset 0 0 0 .5px rgba(0, 0, 0, .5),
+      inset 0 1.5px 0 rgba(255, 255, 255, .18),
+      0 16px 40px rgba(0, 0, 0, .55);
+    --head-bg: rgba(22, 27, 39, .8);
+    --input-bg: rgba(10, 15, 24, .5);
+    --shadow-card: 0 10px 24px rgba(0, 0, 0, .35);
+    --bar-track: rgba(255, 255, 255, .08);
+    --bar-blue: linear-gradient(90deg, rgba(100, 190, 255, .6), rgba(150, 225, 255, .5));
+    --bar-teal: linear-gradient(90deg, rgba(110, 225, 205, .55), rgba(130, 230, 165, .5));
+    --bar-glow: 0 0 14px rgba(90, 200, 250, .45);
+    --bg-overlay: rgba(9, 14, 22, .68);
+    --avatar-grad: linear-gradient(135deg, #0071e3, #30d1c4);
+    --avatar-fg: #ffffff;
   }
 }
 
 :root[data-theme="dark"] {
-  --bg: #0d1117;
-  --fg: #e6edf3;
-  --muted: #9198a1;
-  --border: #30363d;
-  --accent: #2f6fd0;
-  --accent-fg: #ffffff;
-  --row-alt: #161b22;
+  --bg: #0c111c;
+  --fg: #eef1f8;
+  --muted: rgba(238, 241, 248, .65);
+  --border: rgba(255, 255, 255, .09);
+  --row-border: rgba(255, 255, 255, .06);
+  --row-alt: rgba(255, 255, 255, .035);
+  --row-hover: rgba(255, 255, 255, .05);
+  --accent: #5ac8fa;
+  --accent-strong: #9fd0ff;
+  --accent-fg: #0b1524;
+  --positive: #30d158;
   --danger: #ff7b72;
-  --shadow-card: none;
+  --glass-bg: rgba(26, 32, 46, .34);
+  --glass-bg-dense: rgba(22, 27, 39, .48);
+  --glass-pill: rgba(255, 255, 255, .06);
+  --glass-pill-active: rgba(100, 180, 255, .22);
+  --glass-shadow:
+    inset 0 0 0 .5px rgba(0, 0, 0, .45),
+    inset 0 1.5px 0 rgba(255, 255, 255, .24),
+    inset 0 16px 30px -16px rgba(160, 210, 255, .2),
+    inset 0 -12px 24px -16px rgba(10, 132, 255, .18),
+    0 14px 32px rgba(0, 0, 0, .4);
+  --pill-active-shadow:
+    inset 0 0 0 .5px rgba(140, 200, 255, .35),
+    inset 0 1.5px 0 rgba(255, 255, 255, .25),
+    0 6px 18px rgba(10, 132, 255, .18);
+  --control-shadow:
+    inset 0 0 0 .5px rgba(255, 255, 255, .14),
+    inset 0 1px 0 rgba(255, 255, 255, .08);
+  --dock-bg: rgba(26, 32, 46, .5);
+  --dock-shadow:
+    inset 0 0 0 .5px rgba(0, 0, 0, .5),
+    inset 0 1.5px 0 rgba(255, 255, 255, .18),
+    0 16px 40px rgba(0, 0, 0, .55);
+  --head-bg: rgba(22, 27, 39, .8);
+  --input-bg: rgba(10, 15, 24, .5);
+  --shadow-card: 0 10px 24px rgba(0, 0, 0, .35);
+  --bar-track: rgba(255, 255, 255, .08);
+  --bar-blue: linear-gradient(90deg, rgba(100, 190, 255, .6), rgba(150, 225, 255, .5));
+  --bar-teal: linear-gradient(90deg, rgba(110, 225, 205, .55), rgba(130, 230, 165, .5));
+  --bar-glow: 0 0 14px rgba(90, 200, 250, .45);
+  --bg-overlay: rgba(9, 14, 22, .68);
+  --avatar-grad: linear-gradient(135deg, #0071e3, #30d1c4);
+  --avatar-fg: #ffffff;
+}
+
+@supports (height: 1dvh) {
+  :root {
+    --grid-max-h: 70dvh;
+  }
 }
 
 * { box-sizing: border-box; }
 
-/* キーボードフォーカスの可視化（D3-6）。outline: none はどこにも書かない。
-   offset で要素の外側に出すため、アクセント背景のボタンでも周囲の地色との
-   境界にリングが見える */
+/* キーボードフォーカスの可視化（D3-6）。outline: none はどこにも書かない */
 :focus-visible {
   outline: var(--border-w-strong) solid var(--accent);
   outline-offset: var(--border-w-strong);
 }
 
-/* モーション（§デザイン方針: 120〜180ms、opacity と transform のみ） */
-button, .button, .sheet-tab, .card {
-  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) ease;
-}
-
-button:active, .button:active, .sheet-tab:active {
-  transform: translateY(var(--press-shift));
-}
-
+/* prefers-reduced-motion: 本デザインではモーションを常時有効にする方針
+   （Liquid Glass 刷新の受入条件。全停止ルールは意図して置かない） */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    transition: none !important;
-    animation: none !important;
-  }
+}
+
+/* スクロールバーはガラス面に馴染ませる（対応ブラウザのみ。無指定なら既定） */
+.grid-wrap, .chart-wrap, .sheetbar, .sidebar, .dock {
+  scrollbar-color: var(--muted) transparent;
 }
 
 /* スクリーンリーダー専用テキスト（表の caption 等。D3-6） */
@@ -159,87 +332,434 @@ button:active, .button:active, .sheet-tab:active {
   border: 0;
 }
 
+/* ---------------------------------------------------------------- 背景 */
 body {
   margin: 0;
+  display: grid;
+  grid-template-columns: var(--w-sidebar) 1fr;
+  gap: var(--space-4);
+  padding: var(--space-4);
+  min-height: 100vh;
   background: var(--bg);
   color: var(--fg);
-  font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans",
-    "Noto Sans JP", sans-serif;
+  font-family: "Zen Maru Gothic", "Hiragino Maru Gothic ProN", "Kosugi Maru", sans-serif;
   font-size: var(--font-body);
   line-height: var(--leading-body);
 }
 
-.topbar {
+/* 背景は静止画のみ（グラデーションアニメは置かない） */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-bg);
+  background: url("/static/assets/halcyon-bg.png") center / cover no-repeat;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-overlay);
+  background: var(--bg-overlay);
+}
+
+/* ---------------------------------------------------------------- ガラス */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: var(--glass-shadow);
+}
+
+/* サマリー・グラフ用のガラスカード */
+.card {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--radius-card);
+  padding: var(--pad-card-y) var(--pad-card-x);
+}
+
+/* 表パネル（濃いめのガラス） */
+.panel {
+  background: var(--glass-bg-dense);
+  backdrop-filter: blur(var(--glass-blur-dense)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-dense)) saturate(var(--glass-saturate));
+  box-shadow: var(--glass-shadow);
+  border-radius: var(--radius-panel);
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------- サイドバー */
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border-radius: var(--radius-sidebar);
+  position: sticky;
+  top: var(--space-4);
+  align-self: start;
+  max-height: calc(100vh - 2 * var(--space-4));
+  overflow: auto;
+  scrollbar-width: thin;
+}
+
+.brand {
+  margin: 0;
+  font-family: "Komorebi Gothic", "Zen Maru Gothic", sans-serif;
+  letter-spacing: var(--tracking-tight);
+  font-size: var(--font-brand);
+  font-weight: 700;
+}
+
+.guild-pill select {
+  width: 100%;
+  font: inherit;
+  font-size: var(--font-s);
+  padding: var(--pad-control-y) var(--pad-control-x);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--glass-pill);
+  box-shadow: var(--control-shadow);
+  color: var(--fg);
+}
+
+/* 縦ナビ（表切替）。選択背景は .nav-indicator が液体のように追従する */
+.nav {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.nav-indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: var(--radius-control);
+  background: var(--glass-pill-active);
+  box-shadow: var(--pill-active-shadow);
+  transition: all var(--dur-fluid) var(--ease-fluid);
+  pointer-events: none;
+}
+
+.nav-item {
+  position: relative;
+  z-index: var(--z-sticky);
+  padding: var(--pad-nav-y) var(--pad-nav-x);
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--font-nav);
+  text-align: left;
+  cursor: pointer;
+}
+
+.nav-item.active {
+  color: var(--accent-strong);
+  font-weight: 700;
+}
+
+.side-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.theme-mini {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--space-4);
-  padding: var(--space-3) var(--space-5);
-  border-bottom: var(--border-w) solid var(--border);
-}
-
-.topbar h1 { font-size: var(--font-title); margin: 0; }
-
-.account { color: var(--muted); font-size: var(--font-s); }
-
-main { padding: var(--space-5); }
-
-.footer {
-  padding: var(--space-4) var(--space-5);
+  gap: var(--space-1);
   color: var(--muted);
   font-size: var(--font-xs);
-  border-top: var(--border-w) solid var(--border);
 }
 
+.theme-mini label {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.theme-mini select {
+  font: inherit;
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--glass-pill);
+  box-shadow: var(--control-shadow);
+  color: var(--fg);
+}
+
+.account-card[hidden] { display: none; }
+
+.account-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-card);
+  background: var(--glass-pill);
+  box-shadow: var(--control-shadow);
+  font-size: var(--font-s);
+}
+
+.avatar {
+  flex: 0 0 auto;
+  width: var(--avatar-size);
+  height: var(--avatar-size);
+  border-radius: 50%;
+  background: var(--avatar-grad);
+  color: var(--avatar-fg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--font-xs);
+  font-weight: 700;
+}
+
+.account-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-xs);
+}
+
+/* ---------------------------------------------------------------- コンテンツ */
+main {
+  min-width: 0;
+}
+
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--stack-m);
+}
+
+.page-title {
+  margin: 0;
+  font-family: "Komorebi Gothic", "Zen Maru Gothic", sans-serif;
+  letter-spacing: var(--tracking-tight);
+  font-size: var(--font-title);
+  font-weight: 700;
+}
+
+.page-desc {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--font-desc);
+}
+
+/* ---------------------------------------------------------------- 指標カード */
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--space-3);
+  margin-bottom: var(--stack-m);
+}
+
+.metric-label {
+  color: var(--muted);
+  font-size: var(--font-card-label);
+}
+
+.metric-value {
+  font-size: var(--font-card-value);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.metric-value.positive { color: var(--positive); }
+
+.metric-sub {
+  color: var(--positive);
+  font-size: var(--font-xs);
+}
+
+.metric-bar {
+  margin-top: var(--space-2);
+  height: var(--bar-mini-h);
+  border-radius: var(--radius-bar-mini);
+  background: var(--bar-track);
+}
+
+.metric-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-bar-mini);
+  animation: grow var(--dur-grow) var(--ease-fluid) both;
+}
+
+.metric-bar-fill.teal { background: var(--bar-teal); }
+.metric-bar-fill.blue { background: var(--bar-blue); }
+
+/* ---------------------------------------------------------------- 進捗グラフ */
+.chart-wrap {
+  overflow-x: auto;
+  margin-bottom: var(--stack-m);
+}
+
+.chart-row {
+  display: grid;
+  grid-template-columns: var(--w-chart-label) 1fr var(--w-chart-val);
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) 0;
+}
+
+.chart-label {
+  text-align: right;
+  font-size: var(--font-cell);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chart-track {
+  height: var(--bar-h);
+  border-radius: var(--radius-bar);
+  background: var(--bar-track);
+}
+
+.chart-bar {
+  display: block;
+  height: 100%;
+  border-radius: var(--radius-bar);
+  background: var(--bar-teal);
+  animation: grow var(--dur-grow) var(--ease-fluid) both;
+}
+
+.chart-bar.top {
+  background: var(--bar-blue);
+  box-shadow: var(--bar-glow);
+}
+
+.chart-val {
+  font-size: var(--font-cell);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* バーの伸長（階段状の animation-delay は app.js がインラインで設定する） */
+@keyframes grow {
+  from { width: 0; }
+}
+
+/* コンテンツのフェードイン（表・シート・サーバー切替時に app.js が付与） */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--rise-shift));
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.rise {
+  animation: rise var(--dur-fluid) var(--ease-fluid) both;
+}
+
+/* ---------------------------------------------------------------- 汎用 */
 .loading, .empty { color: var(--muted); }
+
+.login-card { max-width: var(--w-settings-max); }
 
 .error {
   color: var(--danger);
   border: var(--border-w) solid var(--danger);
-  border-radius: var(--radius-legacy-m);
+  border-radius: var(--radius-input);
+  background: var(--glass-bg);
   padding: var(--space-3) var(--space-4);
 }
 
 button, .button {
   font: inherit;
-  padding: var(--pad-s) var(--pad-control-x);
-  border: var(--border-w) solid var(--border);
-  border-radius: var(--radius-legacy-m);
-  background: var(--bg);
+  font-size: var(--font-s);
+  padding: var(--pad-control-y) var(--pad-control-x);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--glass-pill);
+  box-shadow: var(--control-shadow);
   color: var(--fg);
   cursor: pointer;
+  white-space: nowrap;
+}
+
+button:disabled {
+  opacity: .45;
+  cursor: default;
 }
 
 button.primary, .button.primary {
   background: var(--accent);
-  border-color: var(--accent);
+  box-shadow: var(--pill-active-shadow);
   color: var(--accent-fg);
 }
 
-/* シートタブ（Google スプレッドシートのタブ相当。**表の上**に置く。
-   表タブ(#tabs) → シートタブ → ツールバー → 表 の順。
-   出欠回答=予定ごと / 桁巻き記録=桁ごと の共通コンポーネント） */
+a.button { text-decoration: none; display: inline-block; }
+
+/* モーション（押下・ホバーは軽く。タブ切替とバー以外のアニメは置かない） */
+button, .button, .sheet-tab, .nav-item {
+  transition: opacity var(--motion-fast) ease, transform var(--motion-fast) ease;
+}
+
+button:active, .button:active, .sheet-tab:active {
+  transform: translateY(var(--press-shift));
+}
+
+/* ---------------------------------------------------------------- シートタブ */
 .sheetbar {
+  position: relative;
   display: flex;
   align-items: stretch;
   gap: var(--space-1);
   margin-bottom: var(--stack-m);
-  border-bottom: var(--border-w-strong) solid var(--border);
-  overflow-x: auto;               /* タブが多いときは横スクロール */
+  overflow-x: auto;
   scrollbar-width: thin;
 }
 
+.sheet-indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  border-radius: var(--radius-pill);
+  background: var(--glass-pill-active);
+  box-shadow: var(--pill-active-shadow);
+  transition: all var(--dur-fluid) var(--ease-fluid);
+  pointer-events: none;
+}
+
 .sheet-tab {
-  flex: 0 0 auto;                 /* タブを潰さず横に並べてスクロールさせる */
+  position: relative;
+  z-index: var(--z-sticky);
+  flex: 0 0 auto;
   max-width: var(--w-tab-max);
-  padding: var(--pad-s) var(--pad-control-x);
-  border: var(--border-w) solid var(--border);
-  border-bottom: none;
-  border-radius: var(--radius-legacy-m) var(--radius-legacy-m) 0 0;
-  background: var(--row-alt);
+  padding: var(--pad-control-y) var(--pad-control-x);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--glass-pill);
+  box-shadow: none;
   color: var(--fg);
   cursor: pointer;
   font: inherit;
+  font-size: var(--font-s);
 }
 
 .sheet-tab .sheet-label {
@@ -250,78 +770,85 @@ button.primary, .button.primary {
   text-overflow: ellipsis;
 }
 
-/* 選択中のタブは太字＋背景色で明示する */
+/* 選択中のタブ: 背景は .sheet-indicator が担う */
 .sheet-tab.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--accent-fg);
+  background: transparent;
+  color: var(--accent-strong);
 }
 
 .sheet-tab.active .sheet-label { font-weight: 700; }
 
-/* 出欠回答のピボット表（1行 = 候補日時。セルに表示名を縦に列挙） */
+/* 指標の一時停止用（初期配置ではアニメさせない） */
+.nav-indicator.no-anim, .sheet-indicator.no-anim { transition: none; }
+
+/* ---------------------------------------------------------------- ピボット表 */
 table.grid.pivot th,
 table.grid.pivot td { vertical-align: top; }
 
-td.pivot-at { white-space: nowrap; font-weight: 600; }
+td.pivot-at { white-space: nowrap; font-weight: 700; }
 
 td.pivot-cell { white-space: normal; min-width: var(--w-cell-min); }
 
 .pivot-count {
   color: var(--muted);
-  font-size: var(--font-2xs);
-  margin-bottom: var(--pad-hairline);
+  font-size: var(--font-xs);
+  margin-bottom: var(--space-1);
 }
 
 .pivot-names { white-space: pre-line; line-height: var(--leading-names); }
 
-/* 表グリッド（横スクロールは表の中だけに閉じ込める）。
-   面はカード1種類（.card）に統一し、ここはレイアウトだけ持つ（D3-2） */
+/* ---------------------------------------------------------------- 表グリッド */
 .grid-wrap {
   overflow: auto;
-  /* 高さ制限が無いと sticky ヘッダは実際には効かない（D3-5）。
-     dvh が使える環境では @supports で差し替える（アドレスバーの伸縮で跳ねない） */
   max-height: var(--grid-max-h);
-  padding: 0; /* 表はカードの縁いっぱいまで使う（スクロールバーを内側に寄せない） */
+  padding: 0;
 }
 
-@supports (height: 1dvh) {
-  :root {
-    --grid-max-h: 70dvh;
-  }
+table.grid {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: var(--font-cell);
 }
 
-table.grid { border-collapse: collapse; width: 100%; font-size: var(--font-s); }
 table.grid th, table.grid td {
-  border-bottom: var(--border-w) solid var(--border);
+  border-bottom: var(--hairline) solid var(--row-border);
   padding: var(--pad-cell-y) var(--pad-cell-x);
   text-align: left;
   white-space: nowrap;
 }
+
 table.grid thead th {
   position: sticky;
   top: 0;
-  background: var(--row-alt);
   z-index: var(--z-sticky);
+  background: var(--head-bg);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  font-weight: 700;
+  border-bottom: var(--hairline) solid var(--border);
 }
 
-/* 行の区切りは 1px 線＋ホバーだけ（D3-3。ゼブラ縞は廃止） */
-table.grid tbody tr:hover { background: var(--row-alt); }
+/* 偶数行のゼブラ + ホバー */
+table.grid tbody tr:nth-child(even) { background: var(--row-alt); }
+table.grid tbody tr:hover { background: var(--row-hover); }
 
 /* 数値列は桁を揃える（D3-3） */
 table.grid th.num, table.grid td.num { font-variant-numeric: tabular-nums; }
 
 /* 行の高さ「詰めて」（D3-3） */
 table.grid.dense th, table.grid.dense td {
-  padding: var(--pad-hairline) var(--pad-cell-x);
+  padding: var(--pad-cell-dense-y) var(--pad-cell-x);
 }
+
+/* ステータス文字（「進行中」等）はアクセント色 */
+td.status-text { color: var(--accent); }
 
 /* 編集可能列のバッジ（D3-3。ヘッダーに1つだけ出す） */
 .badge-edit {
   display: inline-block;
   margin-left: var(--space-1);
   color: var(--muted);
-  font-size: var(--font-2xs);
+  font-size: var(--font-xs);
 }
 
 .toolbar {
@@ -332,69 +859,15 @@ table.grid.dense th, table.grid.dense td {
   margin-bottom: var(--stack-m);
 }
 
-/* アプリシェル（D3-1）。900px 以上でサイドナビ＋コンテンツの2カラム */
-.guild-slot, .theme-slot { color: var(--muted); font-size: var(--font-s); }
-
-.guild-slot select,
-.theme-slot select,
 .toolbar select {
   font: inherit;
-  padding: var(--pad-xs) var(--space-2);
-  border: var(--border-w) solid var(--border);
-  border-radius: var(--radius-legacy-m);
-  background: var(--bg);
+  font-size: var(--font-s);
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--glass-pill);
+  box-shadow: var(--control-shadow);
   color: var(--fg);
-}
-
-a.button { text-decoration: none; display: inline-block; }
-
-/* 表タブ（D3-1）。既定（900px 未満）は横スクロールの1列 */
-.tabs {
-  display: flex;
-  gap: var(--space-2);
-  margin-bottom: var(--stack-m);
-  overflow-x: auto;
-  scrollbar-width: thin;
-}
-
-.tabs button { flex: 0 0 auto; }
-
-/* モバイル（D3-5）。640px 未満: ツールバーの折り返し・ヘッダーの2段化・
-   タップ対象の最小 44×44px */
-@media (max-width: 640px) {
-  .topbar { flex-wrap: wrap; }
-
-  /* タイトルを1段目に、サーバー選択・テーマ切替を2段目に畳む */
-  .topbar h1 { flex: 1 1 100%; }
-
-  /* 検索欄は1行を専有させ、ページャと2段に折り返す */
-  .toolbar .search-box { flex: 1 1 100%; }
-
-  button, .button, .sheet-tab,
-  .toolbar select, .guild-slot select, .theme-slot select {
-    min-height: var(--tap-min);
-  }
-}
-
-@media (min-width: 900px) {
-  .shell {
-    display: grid;
-    grid-template-columns: var(--w-sidenav) 1fr;
-    gap: var(--space-5);
-    align-items: start;
-  }
-
-  /* サイドナビ: 縦一列・左揃え。キーボードのフォーカス順は
-     DOM 順（ヘッダー → ナビ → コンテンツ）で視覚順と一致する */
-  .tabs {
-    flex-direction: column;
-    align-items: stretch;
-    overflow-x: visible;
-    position: sticky;
-    top: var(--space-4);
-  }
-
-  .tabs button { text-align: left; }
 }
 
 /* 列ヘッダのソートボタン（D1-3）。見た目は th のテキストのまま */
@@ -405,6 +878,7 @@ th.sortable .sort-button {
   border: none;
   border-radius: 0;
   background: none;
+  box-shadow: none;
   color: inherit;
   cursor: pointer;
 }
@@ -412,11 +886,13 @@ th.sortable .sort-button {
 /* 検索欄（D1-2） */
 .search-box {
   font: inherit;
+  font-size: var(--font-s);
   min-width: var(--w-input-min);
-  padding: var(--pad-xs) var(--space-2);
-  border: var(--border-w) solid var(--border);
-  border-radius: var(--radius-legacy-m);
-  background: var(--bg);
+  padding: var(--pad-control-y) var(--pad-control-x);
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--input-bg);
+  box-shadow: var(--control-shadow);
   color: var(--fg);
 }
 
@@ -436,75 +912,14 @@ td input {
   font: inherit;
   width: 100%;
   min-width: var(--w-input-min);
-  padding: var(--pad-hairline) var(--pad-xs);
+  padding: var(--space-1) var(--space-2);
   border: var(--border-w) solid var(--accent);
-  border-radius: var(--radius-legacy-s);
-  background: var(--bg);
+  border-radius: var(--radius-input);
+  background: var(--input-bg);
   color: var(--fg);
 }
 
-.cell-error { color: var(--danger); font-size: var(--font-em-s); }
-
-/* サマリーの bento グリッド（D2-3。§デザイン方針の本命） */
-.bento {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(var(--w-card-min), 1fr));
-  gap: var(--space-3);
-  margin-bottom: var(--stack-m);
-}
-
-/* カードは1種類だけ（D3-2）。サマリー・グラフ・表がすべてこれで包まれる。
-   入れ子は1段まで（カードの中にカードを置かない） */
-.card {
-  padding: var(--space-3) var(--space-4);
-  border: var(--border-w) solid var(--border);
-  border-radius: var(--radius-card);
-  background: var(--bg);
-  box-shadow: var(--shadow-card);
-}
-
-.card-value {
-  font-size: var(--font-card-value);
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.card-label { color: var(--muted); font-size: var(--font-xs); }
-
-/* 設定フォーム（D2-2） */
-.settings-form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  max-width: var(--w-settings-max);
-}
-
-.settings-item { display: flex; flex-direction: column; gap: var(--space-1); }
-
-.settings-label {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
-  font-weight: 600;
-}
-
-.settings-input {
-  font: inherit;
-  font-weight: 400;
-  padding: var(--pad-xs) var(--space-2);
-  border: var(--border-w) solid var(--border);
-  border-radius: var(--radius-legacy-m);
-  background: var(--bg);
-  color: var(--fg);
-}
-
-.settings-input[readonly] { color: var(--muted); }
-
-.settings-desc { margin: 0; font-size: var(--font-xs); }
-
-.settings-error { margin: 0; }
-
-.settings-form > button { align-self: flex-start; }
+.cell-error { color: var(--danger); font-size: var(--font-xs); }
 
 /* 入力中セル（D1-4）。確定は Enter / ✓、キャンセルは Escape / ✕ / blur */
 .cell-editor {
@@ -520,7 +935,144 @@ td input {
   flex: 0 0 auto;
 }
 
-.chart-wrap {
+/* ---------------------------------------------------------------- 設定フォーム */
+.settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  max-width: var(--w-settings-max);
+}
+
+.settings-item { display: flex; flex-direction: column; gap: var(--space-1); }
+
+.settings-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-weight: 700;
+}
+
+.settings-input {
+  font: inherit;
+  font-weight: 400;
+  padding: var(--pad-control-y) var(--pad-control-x);
+  border: none;
+  border-radius: var(--radius-input);
+  background: var(--input-bg);
+  box-shadow: var(--control-shadow);
+  color: var(--fg);
+}
+
+.settings-input[readonly] { color: var(--muted); }
+
+.settings-desc { margin: 0; font-size: var(--font-xs); }
+
+.settings-error { margin: 0; }
+
+.settings-form > button { align-self: flex-start; }
+
+/* ---------------------------------------------------------------- Dock（モバイル） */
+.dock {
+  position: fixed;
+  left: 50%;
+  bottom: var(--dock-bottom);
+  transform: translateX(-50%);
+  z-index: var(--z-dock);
+  display: none;
+  align-items: flex-end;
+  gap: var(--dock-gap);
+  padding: var(--pad-dock-y) var(--pad-dock-x);
+  border-radius: var(--radius-dock);
+  background: var(--dock-bg);
+  backdrop-filter: blur(var(--glass-blur-dock)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-dock)) saturate(var(--glass-saturate));
+  box-shadow: var(--dock-shadow);
+  max-width: calc(100vw - 2 * var(--space-3));
   overflow-x: auto;
-  margin-bottom: var(--stack-m);
+  scrollbar-width: none;
+}
+
+.dock-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--dock-item-gap);
+  flex: 0 0 auto;
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: var(--font-dock-label);
+  cursor: pointer;
+  transition: all var(--dur-fluid) var(--ease-fluid);
+}
+
+.dock-item svg {
+  width: var(--icon-size);
+  height: var(--icon-size);
+}
+
+.dock-item.active {
+  background: var(--glass-pill-active);
+  box-shadow: var(--pill-active-shadow);
+  color: var(--accent-strong);
+  font-weight: 700;
+  transform: translateY(var(--dock-lift)) scale(1.08);
+}
+
+/* ---------------------------------------------------------------- モバイル */
+@media (max-width: 768px) {
+  body {
+    grid-template-columns: 1fr;
+    gap: var(--space-3);
+    padding: var(--space-3);
+  }
+
+  /* サイドバーは「ギルド選択＋アカウント」のコンパクトなバーに畳む */
+  .sidebar {
+    position: static;
+    max-height: none;
+    overflow: visible;
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-card);
+  }
+
+  .brand { display: none; }
+  .nav { display: none; }
+  .side-note { display: none; }
+  .theme-text { display: none; }
+
+  .guild-pill { flex: 1 1 auto; }
+
+  .side-foot {
+    margin-top: 0;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+  }
+
+  /* Dock の高さぶんコンテンツ下部を空ける */
+  main { padding-bottom: var(--dock-pad-b); }
+
+  .dock:not([hidden]) { display: flex; }
+
+  .metrics { grid-template-columns: repeat(2, 1fr); }
+
+  /* 検索欄は1行を専有させ、ページャと2段に折り返す */
+  .toolbar .search-box { flex: 1 1 100%; }
+
+  /* タップ対象の最小 44×44px */
+  button, .button, .sheet-tab,
+  .toolbar select, .guild-pill select, .theme-mini select {
+    min-height: var(--tap-min);
+  }
 }

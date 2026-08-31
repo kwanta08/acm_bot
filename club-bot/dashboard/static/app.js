@@ -3,6 +3,10 @@
 // ES モジュール（index.html が type="module" で読み込む）。
 // DOM に触れない純粋関数は static/lib/ に置き、Node 標準の
 // `node --test "tests_js/*.test.mjs"` で検証する（D0-2）。
+//
+// Liquid Glass 刷新: 左サイドバー（#tabs）とモバイル Dock（#dock）は
+// 同じ状態を共有し、renderTabs が両方を描画する。選択ピルの背景は
+// .nav-indicator / .sheet-indicator が transform で滑って追従する。
 import { formatCell, parseInput } from "./lib/format.js";
 import { PAGE_SIZES, pageInfo } from "./lib/paging.js";
 import { buildTableQuery } from "./lib/query.js";
@@ -11,7 +15,6 @@ import { editAction } from "./lib/edit.js";
 import { gridKeyAction, nextCellPosition } from "./lib/keynav.js";
 import { errorDisposition } from "./lib/errors.js";
 import { settingsDiff } from "./lib/settings.js";
-import { summaryCards } from "./lib/summary.js";
 import { readStoredTheme, storeTheme, themeAttribute } from "./lib/theme.js";
 
 const appEl = document.getElementById("app");
@@ -34,6 +37,9 @@ const state = {
   dir: null,
   // 行の高さ「詰めて」（D3-3）。セッション中は表をまたいで維持する
   dense: false,
+  // フェードイン（.rise）を次の描画で発火させるか。
+  // 表・シート・サーバーの切替でのみ立てる（ページ送りでは点滅させない）
+  rise: false,
 };
 
 function el(tag, attrs = {}, children = []) {
@@ -72,22 +78,77 @@ function showError(message, onRetry) {
   );
 }
 
+// ------------------------------------------------- 液体インジケーター
+// 選択ピルの背景を1個だけ持ち、選択変更時に transform で滑らせる。
+// 要素はモジュールで使い回す（作り直すと transition が働かない）
+const navIndicator = el("span", { class: "nav-indicator", "aria-hidden": "true" });
+const sheetIndicator = el("span", { class: "sheet-indicator", "aria-hidden": "true" });
+
+function placeIndicator(indicator, btn) {
+  if (!btn) return;
+  const first = !indicator.dataset.placed;
+  if (first) indicator.classList.add("no-anim");
+  indicator.style.transform = `translate(${btn.offsetLeft}px, ${btn.offsetTop}px)`;
+  indicator.style.width = `${btn.offsetWidth}px`;
+  indicator.style.height = `${btn.offsetHeight}px`;
+  if (first) {
+    indicator.dataset.placed = "1";
+    // 強制リフローで no-anim を反映させてから外す（初期配置は滑らせない）
+    void indicator.offsetWidth;
+    indicator.classList.remove("no-anim");
+  }
+}
+
+// フォント読み込みやリサイズでピルの寸法が変わったら追従させる
+function repositionIndicators() {
+  const activeNav = document.querySelector("#tabs .nav-item.active");
+  if (activeNav) placeIndicator(navIndicator, activeNav);
+  const activeSheet = document.querySelector(".sheetbar .sheet-tab.active");
+  if (activeSheet) placeIndicator(sheetIndicator, activeSheet);
+}
+window.addEventListener("resize", repositionIndicators);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(repositionIndicators);
+
+// コンテンツのフェードイン。クラスを付け直してアニメを再発火させる
+function applyRise() {
+  if (!state.rise) return;
+  state.rise = false;
+  const content = document.getElementById("content");
+  if (!content) return;
+  content.classList.remove("rise");
+  void content.offsetWidth;
+  content.classList.add("rise");
+}
+
 // ---------------------------------------------------------------- 表示
 function renderLoginPrompt() {
+  accountEl.hidden = true;
   accountEl.replaceChildren();
-  const slot = document.getElementById("guild-slot");
-  if (slot) slot.replaceChildren();
+  const picker = document.getElementById("guild-picker");
+  if (picker) picker.replaceChildren();
+  const tabs = document.getElementById("tabs");
+  if (tabs) tabs.replaceChildren();
+  const dock = document.getElementById("dock");
+  if (dock) {
+    dock.hidden = true;
+    dock.replaceChildren();
+  }
   appEl.replaceChildren(
-    el("p", { text: "Discord でログインすると、自分が所属するサーバーのデータを表示できます。" }),
-    el("p", {}, [
-      el("a", { class: "button primary", href: "/auth/login", text: "Discord でログイン" }),
+    el("div", { class: "card login-card" }, [
+      el("p", { text: "Discord でログインすると、自分が所属するサーバーのデータを表示できます。" }),
+      el("p", {}, [
+        el("a", { class: "button primary", href: "/auth/login", text: "Discord でログイン" }),
+      ]),
     ]),
   );
 }
 
 function renderAccount() {
+  const name = state.me.user.name || "?";
+  accountEl.hidden = false;
   accountEl.replaceChildren(
-    el("span", { text: state.me.user.name }),
+    el("span", { class: "avatar", "aria-hidden": "true", text: name.charAt(0) }),
+    el("span", { class: "account-name", text: name, title: name }),
     el("button", {
       text: "ログアウト",
       onclick: async () => {
@@ -100,7 +161,9 @@ function renderAccount() {
 
 function renderGuildPicker() {
   const guilds = state.me.guilds;
+  const picker = document.getElementById("guild-picker");
   if (guilds.length === 0) {
+    if (picker) picker.replaceChildren();
     appEl.replaceChildren(
       el("p", { class: "empty", text: "この Bot が導入されているサーバーが見つかりませんでした。" }),
     );
@@ -111,77 +174,250 @@ function renderGuildPicker() {
     onchange: (e) => selectGuild(e.target.value),
   }, guilds.map((g) =>
     el("option", { value: g.id, text: g.name, ...(g.id === state.guildId ? { selected: "selected" } : {}) })));
+  if (picker) picker.replaceChildren(select);
+}
 
-  // サーバー選択はヘッダーへ（D3-1）
-  const slot = document.getElementById("guild-slot");
-  if (slot) slot.replaceChildren(el("label", {}, ["サーバー: ", select]));
-
-  // シェル（D3-1）: 900px 以上でサイドナビ＋コンテンツの2カラム、
-  // 未満では横スクロールのタブ（切替は style.css のメディアクエリ）。
-  // #tabs / #grid の ID は据え置く（app.js の他箇所が参照するため）
+// コンテンツの骨組み: タイトル行 → 指標カード → 表。
+// #grid / #summary の ID は据え置く（app.js の他箇所が参照するため）
+function buildContentShell() {
   appEl.replaceChildren(
-    el("div", { class: "shell" }, [
-      el("nav", { id: "tabs", class: "tabs", "aria-label": "表の一覧" }),
-      el("div", { class: "content" }, [
-        el("div", { id: "summary" }),
-        el("div", { id: "grid" }),
-      ]),
+    el("div", { class: "content", id: "content" }, [
+      el("div", { id: "page-head" }),
+      el("div", { id: "summary" }),
+      el("div", { id: "grid" }, [el("p", { class: "loading", text: "読み込み中…" })]),
     ]),
   );
 }
 
-// サマリーカード（D2-3）。/summary の失敗は表の表示を妨げない（カードだけ —）
-function renderSummary(summary) {
-  const box = document.getElementById("summary");
-  if (!box) return;
-  box.replaceChildren(
-    el("div", { class: "bento" }, summaryCards(summary).map((card) =>
-      el("div", { class: "card" }, [
-        el("div", { class: "card-value", text: card.value }),
-        el("div", { class: "card-label", text: card.label }),
-      ]))),
-  );
+function renderPageHead({ title, desc, csvHref }) {
+  const head = document.getElementById("page-head");
+  if (!head) return;
+  head.classList.add("page-head");
+  head.replaceChildren(...[
+    el("div", {}, [
+      el("h2", { class: "page-title", text: title }),
+      desc ? el("p", { class: "page-desc", text: desc }) : null,
+    ].filter(Boolean)),
+    csvHref ? el("a", { class: "button", href: csvHref, download: "", text: "CSV をダウンロード" }) : null,
+  ].filter(Boolean));
 }
 
-async function loadSummary() {
-  try {
-    renderSummary(await api(`/api/guilds/${state.guildId}/summary`));
-  } catch (e) {
-    if (errorDisposition(e.status) === "login") {
-      renderLoginPrompt();
-      return;
-    }
-    renderSummary(null);
+// ------------------------------------------------- 指標カード（サマリー行）
+// 出欠回答と機体進捗だけに出す。値は表の描画データから集計する
+// （/summary API は使わない。表示中のシート・ページと必ず一致させるため）
+function metricCard(card) {
+  const kids = [
+    el("div", { class: "metric-label", text: card.label }),
+    el("div", { class: card.positive ? "metric-value positive" : "metric-value", text: card.value }),
+  ];
+  if (card.sub) kids.push(el("div", { class: "metric-sub", text: card.sub }));
+  if (card.bar !== null && card.bar !== undefined) {
+    const fill = el("span", { class: `metric-bar-fill ${card.barColor || "teal"}` });
+    fill.style.width = `${Math.round(Math.min(Math.max(card.bar, 0), 1) * 100)}%`;
+    kids.push(el("div", { class: "metric-bar" }, [fill]));
   }
+  return el("div", { class: "card metric" }, kids);
+}
+
+function renderMetrics(cards) {
+  const box = document.getElementById("summary");
+  if (!box) return;
+  if (!cards || cards.length === 0) {
+    box.replaceChildren();
+    return;
+  }
+  box.replaceChildren(el("div", { class: "metrics" }, cards.map(metricCard)));
+}
+
+// 出欠回答: 参加 / 不参加 / 未回答 / 回答率。
+// 参加・不参加は「いずれかの候補にその回答をした人」の人数（重複なし）。
+// 未回答は予定単位（全行で同じ顔ぶれ）なので先頭行から取る
+function attendanceMetrics(pivot) {
+  if (!pivot || pivot.rows.length === 0) return null;
+  const ok = new Set();
+  const ng = new Set();
+  const maybe = new Set();
+  for (const row of pivot.rows) {
+    for (const name of row.groups.ok || []) ok.add(name);
+    for (const name of row.groups.ng || []) ng.add(name);
+    for (const name of row.groups.maybe || []) maybe.add(name);
+  }
+  const unanswered = (pivot.rows[0].groups.none || []).length;
+  const responded = new Set([...ok, ...ng, ...maybe]).size;
+  const total = responded + unanswered;
+  const rate = total > 0 ? responded / total : null;
+  return [
+    { label: "参加", value: String(ok.size) },
+    { label: "不参加", value: String(ng.size) },
+    { label: "未回答", value: String(unanswered) },
+    {
+      label: "回答率",
+      value: rate === null ? "—" : `${Math.round(rate * 100)}%`,
+      positive: true,
+      bar: rate === null ? 0 : rate,
+      barColor: "teal",
+    },
+  ];
+}
+
+function clampProgress(value) {
+  return Math.min(Math.max(Number(value) || 0, 0), 1);
+}
+
+// 機体進捗: 機体全体の進捗 / ノード数 / 今週の更新 / 実測重量合計（目標比）。
+// 機体全体は最上位ノード（parent_id なし）の平均。無ければ全ノードの平均
+function progressMetrics(rows, total) {
+  const withProgress = rows.filter(
+    (r) => r.manual_progress !== null && r.manual_progress !== undefined);
+  const tops = withProgress.filter((r) => !r.parent_id);
+  const base = tops.length > 0 ? tops : withProgress;
+  const overall = base.length > 0
+    ? base.reduce((sum, r) => sum + clampProgress(r.manual_progress), 0) / base.length
+    : null;
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  const updatedThisWeek = rows.filter((r) => {
+    if (!r.updated_at) return false;
+    const t = Date.parse(String(r.updated_at).replace(" ", "T"));
+    return Number.isFinite(t) && now - t <= weekMs;
+  }).length;
+  const actual = rows.reduce((s, r) => s + (Number(r.actual_weight_g) || 0), 0);
+  const targetW = rows.reduce((s, r) => s + (Number(r.target_weight_g) || 0), 0);
+  return [
+    {
+      label: "機体全体の進捗",
+      value: overall === null ? "—" : `${Math.round(overall * 100)}%`,
+      bar: overall === null ? 0 : overall,
+      barColor: "blue",
+    },
+    { label: "進捗ノード数", value: String(total) },
+    { label: "今週の更新", value: String(updatedThisWeek) },
+    {
+      label: "実測重量合計",
+      value: actual > 0 ? `${Math.round(actual).toLocaleString("ja-JP")} g` : "—",
+      sub: actual > 0 && targetW > 0 ? `目標比 ${Math.round((actual / targetW) * 100)}%` : null,
+    },
+  ];
 }
 
 // 設定タブの内部キー（表ホワイトリストの "settings"（L4 の生テーブル）とは別物）
 const SETTINGS_TAB = "__settings__";
 
+// ------------------------------------------------- サイドナビ + Dock
+// SVG ストロークアイコン（線画。fill なし・stroke-width 1.6）
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function svg(tag, attrs = {}, children = []) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
+  for (const child of [].concat(children)) if (child) node.append(child);
+  return node;
+}
+
+const ICON_PATHS = {
+  tasks: ["M4 12.5l5 5L20 6.5"],
+  members: ["M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z", "M4 20c1.5-3.5 4.5-5 8-5s6.5 1.5 8 5"],
+  teams: ["M4 4h6v6H4Z", "M14 4h6v6h-6Z", "M4 14h6v6H4Z", "M14 14h6v6h-6Z"],
+  schedules: ["M4 6h16v14H4Z", "M4 10h16", "M8 3v5", "M16 3v5"],
+  schedule_votes: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M8.5 12.5l2.5 2.5 4.5-5"],
+  layer_records: ["M3 16c4-8 7 4 10-3s5-2 8-6"],
+  progress: ["M5 20V10", "M12 20V4", "M19 20v-7"],
+  audit_log: ["M5 4h14v16H5Z", "M9 9h6", "M9 13h6"],
+  [SETTINGS_TAB]: [
+    "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z",
+    "M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.7a7 7 0 0 0-2 "
+      + "1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 "
+      + "1.2L10 21h4l.6-2.7a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2Z",
+  ],
+  fallback: ["M4 5h16v14H4Z", "M4 10h16", "M10 10v9"],
+};
+
+// Dock 用の短縮ラベル（長い表名は Dock で潰れるため）
+const DOCK_LABELS = {
+  schedule_votes: "出欠",
+  layer_records: "桁巻き",
+  layer_keta: "桁",
+  progress_milestones: "節目",
+  progress_snapshots: "履歴",
+  stock_items: "在庫",
+  stock_movements: "入出庫",
+  tool_loans: "貸出",
+  skill_tags: "技能",
+  audit_log: "ログ",
+};
+
+function dockIcon(key) {
+  const paths = ICON_PATHS[key] || ICON_PATHS.fallback;
+  return svg("svg", {
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    "stroke-width": "1.6",
+    "stroke-linecap": "round",
+    "stroke-linejoin": "round",
+    "aria-hidden": "true",
+  }, paths.map((d) => svg("path", { d })));
+}
+
+// サイドバーの縦ナビと Dock は同じ状態を共有し、ここで両方描画する
 function renderTabs() {
   const tabs = document.getElementById("tabs");
+  const dock = document.getElementById("dock");
   if (!tabs) return;
   tabs.setAttribute("role", "tablist");
-  tabs.replaceChildren(
-    ...state.tables.map((t) =>
-      el("button", {
-        class: t.key === state.tableKey ? "primary" : "",
-        role: "tab",
-        "aria-selected": t.key === state.tableKey ? "true" : "false",
-        text: t.label,
-        title: t.description || "",
-        onclick: () => selectTable(t.key),
-      })),
+  const entries = [
+    ...state.tables.map((t) => ({
+      key: t.key,
+      label: t.label,
+      title: t.description || "",
+      active: t.key === state.tableKey,
+      onclick: () => selectTable(t.key),
+    })),
     // 設定画面（D2-2）。表の並びの末尾に置く
-    el("button", {
-      class: state.tableKey === SETTINGS_TAB ? "primary" : "",
-      role: "tab",
-      "aria-selected": state.tableKey === SETTINGS_TAB ? "true" : "false",
-      text: "設定",
+    {
+      key: SETTINGS_TAB,
+      label: "設定",
       title: "サーバー設定の表示と変更",
+      active: state.tableKey === SETTINGS_TAB,
       onclick: () => selectSettings(),
-    }),
+    },
+  ];
+  tabs.replaceChildren(
+    navIndicator,
+    ...entries.map((e) => el("button", {
+      class: e.active ? "nav-item active" : "nav-item",
+      role: "tab",
+      "aria-selected": e.active ? "true" : "false",
+      text: e.label,
+      title: e.title,
+      onclick: e.onclick,
+    })),
   );
+  requestAnimationFrame(() =>
+    placeIndicator(navIndicator, tabs.querySelector(".nav-item.active")));
+
+  if (!dock) return;
+  dock.setAttribute("role", "tablist");
+  dock.replaceChildren(...entries.map((e) => el("button", {
+    class: e.active ? "dock-item active" : "dock-item",
+    role: "tab",
+    "aria-selected": e.active ? "true" : "false",
+    title: e.label,
+    onclick: e.onclick,
+  }, [
+    dockIcon(e.key),
+    el("span", { class: "dock-label", text: DOCK_LABELS[e.key] || e.label }),
+  ])));
+  dock.hidden = entries.length <= 1;
+  // Dock が横スクロールしている場合、選択中の項目を中央へ寄せる
+  requestAnimationFrame(() => {
+    const active = dock.querySelector(".dock-item.active");
+    if (!active) return;
+    dock.scrollTo({
+      left: active.offsetLeft - (dock.clientWidth - active.offsetWidth) / 2,
+      behavior: "smooth",
+    });
+  });
 }
 
 function editableCell(td, row, column, data) {
@@ -193,7 +429,13 @@ function editableCell(td, row, column, data) {
     const input = el("input", {
       value: current === null || current === undefined ? "" : String(current),
     });
+    // 確定・キャンセルは1回だけ有効にする。replaceChildren が編集中の
+    // input を DOM から外すとき、ブラウザは同期的に blur を発火させるため、
+    // ガードが無いと cancel が再入して NotFoundError で表示が壊れる
+    let settled = false;
     const finish = async (commit) => {
+      if (settled) return;
+      settled = true;
       if (!commit) {
         // キャンセル: 値を元に戻す（blur・Escape・✕。D1-4）
         td.replaceChildren(document.createTextNode(formatCell(row[column.name], column, row)));
@@ -239,7 +481,12 @@ function editableCell(td, row, column, data) {
       onpointerdown: keepFocus,
       onmousedown: keepFocus,
       ontouchstart: keepFocus,
-      onclick: () => act(editAction({ type: "commit-button" })),
+      // stopPropagation: td のクリックリスナーまで泳がせると、確定で
+      // エディタを外した直後に新しいエディタが開き直されてしまう
+      onclick: (ev) => {
+        ev.stopPropagation();
+        act(editAction({ type: "commit-button" }));
+      },
     });
     const cancelBtn = el("button", {
       class: "cell-action cell-action-cancel",
@@ -249,7 +496,10 @@ function editableCell(td, row, column, data) {
       onpointerdown: keepFocus,
       onmousedown: keepFocus,
       ontouchstart: keepFocus,
-      onclick: () => act(editAction({ type: "cancel-button" })),
+      onclick: (ev) => {
+        ev.stopPropagation();
+        act(editAction({ type: "cancel-button" }));
+      },
     });
     const editor = el("span", { class: "cell-editor" }, [input, commitBtn, cancelBtn]);
     input.addEventListener("keydown", (ev) => {
@@ -307,70 +557,40 @@ function setupGridKeyboard(cells) {
   }));
 }
 
-// 進捗グラフ（インライン SVG。ライブラリも外部 CDN も使わない）。
-// bot 側の matplotlib を撤去し、描画はここへ移した。
-const SVG_NS = "http://www.w3.org/2000/svg";
-
-function svg(tag, attrs = {}, children = []) {
-  const node = document.createElementNS(SVG_NS, tag);
-  for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
-  for (const child of [].concat(children)) if (child) node.append(child);
-  return node;
-}
-
+// 進捗グラフ（HTML の横棒。ライブラリも外部 CDN も使わない）。
+// バーは grow アニメで伸び、行ごとに 0.12s ずつ遅らせて階段状にする。
+// 最上位ノード（parent_id なし）は青系 + グロー、下位はティール
 function progressChart(rows, { max = 25 } = {}) {
   const items = rows
     .filter((r) => r.manual_progress !== null && r.manual_progress !== undefined)
     .slice(0, max)
     .map((r) => ({
       label: String(r.name || r.node_id || ""),
-      value: Math.min(Math.max(Number(r.manual_progress) || 0, 0), 1),
+      value: clampProgress(r.manual_progress),
+      top: !r.parent_id,
     }));
   if (items.length === 0) return null;
 
-  const rowH = 24;
-  const labelW = 160;
-  const barW = 320;
-  const height = items.length * rowH + 8;
-  const chart = svg("svg", {
-    width: labelW + barW + 56,
-    height,
-    viewBox: `0 0 ${labelW + barW + 56} ${height}`,
-    role: "img",
-    "aria-label": "進捗グラフ",
-  });
-
-  items.forEach((item, i) => {
-    const y = i * rowH + 4;
-    const label = item.label.length > 18 ? `${item.label.slice(0, 17)}…` : item.label;
-    chart.append(
-      svg("text", {
-        x: labelW - 8, y: y + 14, "text-anchor": "end",
-        "font-size": "12", fill: "currentColor",
-      }, [document.createTextNode(label)]),
-      svg("rect", {
-        x: labelW, y: y + 4, width: barW, height: 14, rx: 3,
-        fill: "currentColor", "fill-opacity": "0.12",
-      }),
-      svg("rect", {
-        x: labelW, y: y + 4, width: Math.max(barW * item.value, 1), height: 14,
-        rx: 3, fill: "var(--accent)",
-      }),
-      svg("text", {
-        x: labelW + barW + 8, y: y + 15, "font-size": "12", fill: "currentColor",
-      }, [document.createTextNode(`${Math.round(item.value * 100)}%`)]),
-    );
-  });
-  return chart;
+  return el("div", { class: "chart", role: "img", "aria-label": "進捗グラフ" },
+    items.map((item, i) => {
+      const bar = el("span", { class: item.top ? "chart-bar top" : "chart-bar" });
+      bar.style.width = `${Math.max(item.value * 100, 0.5)}%`;
+      bar.style.animationDelay = `${(i * 0.12).toFixed(2)}s`;
+      return el("div", { class: "chart-row" }, [
+        el("span", { class: "chart-label", text: item.label, title: item.label }),
+        el("div", { class: "chart-track" }, [bar]),
+        el("span", { class: "chart-val", text: `${Math.round(item.value * 100)}%` }),
+      ]);
+    }));
 }
 
 // シートタブ（Google スプレッドシートのタブ相当。表の**上**に置く。
-// 表タブ(#tabs) → シートタブ → ツールバー → 表 の順で並ぶ）。
+// ページタイトル行 → シートタブ → ツールバー → 表 の順で並ぶ）。
 // 出欠回答（予定ごと）と桁巻き記録（桁ごと）で共通に使う。
 // タブ名はタイトルのみ（日程調整の開催日時はツールチップで確認できる）。
 function renderSheetTabs(data) {
   const sheets = data.sheets;
-  return el("div", { class: "sheetbar", role: "tablist" },
+  const bar = el("div", { class: "sheetbar", role: "tablist" },
     sheets.items.map((s) => el("button", {
       class: s.id === sheets.active ? "sheet-tab active" : "sheet-tab",
       role: "tab",
@@ -380,6 +600,10 @@ function renderSheetTabs(data) {
     }, [
       el("span", { class: "sheet-label", text: s.label }),
     ])));
+  bar.prepend(sheetIndicator);
+  requestAnimationFrame(() =>
+    placeIndicator(sheetIndicator, bar.querySelector(".sheet-tab.active")));
+  return bar;
 }
 
 // 出欠回答のピボット表（1行 = 候補日時、セル = 表示名を改行区切りで列挙）
@@ -400,7 +624,7 @@ function attendancePivotTable(pivot) {
       }
       return td;
     })));
-  return el("div", { class: "grid-wrap card" }, [
+  return el("div", { class: "grid-wrap panel" }, [
     el("table", { class: "grid pivot" }, [
       el("caption", { class: "sr-only", text: "出欠回答のピボット表（候補日時ごとの回答者）" }),
       el("thead", {}, [head]),
@@ -430,18 +654,6 @@ function renderGrid(data) {
   const grid = document.getElementById("grid");
   if (!grid) return;
 
-  // 予定・桁がまだ1件も無い場合の空状態（タブも表も出さない）
-  if (data.sheets && data.sheets.items.length === 0) {
-    grid.replaceChildren(el("p", {
-      class: "empty",
-      text: `${data.sheets.noun}がまだ登録されていません。`,
-    }));
-    return;
-  }
-
-  // シートタブは表の上（表タブ #tabs のすぐ下）に置く。
-  // 以下の3分岐（ピボット表 / 行0件 / 通常の表）すべてで先頭に来る
-  const sheetbar = data.sheets ? renderSheetTabs(data) : null;
   // 画面と同じ絞り込み（シート・検索語）を CSV にも効かせる
   // （出欠回答で全予定が混ざった CSV が落ちてくるのを防ぐ。検索も同じ原則）
   const csvQuery = buildTableQuery({
@@ -453,17 +665,42 @@ function renderGrid(data) {
   const csvHref = `/api/guilds/${state.guildId}/tables/${data.table.key}/export.csv`
     + (csvQuery ? `?${csvQuery}` : "");
 
+  // ページタイトル行（表名 + 説明 + CSV ピル）
+  renderPageHead({
+    title: data.table.label,
+    desc: data.table.description || "",
+    csvHref,
+  });
+
+  // 指標カード（出欠回答・機体進捗のみ。他の表では出さない）
+  let metrics = null;
+  if (data.table.key === "schedule_votes") metrics = attendanceMetrics(data.pivot);
+  else if (data.table.key === "progress") metrics = progressMetrics(data.rows, data.total);
+  renderMetrics(metrics);
+
+  // 予定・桁がまだ1件も無い場合の空状態（タブも表も出さない）
+  if (data.sheets && data.sheets.items.length === 0) {
+    grid.replaceChildren(el("p", {
+      class: "empty",
+      text: `${data.sheets.noun}がまだ登録されていません。`,
+    }));
+    applyRise();
+    return;
+  }
+
+  // シートタブは表の上（タイトル行のすぐ下）に置く。
+  // 以下の3分岐（ピボット表 / 行0件 / 通常の表）すべてで先頭に来る
+  const sheetbar = data.sheets ? renderSheetTabs(data) : null;
+
   // 出欠回答はピボット表（候補日時 × 参加/不参加/未定/未回答）で表示する
   if (data.pivot) {
     grid.replaceChildren(...[
       sheetbar,
-      el("div", { class: "toolbar" }, [
-        el("a", { class: "button", href: csvHref, download: "", text: "CSV をダウンロード" }),
-      ]),
       data.pivot.rows.length > 0
         ? attendancePivotTable(data.pivot)
         : el("p", { class: "empty", text: "候補日時がまだ登録されていません。" }),
     ].filter(Boolean));
+    applyRise();
     return;
   }
 
@@ -478,6 +715,7 @@ function renderGrid(data) {
         text: state.q ? "検索に一致する行がありません。" : "データがありません。",
       }),
     ].filter(Boolean));
+    applyRise();
     return;
   }
   // 列ヘッダのソート（D1-3）。クリックで 昇順 → 降順 → 既定 を巡回し、
@@ -522,9 +760,14 @@ function renderGrid(data) {
   const body = data.rows.map((row) => {
     const rowCells = [];
     const tr = el("tr", {}, data.columns.map((c) => {
+      // ステータス文字（「進行中」等）はアクセント色にする
+      const classes = [
+        numClass(c).trim(),
+        c.name === "status" ? "status-text" : "",
+      ].filter(Boolean).join(" ");
       const td = el("td", {
         text: formatCell(row[c.name], c, row),
-        ...(numClass(c) ? { class: numClass(c).trim() } : {}),
+        ...(classes ? { class: classes } : {}),
       });
       if (c.editable && data.can_edit) {
         editableCell(td, row, c, data);
@@ -595,10 +838,9 @@ function renderGrid(data) {
       search,
       ...pager,
       el("span", { class: "empty", text: hint }),
-      el("a", { class: "button", href: csvHref, download: "", text: "CSV をダウンロード" }),
     ].filter(Boolean)),
     chart ? el("div", { class: "chart-wrap card" }, [chart]) : null,
-    el("div", { class: "grid-wrap card" }, [
+    el("div", { class: "grid-wrap panel" }, [
       el("table", { class: state.dense ? "grid dense" : "grid" }, [
         el("caption", { class: "sr-only", text: `${data.table.label} の一覧` }),
         el("thead", {}, [head]),
@@ -606,6 +848,7 @@ function renderGrid(data) {
       ]),
     ]),
   ].filter(Boolean));
+  applyRise();
 }
 
 // ---------------------------------------------------------------- 操作
@@ -645,7 +888,10 @@ async function loadGrid({ sheet = state.sheetId, offset = state.offset } = {}) {
 // 設定画面（D2-2）。GET /settings を表示し、差分だけを PATCH する
 async function selectSettings() {
   state.tableKey = SETTINGS_TAB;
+  state.rise = true;
   renderTabs();
+  renderPageHead({ title: "設定", desc: "サーバー設定の表示と変更" });
+  renderMetrics(null);
   const grid = document.getElementById("grid");
   if (grid) grid.replaceChildren(el("p", { class: "loading", text: "読み込み中…" }));
   try {
@@ -742,6 +988,7 @@ function renderSettingsForm(data) {
   grid.replaceChildren(
     el("div", { class: "settings-form" }, [...items, save, status]),
   );
+  applyRise();
 }
 
 async function selectTable(key) {
@@ -752,6 +999,9 @@ async function selectTable(key) {
   state.q = "";
   state.sort = null;
   state.dir = null;
+  state.rise = true;
+  // シートインジケーターは表ごとに初期配置へ戻す（前の表から滑らせない）
+  delete sheetIndicator.dataset.placed;
   renderTabs();
   await loadGrid({ sheet: null, offset: 0 });
 }
@@ -760,13 +1010,15 @@ async function selectTable(key) {
 // シートを切り替えたらページ位置をリセットする
 async function selectSheet(key, sheetId) {
   state.offset = 0;
+  state.rise = true;
   await loadGrid({ sheet: sheetId, offset: 0 });
 }
 
 async function selectGuild(guildId) {
   state.guildId = guildId;
+  state.rise = true;
   renderGuildPicker();
-  loadSummary(); // await しない: サマリーの失敗・遅延で表を待たせない
+  buildContentShell();
   try {
     const data = await api(`/api/guilds/${guildId}/tables`);
     state.tables = data.tables;
@@ -805,7 +1057,7 @@ function setupThemeToggle() {
   applyTheme(stored);
   const current = themeAttribute(stored) || "system";
   slot.replaceChildren(el("label", {}, [
-    "テーマ: ",
+    el("span", { class: "theme-text", text: "テーマ: " }),
     el("select", {
       "aria-label": "テーマを選択",
       onchange: (e) => {
