@@ -7,6 +7,12 @@
     python scripts/build_manual_pdf.py                  # role_manual.html を変換
     python scripts/build_manual_pdf.py --install-font   # フォントを入れてから変換
     python scripts/build_manual_pdf.py docs/keta_maki_guide.html
+    python scripts/build_manual_pdf.py docs/leaflet.html --png   # ページごとの PNG も出す
+
+`--png` は PDF をページごとの PNG（`<名前>-1.png`, `<名前>-2.png` …）にする。
+SNS やチャットへ貼るとき用で、PDF と同じく生成物。PyMuPDF を使うので、
+無ければ `pip install pymupdf` を促して PDF だけで終了する（bot 本体の
+requirements.txt には入れない。この変換をするときだけ要る）。
 
 **フォントについて**: マニュアルは Zen Maru Gothic（SIL Open Font License）を
 指定している。CSS の @font-face は `local()` を先に見るので、OS にこの
@@ -131,6 +137,24 @@ def render(html: Path, pdf: Path, chrome: str) -> None:
         )
 
 
+def rasterize(pdf: Path, dpi: int) -> list[Path]:
+    """PDF をページごとの PNG にする。戻り値は書き出したファイル。"""
+    try:
+        import pymupdf  # type: ignore[import-not-found]
+    except ImportError as exc:  # pragma: no cover - 環境依存
+        raise RuntimeError(
+            "PNG の書き出しには PyMuPDF が要ります: pip install pymupdf"
+        ) from exc
+
+    written: list[Path] = []
+    with pymupdf.open(pdf) as doc:
+        for number, page in enumerate(doc, start=1):
+            out = pdf.with_name(f"{pdf.stem}-{number}.png")
+            page.get_pixmap(dpi=dpi).save(out)
+            written.append(out)
+    return written
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="docs/ の HTML マニュアルを PDF に変換する")
     parser.add_argument(
@@ -144,6 +168,17 @@ def main() -> int:
         "--install-font",
         action="store_true",
         help="Zen Maru Gothic をユーザーのフォントディレクトリへ入れてから変換する",
+    )
+    parser.add_argument(
+        "--png",
+        action="store_true",
+        help="PDF に加えてページごとの PNG（<名前>-1.png …）も書き出す",
+    )
+    parser.add_argument(
+        "--dpi",
+        type=int,
+        default=150,
+        help="--png の解像度（既定: 150。A4 なら 1240x1754 px）",
     )
     args = parser.parse_args()
 
@@ -164,6 +199,16 @@ def main() -> int:
         return 1
 
     print(f"{html} -> {pdf}  ({pdf.stat().st_size / 1024:.0f} KB)")
+
+    if args.png:
+        try:
+            pages = rasterize(pdf, args.dpi)
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        for page in pages:
+            print(f"{pdf} -> {page}  ({page.stat().st_size / 1024:.0f} KB)")
+
     return 0
 
 
