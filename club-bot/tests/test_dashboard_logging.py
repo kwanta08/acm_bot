@@ -53,6 +53,34 @@ def test_setup_logging_accepts_a_filename(tmp_path):
         root.handlers = saved
 
 
+def test_setup_logging_survives_unwritable_log_dir(tmp_path):
+    """ログ先に書けなくてもプロセスを落とさない（本番 502 の再発防止）。
+
+    v24 デプロイで実際に起きた障害: LOG_DIR 未設定の旧 systemd ユニット
+    （ProtectHome=read-only）では相対 `logs/` の makedirs が失敗し、
+    create_app() が import 時に例外 → uvicorn 即死 → Restart=always の
+    再起動ループ → Caddy が 502 を返し続けた。
+    ログはコンソールのみに落として、サービス自体は起動を続けること。
+    """
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("x")  # ファイルを親に持つパスは makedirs が必ず失敗する
+    root, saved = _fresh_root()
+    try:
+        with mock.patch.dict(os.environ, {"LOG_DIR": str(blocker / "logs")}):
+            logger = setup_logging(filename="dashboard.log")
+        assert logger is not None
+        assert any(isinstance(h, logging.StreamHandler) for h in root.handlers), (
+            "コンソールハンドラまで失っている"
+        )
+        assert not any(isinstance(h, RotatingFileHandler) for h in root.handlers), (
+            "書けないはずのファイルハンドラが登録されている"
+        )
+    finally:
+        for h in root.handlers:
+            h.close()
+        root.handlers = saved
+
+
 def test_bot_default_filename_is_still_bot_log():
     """bot 側の既定は bot.log のまま（呼び出し側の変更が不要）。"""
     sig = inspect.signature(setup_logging)
