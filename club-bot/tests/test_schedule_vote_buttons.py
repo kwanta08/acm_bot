@@ -264,7 +264,7 @@ def test_create_posts_one_board_with_candidate_buttons():
     async def _main():
         db = await _make_db()
         try:
-            cog, channel, schedule_id = await _create_via_command(db)
+            _cog, channel, schedule_id = await _create_via_command(db)
 
             boards = [m for m in channel.sent if m["embed"] is not None]
             assert len(boards) == 1, "候補ごとにメッセージが分かれている（縦積みに戻っている）"
@@ -300,7 +300,7 @@ def test_create_splits_boards_beyond_25_options():
     async def _main():
         db = await _make_db()
         try:
-            cog, channel, schedule_id = await _create_via_command(db, option_count=30)
+            _cog, channel, _schedule_id = await _create_via_command(db, option_count=30)
 
             boards = [m for m in channel.sent if m["embed"] is not None]
             assert len(boards) == 2, "25 件を超えた候補が1通に詰め込まれている"
@@ -375,7 +375,7 @@ def test_reaction_style_opt_out_keeps_the_legacy_flow():
     async def _main():
         db = await _make_db()
         try:
-            cog, channel, schedule_id = await _create_via_command(db, style="reaction")
+            _cog, channel, schedule_id = await _create_via_command(db, style="reaction")
 
             vote_messages = [m for m in channel.sent if m["embed"] is not None]
             assert len(vote_messages) == 2, "reaction 設定なのに候補ごとのメッセージでない"

@@ -17,6 +17,7 @@ select_unanswered_targets は、ギルドも DB も触らない純関数とし�
 from __future__ import annotations
 
 import re
+from typing import ClassVar
 
 import discord
 from discord import app_commands
@@ -201,7 +202,7 @@ class VoteStatusButton(
 ):
     """ステータス選択（ephemeral）の 参加/未定/不参加/取り消し ボタン。"""
 
-    STYLES = {
+    STYLES: ClassVar[dict[str, discord.ButtonStyle]] = {
         "ok": discord.ButtonStyle.success,
         "ng": discord.ButtonStyle.danger,
     }
