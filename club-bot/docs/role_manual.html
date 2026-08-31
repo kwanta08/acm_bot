@@ -264,7 +264,7 @@
       <li><strong>第2章　班長</strong> <span class="badge b2">L2</span><span class="sub">　― 日程を決める・タスクと進捗を回す</span></li>
       <li><strong>第3章　幹部</strong> <span class="badge b3">L3</span><span class="sub">　― 名簿を整える・ログを確認する</span></li>
       <li><strong>第4章　Bot管理者</strong> <span class="badge b4">L4</span><span class="sub">　― 最初の設定・年度替わり・データ管理</span></li>
-      <li><strong>第5章　Web ダッシュボード</strong><span class="sub">　― ブラウザで表を見る・直す（任意の機能）</span></li>
+      <li><strong>第5章　Web ダッシュボード</strong><span class="sub">　― ブラウザで表を見る・直す・CSV に出す</span></li>
       <li><strong>付録</strong><span class="sub">　― 自動で届く通知・困ったとき・全コマンド早見表</span></li>
     </ol>
   </div>
@@ -1559,7 +1559,7 @@
     <h1>Web ダッシュボード</h1>
     <div class="who">
       Discord の外から、<strong>ブラウザで表を見る・直す</strong>ための画面です。<br>
-      サークルによっては使っていないこともあります（任意の機能です）。
+      運営が公開している画面に、<strong>Discord のアカウントでそのままログイン</strong>できます。
     </div>
   </div>
 
@@ -1594,17 +1594,34 @@
 
   <h2>5-2　使いはじめる</h2>
   <p>
-    <strong>アカウントを新しく作る必要はありません。</strong>
-    サークルの管理者から教えてもらった URL を開き、<strong>「Discord でログイン」</strong>を押すだけです。
-    パスワードをダッシュボードへ入力することはありません（Discord の画面で許可するだけです）。
-    ログインすると、<strong>自分が入っているサーバーだけ</strong>が選択肢に出ます。
+    ダッシュボードは<strong>運営が1つ公開しています。</strong>
+    サークルごとに用意する必要はありません。次のアドレスを開いてください。
   </p>
 
-  <div class="box warn">
-    <span class="t">URL はサークルごとに違います</span>
-    このBotを使っているサークルが、それぞれ自分のところで動かす仕組みです。
-    <strong>URL が配られていなければ、そのサークルはダッシュボードを使っていません。</strong>
-    Discord のコマンドだけで全部の機能が使えるので、無くても困りません。
+  <div class="figure">
+    <svg viewBox="0 0 700 108" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <rect x="2" y="8" width="696" height="92" rx="10" fill="#f4f7fb" stroke="#2f7fd1" stroke-width="1.8"/>
+      <text x="350" y="34" font-size="10.4" fill="#5d7481" text-anchor="middle">ブラウザで開くアドレス</text>
+      <rect x="120" y="44" width="460" height="34" rx="17" fill="#ffffff" stroke="#cdd8dd"/>
+      <text x="350" y="66" font-size="13.5" font-weight="700" fill="#2467ab" text-anchor="middle">https://dashboard.aircraftmakers.jp</text>
+      <text x="350" y="94" font-size="9.4" fill="#5d7481" text-anchor="middle">スマホでもパソコンでも同じアドレスです</text>
+    </svg>
+    <div class="figcap">図5-2　ダッシュボードのアドレス。ブックマークしておくと便利です。</div>
+  </div>
+
+  <p>
+    <strong>アカウントを新しく作る必要はありません。</strong>
+    <strong>「Discord でログイン」</strong>を押すだけです。
+    パスワードをダッシュボードへ入力することはありません（Discord の画面で「許可」を押すだけです）。
+  </p>
+
+  <div class="box tip">
+    <span class="t">誰でも開けますが、見えるのは自分のサーバーだけです</span>
+    アドレスは公開されていて誰でもログインできます。ただしログイン後に選べるのは、
+    <strong>自分が入っていて、なおかつ Bot も入っているサーバー</strong>だけです。
+    他のサークルのデータが見えることはありません。
+    条件に合うサーバーが1つも無い人は、ログインしても何も表示されません。
   </div>
 
 </div>
@@ -1613,9 +1630,9 @@
   <h2>5-3　画面の見かた</h2>
 
   <div class="figure">
-    <svg viewBox="0 0 700 322" xmlns="http://www.w3.org/2000/svg"
+    <svg viewBox="0 0 700 330" xmlns="http://www.w3.org/2000/svg"
          font-family="Zen Maru Gothic, sans-serif">
-      <rect x="4" y="8" width="692" height="306" rx="10" fill="#ffffff" stroke="#c9d5da" stroke-width="1.5"/>
+      <rect x="4" y="8" width="692" height="314" rx="10" fill="#ffffff" stroke="#c9d5da" stroke-width="1.5"/>
 
       <!-- ブラウザのバー -->
       <path d="M4 18 a10 10 0 0 1 10 -10 h672 a10 10 0 0 1 10 10 v18 h-692 z" fill="#eceff1"/>
@@ -1623,86 +1640,87 @@
       <circle cx="39" cy="26" r="4.5" fill="#d5dade"/>
       <circle cx="54" cy="26" r="4.5" fill="#d5dade"/>
       <rect x="72" y="18" width="300" height="16" rx="8" fill="#ffffff"/>
-      <text x="84" y="30" font-size="8.6" fill="#9aa3ab">https://（サークルごとの URL）</text>
-
-      <!-- アプリのヘッダ -->
+      <text x="84" y="30" font-size="8.4" fill="#5d7481">https://dashboard.aircraftmakers.jp</text>
       <line x1="4" y1="36" x2="696" y2="36" stroke="#dde4e8"/>
-      <text x="20" y="58" font-size="11" font-weight="700" fill="#0b4f6c">サークル名 ダッシュボード</text>
-      <rect x="404" y="44" width="150" height="20" rx="5" fill="#f1f5f7" stroke="#cdd8dd"/>
-      <text x="414" y="58" font-size="9" fill="#23303a">サーバーを選ぶ ▾</text>
-      <rect x="562" y="44" width="60" height="20" rx="5" fill="#f1f5f7" stroke="#cdd8dd"/>
-      <text x="572" y="58" font-size="9" fill="#23303a">テーマ</text>
-      <rect x="630" y="44" width="52" height="20" rx="5" fill="#f1f5f7" stroke="#cdd8dd"/>
-      <text x="640" y="58" font-size="9" fill="#23303a">アカ…</text>
-      <line x1="4" y1="72" x2="696" y2="72" stroke="#dde4e8"/>
 
-      <!-- サイドバー -->
-      <rect x="4" y="72" width="150" height="242" fill="#f7fafb"/>
-      <line x1="154" y1="72" x2="154" y2="314" stroke="#dde4e8"/>
-      <text x="18" y="92" font-size="9" font-weight="700" fill="#9aa3ab">表の種類</text>
-      <rect x="12" y="100" width="134" height="20" rx="5" fill="#2f7fd1"/>
-      <text x="24" y="114" font-size="9.4" font-weight="700" fill="#fff">出欠回答</text>
-      <text x="24" y="136" font-size="9.4" fill="#23303a">メンバー</text>
-      <text x="24" y="156" font-size="9.4" fill="#23303a">班</text>
-      <text x="24" y="176" font-size="9.4" fill="#23303a">日程調整</text>
-      <text x="24" y="196" font-size="9.4" fill="#23303a">桁巻き積層記録</text>
-      <text x="24" y="216" font-size="9.4" fill="#23303a">機体進捗</text>
-      <text x="24" y="236" font-size="9.4" fill="#23303a">在庫（品目）</text>
-      <text x="24" y="256" font-size="9.4" fill="#9aa3ab">…ほか</text>
-      <text x="18" y="292" font-size="8.4" fill="#9aa3ab">スマホでは画面の下に</text>
-      <text x="18" y="304" font-size="8.4" fill="#9aa3ab">横並びで出ます</text>
+      <!-- 左サイドバー -->
+      <rect x="4" y="36" width="176" height="286" fill="#f7fafb"/>
+      <line x1="180" y1="36" x2="180" y2="322" stroke="#dde4e8"/>
+      <text x="18" y="56" font-size="9.6" font-weight="700" fill="#0b4f6c">鳥人間サークル運営 Bot</text>
+      <rect x="16" y="64" width="148" height="22" rx="11" fill="#e8f2fb" stroke="#2f7fd1"/>
+      <text x="28" y="79" font-size="9" fill="#2467ab">◈ サーバーを選ぶ ▾</text>
+      <text x="18" y="102" font-size="8.6" font-weight="700" fill="#9aa3ab">表の一覧</text>
+      <rect x="12" y="108" width="156" height="20" rx="5" fill="#2f7fd1"/>
+      <text x="24" y="122" font-size="9.2" font-weight="700" fill="#fff">桁巻き積層記録</text>
+      <text x="24" y="143" font-size="9.2" fill="#23303a">メンバー</text>
+      <text x="24" y="162" font-size="9.2" fill="#23303a">班</text>
+      <text x="24" y="181" font-size="9.2" fill="#23303a">日程調整</text>
+      <text x="24" y="200" font-size="9.2" fill="#23303a">出欠回答</text>
+      <text x="24" y="219" font-size="9.2" fill="#23303a">機体進捗</text>
+      <text x="24" y="238" font-size="9.2" fill="#23303a">在庫（品目）</text>
+      <text x="24" y="257" font-size="9.2" fill="#9aa3ab">…ほか</text>
+      <!-- サイドバー下部 -->
+      <line x1="16" y1="272" x2="164" y2="272" stroke="#e3eaed"/>
+      <rect x="16" y="280" width="66" height="18" rx="9" fill="#eef2f4"/>
+      <text x="49" y="293" font-size="8.4" fill="#5d7481" text-anchor="middle">テーマ</text>
+      <rect x="88" y="280" width="76" height="18" rx="9" fill="#eef2f4"/>
+      <text x="126" y="293" font-size="8.4" fill="#5d7481" text-anchor="middle">アカウント</text>
+      <text x="18" y="314" font-size="7.8" fill="#9aa3ab">スマホでは画面の下に並びます</text>
 
-      <!-- シートタブ -->
-      <text x="168" y="90" font-size="9" font-weight="700" fill="#9aa3ab">シートタブ（予定ごと）</text>
-      <rect x="168" y="96" width="118" height="20" rx="10" fill="#e8f2fb" stroke="#2f7fd1"/>
-      <text x="227" y="110" font-size="9" font-weight="700" fill="#2467ab" text-anchor="middle">6月度 定例MTG</text>
-      <rect x="292" y="96" width="106" height="20" rx="10" fill="#f1f5f7" stroke="#cdd8dd"/>
-      <text x="345" y="110" font-size="9" fill="#5d7481" text-anchor="middle">春合宿の日程</text>
-      <rect x="404" y="96" width="96" height="20" rx="10" fill="#f1f5f7" stroke="#cdd8dd"/>
-      <text x="452" y="110" font-size="9" fill="#5d7481" text-anchor="middle">機体審査会</text>
-      <text x="512" y="110" font-size="9" fill="#9aa3ab">…</text>
+      <!-- タイトル行（CSV はここ） -->
+      <text x="196" y="60" font-size="11.5" font-weight="700" fill="#0b4f6c">桁巻き積層記録</text>
+      <text x="196" y="76" font-size="8.4" fill="#9aa3ab">誰がいつ何層巻いたかの記録</text>
+      <rect x="566" y="48" width="116" height="22" rx="6" fill="#1e7a51"/>
+      <text x="624" y="63" font-size="8.8" font-weight="700" fill="#fff" text-anchor="middle">CSV をダウンロード</text>
+
+      <!-- シートタブ（桁ごと） -->
+      <text x="196" y="98" font-size="8.4" font-weight="700" fill="#9aa3ab">シートタブ（桁ごと）</text>
+      <rect x="196" y="104" width="86" height="20" rx="10" fill="#e8f2fb" stroke="#2f7fd1"/>
+      <text x="239" y="118" font-size="8.8" font-weight="700" fill="#2467ab" text-anchor="middle">主桁</text>
+      <rect x="288" y="104" width="86" height="20" rx="10" fill="#f1f5f7" stroke="#cdd8dd"/>
+      <text x="331" y="118" font-size="8.8" fill="#5d7481" text-anchor="middle">後縁桁</text>
+      <rect x="380" y="104" width="86" height="20" rx="10" fill="#f1f5f7" stroke="#cdd8dd"/>
+      <text x="423" y="118" font-size="8.8" fill="#5d7481" text-anchor="middle">尾翼桁</text>
+      <text x="476" y="118" font-size="8.8" fill="#9aa3ab">…</text>
 
       <!-- ツールバー -->
-      <rect x="168" y="126" width="180" height="20" rx="5" fill="#ffffff" stroke="#cdd8dd"/>
-      <text x="178" y="140" font-size="8.8" fill="#9aa3ab">🔍 この表を検索</text>
-      <rect x="356" y="126" width="96" height="20" rx="5" fill="#f1f5f7" stroke="#cdd8dd"/>
-      <text x="365" y="140" font-size="8.8" fill="#23303a">表示件数: 50 ▾</text>
-      <rect x="566" y="126" width="116" height="20" rx="5" fill="#1e7a51"/>
-      <text x="624" y="140" font-size="8.8" font-weight="700" fill="#fff" text-anchor="middle">CSV をダウンロード</text>
+      <rect x="196" y="134" width="180" height="20" rx="5" fill="#ffffff" stroke="#cdd8dd"/>
+      <text x="206" y="148" font-size="8.4" fill="#9aa3ab">この表を検索</text>
+      <rect x="384" y="134" width="96" height="20" rx="5" fill="#f1f5f7" stroke="#cdd8dd"/>
+      <text x="393" y="148" font-size="8.4" fill="#23303a">表示件数: 50 ▾</text>
 
       <!-- 表 -->
-      <rect x="168" y="158" width="514" height="22" fill="#0b4f6c"/>
-      <text x="180" y="173" font-size="8.8" fill="#fff">候補日時</text>
-      <text x="300" y="173" font-size="8.8" fill="#fff">参加</text>
-      <text x="392" y="173" font-size="8.8" fill="#fff">不参加</text>
-      <text x="484" y="173" font-size="8.8" fill="#fff">未定</text>
-      <text x="576" y="173" font-size="8.8" fill="#fff">未回答</text>
-      <g font-size="8.6" fill="#23303a">
-        <rect x="168" y="180" width="514" height="22" fill="#f5f9fa"/>
-        <text x="180" y="195">2026-07-03 19:00:00</text>
-        <text x="300" y="195">参加 (4)</text>
-        <text x="392" y="195">不参加 (2)</text>
-        <text x="484" y="195">未定 (1)</text>
-        <text x="576" y="195">未回答 (3)</text>
-        <rect x="168" y="202" width="514" height="22" fill="#ffffff"/>
-        <text x="180" y="217">2026-07-04 19:00:00</text>
-        <text x="300" y="217">参加 (6)</text>
-        <text x="392" y="217">不参加 (1)</text>
-        <text x="484" y="217">未定 (0)</text>
-        <text x="576" y="217">未回答 (3)</text>
-        <rect x="168" y="224" width="514" height="22" fill="#f5f9fa"/>
-        <text x="180" y="239">2026-07-05 13:00:00</text>
-        <text x="300" y="239">参加 (2)</text>
-        <text x="392" y="239">不参加 (2)</text>
-        <text x="484" y="239">未定 (3)</text>
-        <text x="576" y="239">未回答 (3)</text>
+      <rect x="196" y="166" width="486" height="20" fill="#0b4f6c"/>
+      <text x="206" y="180" font-size="8.4" fill="#fff">作業日</text>
+      <text x="300" y="180" font-size="8.4" fill="#fff">作業者</text>
+      <text x="396" y="180" font-size="8.4" fill="#fff">層番号</text>
+      <text x="470" y="180" font-size="8.4" fill="#fff">作業時間</text>
+      <text x="566" y="180" font-size="8.4" fill="#fff">メモ ✎</text>
+      <g font-size="8.2" fill="#23303a">
+        <rect x="196" y="186" width="486" height="19" fill="#f5f9fa"/>
+        <text x="206" y="199">2026-06-14 15:20:00</text>
+        <text x="300" y="199">たろう</text>
+        <text x="396" y="199">3</text>
+        <text x="470" y="199">1時間20分</text>
+        <rect x="196" y="205" width="486" height="19" fill="#ffffff"/>
+        <text x="206" y="218">2026-06-13 16:05:00</text>
+        <text x="300" y="218">はなこ</text>
+        <text x="396" y="218">2</text>
+        <text x="470" y="218">1時間40分</text>
+        <rect x="196" y="224" width="486" height="19" fill="#f5f9fa"/>
+        <text x="206" y="237">2026-06-11 14:00:00</text>
+        <text x="300" y="237">たろう</text>
+        <text x="396" y="237">1</text>
+        <text x="470" y="237">2時間05分</text>
       </g>
-      <rect x="168" y="158" width="514" height="88" fill="none" stroke="#cdd8dd"/>
-      <text x="168" y="264" font-size="8.6" fill="#5d7481">セルの中には、その人たちの表示名が縦に並びます（人数は先頭の数字）。</text>
-      <text x="168" y="280" font-size="8.6" fill="#5d7481">✎ が付いた列はクリックして直せます。直した記録は必ず操作ログに残ります。</text>
-      <text x="168" y="300" font-size="8.6" fill="#9aa3ab">※ 画面はイメージです。表の名前や並びはサークルの設定によって変わります。</text>
+      <rect x="196" y="166" width="486" height="77" fill="none" stroke="#cdd8dd"/>
+
+      <text x="196" y="262" font-size="8.4" fill="#5d7481">✎ が付いた列はクリックして直せます。直した記録は必ず操作ログに残ります。</text>
+      <text x="196" y="278" font-size="8.4" fill="#5d7481">人の名前は Discord の ID ではなく、そのサーバーでの表示名で出ます。</text>
+      <text x="196" y="300" font-size="8.2" fill="#9aa3ab">※ 画面はイメージです。表の名前や並びはサークルの設定によって変わります。</text>
+      <text x="196" y="315" font-size="8.2" fill="#9aa3ab">※ 出欠回答だけは集計されたピボット表になり、検索欄は出ません。</text>
     </svg>
-    <div class="figcap">図5-2　画面の構成。左で「表の種類」、上のタブで「どの予定か」を選びます。</div>
+    <div class="figcap">図5-3　画面の構成。左で表を選び、上のタブで「どの桁か」を切り替えます。</div>
   </div>
 
   <h2>5-4　ダッシュボードの権限は「3段階」</h2>
@@ -1758,7 +1776,7 @@
         幹部ロールを持っているだけでは「閲覧のみ」です（サーバー管理権限か名簿の班長フラグがあれば別です）。
       </text>
     </svg>
-    <div class="figcap">図5-3　Discord とダッシュボードの権限の対応。幹部の扱いだけがずれます。</div>
+    <div class="figcap">図5-4　Discord とダッシュボードの権限の対応。幹部の扱いだけがずれます。</div>
   </div>
 
 </div>
@@ -1843,7 +1861,7 @@
   <h2>5-7　安全のしくみ</h2>
   <table>
     <tr><th style="width:32%;">気になること</th><th>どうなっているか</th></tr>
-    <tr><td>他のサークルのデータは見える？</td><td><strong>見えません。</strong> URL を書き換えても、ログイン時に確認できたサーバー以外は拒否されます</td></tr>
+    <tr><td>誰でも開けるのに、他のサークルのデータは見えない？</td><td><strong>見えません。</strong> ログインできても、選べるのは自分が入っているサーバーだけです。URL を書き換えても、ログイン時に確認できたサーバー以外は拒否されます</td></tr>
     <tr><td>Bot を乗っ取られない？</td><td>ダッシュボードは <strong>Bot のトークンを持っていません</strong>。Discord へメッセージを送ることもできません</td></tr>
     <tr><td>パスワードは渡すの？</td><td>渡しません。Discord のログイン画面で許可するだけです</td></tr>
     <tr><td>班長を外したのに編集できる？</td><td>班長フラグの変更は<strong>すぐ反映されます</strong>。ただしサーバーからの退会と「サーバー管理権限」の付け外しは、最大24時間ほど古い状態が残ります（ログインし直せば即時です）</td></tr>
