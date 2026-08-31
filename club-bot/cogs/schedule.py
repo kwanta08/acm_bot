@@ -364,7 +364,7 @@ class Schedule(commands.Cog):
 
         if ui_style == "buttons":
             # 全候補を1メッセージ（投票ボード）に集約し、候補ボタンで投票する。
-            # 候補が 25 件を超える分はページ分割（Embed field・ボタンとも上限25）
+            # 候補が 25 件を超える分はページ分割（ボタンの上限が25）
             await self._post_vote_boards(
                 guild_id,
                 schedule,
@@ -374,6 +374,7 @@ class Schedule(commands.Cog):
                 mention,
                 roster_active,
                 roster_retired,
+                emojis=svc.get_schedule_emojis(gconf, interaction.guild),
             )
         else:
             # 候補ごとに1メッセージ投稿（仕様 11.2.3 の従来方式）
@@ -683,6 +684,8 @@ class Schedule(commands.Cog):
                 options[i : i + svc.MAX_BOARD_OPTIONS]
                 for i in range(0, len(options), svc.MAX_BOARD_OPTIONS)
             ] or [[]]
+            gconf = await config.for_guild(guild_id)
+            emojis = svc.get_schedule_emojis(gconf, interaction.guild)
             for page, chunk in enumerate(chunks, start=1):
                 embed = await svc.build_vote_board_embed(
                     self.repo,
@@ -695,6 +698,7 @@ class Schedule(commands.Cog):
                     roster_retired_ids=roster_retired,
                     page=page,
                     total_pages=len(chunks),
+                    emojis=emojis,
                 )
                 await interaction.followup.send(embed=embed, ephemeral=True)
             return
@@ -1313,6 +1317,7 @@ class Schedule(commands.Cog):
         mention: str | None,
         roster_active: set[str],
         roster_retired: set[str],
+        emojis: dict | None = None,
     ) -> int:
         """投票ボードを投稿する（候補 25 件ごとに1メッセージ）。
 
@@ -1337,6 +1342,7 @@ class Schedule(commands.Cog):
                 roster_retired_ids=roster_retired,
                 page=page,
                 total_pages=len(chunks),
+                emojis=emojis,
             )
             view = discord.ui.View(timeout=None)
             for opt in chunk:
@@ -1490,6 +1496,7 @@ class Schedule(commands.Cog):
 
         if roster_active is None or roster_retired is None:
             roster_active, roster_retired = await self._roster_ids(guild_id)
+        gconf = await config.for_guild(guild_id)
         embed = await svc.build_vote_board_embed(
             self.repo,
             guild_id,
@@ -1501,6 +1508,7 @@ class Schedule(commands.Cog):
             roster_retired_ids=roster_retired,
             page=page,
             total_pages=max(len(board_ids), 1),
+            emojis=svc.get_schedule_emojis(gconf, getattr(channel, "guild", None)),
         )
         try:
             msg = await channel.fetch_message(int(message_id))

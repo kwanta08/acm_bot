@@ -245,8 +245,21 @@ async def _seed_board(db, *, closed: bool = False, message_id: str | None = "100
 # =====================================================================
 # 1. 作成（ボード投稿）
 # =====================================================================
-def test_create_posts_one_board_with_inline_candidates():
-    """既定（buttons）は候補2件でもメッセージ1通。候補は inline field。"""
+def _candidate_lines(embed) -> list[str]:
+    """ボード description のうち候補の集計行（**日付** で始まる行）を返す。"""
+    return [
+        line for line in (embed.description or "").splitlines() if line.startswith("**2026")
+    ]
+
+
+def test_create_posts_one_board_with_candidate_buttons():
+    """既定（buttons）は候補2件でもメッセージ1通。
+
+    候補の集計は **inline field ではなく description の1行ずつ**。
+    Discord モバイルは inline field を縦積みにするため、field で
+    横並びを作るとスマホで候補が縦の壁に戻る。横並びの本体は
+    候補ボタン（ボタン行はモバイルでも横に並ぶ）。
+    """
 
     async def _main():
         db = await _make_db()
@@ -256,8 +269,12 @@ def test_create_posts_one_board_with_inline_candidates():
             boards = [m for m in channel.sent if m["embed"] is not None]
             assert len(boards) == 1, "候補ごとにメッセージが分かれている（縦積みに戻っている）"
             embed = boards[0]["embed"]
-            assert len(embed.fields) == 2
-            assert all(f.inline for f in embed.fields), "候補が inline field でない"
+            assert len(embed.fields) == 0, (
+                "候補が inline field に戻っている（モバイルで縦積みになる）"
+            )
+            lines = _candidate_lines(embed)
+            assert len(lines) == 2, "候補の集計行が description に無い"
+            assert all("✅ 0" in line and "❓ 0" in line and "❌ 0" in line for line in lines)
 
             view = boards[0]["view"]
             assert view is not None, "投票ボタンが付いていない"
@@ -278,7 +295,7 @@ def test_create_posts_one_board_with_inline_candidates():
 
 
 def test_create_splits_boards_beyond_25_options():
-    """候補 26 件以上はページ分割（field・ボタンとも上限 25）。"""
+    """候補 26 件以上はページ分割（ボタンの上限 25）。"""
 
     async def _main():
         db = await _make_db()
@@ -289,7 +306,8 @@ def test_create_splits_boards_beyond_25_options():
             assert len(boards) == 2, "25 件を超えた候補が1通に詰め込まれている"
             assert len(boards[0]["view"].children) == svc.MAX_BOARD_OPTIONS
             assert len(boards[1]["view"].children) == 5
-            assert len(boards[0]["embed"].fields) == svc.MAX_BOARD_OPTIONS
+            assert len(_candidate_lines(boards[0]["embed"])) == svc.MAX_BOARD_OPTIONS
+            assert len(_candidate_lines(boards[1]["embed"])) == 5
             assert "（1/2）" in boards[0]["embed"].title
             assert "（2/2）" in boards[1]["embed"].title
         finally:
@@ -342,6 +360,15 @@ def test_mention_is_only_on_the_first_board():
     run(_main())
 
 
+def test_board_line_uses_the_guild_emojis():
+    """集計行の絵文字はギルド別設定を反映する（カスタム絵文字は本文で描画される）。"""
+    line = svc.format_board_line(
+        "10/1", 2, 1, 0, {"ok": "<:maru:1>", "maybe": "❓", "ng": "<:batu:2>"}
+    )
+    assert line == "**10/1**　<:maru:1> 2　❓ 1　<:batu:2> 0"
+    assert svc.format_board_line("10/2", 0, 0, 0) == "**10/2**　✅ 0　❓ 0　❌ 0"
+
+
 def test_reaction_style_opt_out_keeps_the_legacy_flow():
     """SCHEDULE_UI_STYLE='reaction' なら従来どおり候補ごとに1メッセージ。"""
 
@@ -386,9 +413,13 @@ def test_apply_vote_writes_the_vote_and_redraws_the_board():
             assert "参加" in interaction.edited[-1]["content"]
 
             assert board.edits, "投票ボードが描き直されていない"
-            fields = board.edits[-1]["embed"].fields
-            assert fields[0].value.splitlines()[0].startswith("参加 1"), (
-                "ボードの集計に票が反映されていない"
+            desc = board.edits[-1]["embed"].description or ""
+            opt1_line = next(
+                line for line in desc.splitlines() if line.startswith("**10/1 18:00**")
+            )
+            assert "✅ 1" in opt1_line, "ボードの集計に票が反映されていない"
+            assert "user42" not in desc and "<@42>" not in desc, (
+                "ボードに名前が出ている（名前は候補ボタンの詳細で見せる）"
             )
         finally:
             await db.close()

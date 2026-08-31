@@ -26,14 +26,9 @@ DEFAULT_STATUS_TO_EMOJI = {
     "ng": "❌",
 }
 
-# 投票ボード（ボタン式）の1メッセージあたり候補数。Embed の field と
-# ボタンの上限がどちらも 25 なので、これを超える分はページ分割する
+# 投票ボード（ボタン式）の1メッセージあたり候補数（ボタンの上限）。
+# これを超える分はページ分割する
 MAX_BOARD_OPTIONS = 25
-
-# 候補1つの field に列挙する名前の数。inline 3列の狭い幅でも読め、
-# 25候補あっても Embed 全体の 6000 文字に収まる値にする。
-# 全員分は候補ボタンを押したときの詳細（ephemeral）と締切後の集計で見せる
-BOARD_NAME_LIMIT = 5
 
 # 集計サマリーの候補1つに列挙する名前の数。これを超えると field の
 # 1024 文字制限に当たり、集計サマリーごと送信に失敗する（400）
@@ -297,6 +292,22 @@ async def _bucket_names(
     return ok_users, ng_users, maybe_users
 
 
+def format_board_line(
+    label: str, ok: int, maybe: int, ng: int, emojis: dict[str, Any] | None = None
+) -> str:
+    """投票ボードの候補1つ分（1行）を整形する。
+
+    **候補1つ = 1行**にするのは Discord モバイルの制約のため。inline field は
+    モバイルでは内容量に関係なく縦積み（1列）にされるので、field で
+    横並びを作ってもスマホでは崩れる。1行のコンパクト表示なら
+    どのクライアントでも同じ形で読める。
+    絵文字はギルド別設定（カスタム絵文字は `<:name:id>` で Embed 本文に
+    そのまま描画される）。
+    """
+    e = {**DEFAULT_STATUS_TO_EMOJI, **(emojis or {})}
+    return f"**{label}**　{e['ok']} {ok}　{e['maybe']} {maybe}　{e['ng']} {ng}"
+
+
 async def build_vote_board_embed(
     repo: ScheduleRepository,
     guild_id: int,
@@ -309,12 +320,18 @@ async def build_vote_board_embed(
     roster_retired_ids: set[str] | None = None,
     page: int = 1,
     total_pages: int = 1,
+    emojis: dict[str, Any] | None = None,
 ) -> discord.Embed:
-    """ボタン投票の投票ボード Embed（全候補を1メッセージに横並びで集約）。
+    """ボタン投票の投票ボード Embed（全候補を1メッセージに集約）。
 
-    候補は inline field（Discord は最大3列/行で横に並べる）。名前は
-    BOARD_NAME_LIMIT で打ち切り、全員分は候補ボタンを押したときの詳細
-    （build_option_embed）と締切後の集計サマリーで見せる。
+    候補ごとの集計は **description に1行ずつ**置く（format_board_line）。
+    以前は inline field で3列に並べていたが、Discord モバイルは inline
+    field を縦積みにするため、スマホでは候補が縦の壁に戻ってしまった。
+    横並びの本体はメッセージ下部の**候補ボタン**（ボタン行はモバイルでも
+    横に並ぶ）が担い、Embed 側は1候補1行で薄く保つ。
+
+    名前はボードに出さない。全員分の顔ぶれは候補ボタンを押したときの
+    詳細（build_option_embed）と締切後の集計サマリーで見せる。
 
     ``options`` は**このメッセージ（ページ）に載る分だけ**を渡す
     （最大 MAX_BOARD_OPTIONS。超える分は呼び出し側がページ分割する）。
@@ -345,17 +362,28 @@ async def build_vote_board_embed(
     lines.append(f"対象: {target_role_name} / 未回答（この予定）: {unanswered_count}")
     if schedule.get("description"):
         lines.append(str(schedule["description"]))
-    lines.append("**候補のボタンを押して出欠を回答してください。**")
-    embed.description = "\n".join(lines)
 
-    for opt in options[:MAX_BOARD_OPTIONS]:
-        votes = await repo.list_votes(guild_id, opt["option_id"])
-        ok_users, ng_users, maybe_users = await _bucket_names(bot, guild, votes)
-        embed.add_field(
-            name=str(opt["label"])[:100],
-            value=format_status_lines(ok_users, ng_users, maybe_users, BOARD_NAME_LIMIT),
-            inline=True,
-        )
+    if options:
+        lines.append("")
+        e = {**DEFAULT_STATUS_TO_EMOJI, **(emojis or {})}
+        lines.append(f"{e['ok']} 参加　{e['maybe']} 未定　{e['ng']} 不参加")
+        for opt in options[:MAX_BOARD_OPTIONS]:
+            votes = await repo.list_votes(guild_id, opt["option_id"])
+            counts = {"ok": 0, "maybe": 0, "ng": 0}
+            for v in votes:
+                if v["status"] in counts:
+                    counts[v["status"]] += 1
+            lines.append(
+                format_board_line(
+                    str(opt["label"]), counts["ok"], counts["maybe"], counts["ng"], emojis
+                )
+            )
+
+    lines.append("")
+    lines.append(
+        "**候補のボタンを押して出欠を回答してください**（名前の一覧もそこで見られます）。"
+    )
+    embed.description = "\n".join(lines)
     return embed
 
 
