@@ -150,8 +150,24 @@
   }
   .foot b { color: #fff; font-weight: 700; }
 
+  /* 連絡先バンド（裏面） */
+  .cta {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 20mm;
+    background: var(--navy); color: rgba(255,255,255,.84);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 14mm; gap: 6mm;
+  }
+  .cta .l { font-size: 8pt; line-height: 1.45; }
+  .cta .l .hl {
+    display: block; font-size: 12pt; font-weight: 700; color: #fff;
+    letter-spacing: .3px; margin-top: 1mm;
+  }
+  .cta .l .hl .id { color: var(--accent-l); }
+  .cta .r { font-size: 7.4pt; text-align: right; line-height: 1.5; }
+  .cta .r b { color: #fff; font-weight: 700; font-size: 8.2pt; }
+
   /* ============ 2ページ目 ============ */
-  .p2top { background: var(--navy); color: #fff; padding: 4.5mm 14mm 4mm; }
+  .p2top { background: var(--navy); color: #fff; padding: 4mm 14mm 3.6mm; }
   .p2top h2 { font-size: 14pt; font-weight: 700; letter-spacing: .4px; }
   .p2top p { font-size: 9pt; opacity: .82; margin-top: 1.6mm; }
 
@@ -173,7 +189,7 @@
   .pipe .box .cap { font-size: 7.4pt; color: var(--accent); font-weight: 700; letter-spacing: .6px; }
   .pipe .box .bd {
     background: #fff; border: 1px solid #c9dee4; border-radius: 3mm; padding: 2.2mm 2mm;
-    margin-top: 1.2mm; min-height: 12.5mm; display: flex; flex-direction: column;
+    margin-top: 1.2mm; min-height: 11.5mm; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 1mm;
   }
   .pipe .box .t1 { font-size: 8.8pt; font-weight: 700; color: var(--navy); line-height: 1.4; }
@@ -244,7 +260,7 @@
   .wgrid .c { color: var(--p); font-weight: 700; }
   .wgrid .m { color: var(--wmute); }
 
-  .dash-notes { display: grid; grid-template-columns: 1fr 1fr; gap: .6mm 5mm; margin-top: 2.6mm; }
+  .dash-notes { display: grid; grid-template-columns: 1fr 1fr; gap: .5mm 5mm; margin-top: 2.2mm; }
   .dash-notes li { list-style: none; font-size: 8pt; line-height: 1.5; color: var(--ink); padding-left: 4.4mm; position: relative; }
   .dash-notes li::before {
     content: ''; position: absolute; left: 0; top: 1.4mm; width: 2.4mm; height: 2.4mm;
@@ -261,7 +277,7 @@
   .safe .it { flex: 1; font-size: 7.6pt; color: var(--ink-soft); line-height: 1.45; border-left: 1px solid #bcd7de; padding-left: 3mm; }
   .safe .it b { display: block; color: var(--navy); font-size: 8pt; }
 
-  .note { font-size: 7.4pt; color: var(--ink-soft); margin-top: 2.4mm; line-height: 1.55; }
+  .note { font-size: 7.4pt; color: var(--ink-soft); margin-top: 2mm; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -392,7 +408,7 @@
         <div class="step">
           <div class="n">1</div>
           <h4>招待する</h4>
-          <p>招待URLを開いてサーバーを選ぶだけ。要求する権限は最小限で、<b>Administrator は求めません</b>。</p>
+          <p><b>X の DM で招待URLをお渡しします</b>。開いてサーバーを選ぶだけ。権限は最小限で、Administrator は求めません。</p>
           <svg class="arw" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
         </div>
         <div class="step">
@@ -422,7 +438,7 @@
 
   <div class="foot">
     <span><b>鳥人間サークル 統合運営 Discord Bot</b>　discord.py 2.x / Python 3.10+ / MIT License</span>
-    <span>github.com/kwanta08/acm_bot</span>
+    <span>X: <b>@kwa_2me</b>　/　github.com/kwanta08/acm_bot</span>
   </div>
 </section>
 
@@ -434,7 +450,7 @@
     <p>毎日つかうものから、年に数回のものまで。すべて Discord のスラッシュコマンドで。</p>
   </div>
 
-  <div class="pad" style="padding-top:6mm">
+  <div class="pad" style="padding-top:5mm">
 
     <div class="feat">
       <div class="f">
@@ -619,16 +635,17 @@
       </ul>
 
       <p class="note">
-        ※ 人物は ID ではなく<b>サーバーでの表示名</b>、日時は<b>日本時間</b>で表示。CSV は画面と同じ表示値で全件出力します。任意機能なので、動かさなくても Bot は通常どおり動きます（別プロセスなので <b>Web が落ちても Discord は止まりません</b>）。<br>
-        <b>表示・編集できるのは自分のサーバーのデータだけ</b>で、他のサーバーのデータは取得できません。
+        ※ 人物は ID ではなく<b>サーバーでの表示名</b>、日時は<b>日本時間</b>で表示し、CSV は全件出力します。任意機能なので動かさなくても Bot は通常どおり動きます（別プロセスなので <b>Web が落ちても Discord は止まりません</b>）。<b>表示・編集できるのは自分のサーバーのデータだけ</b>です。
       </p>
     </div>
 
   </div>
 
-  <div class="foot">
-    <span>現在<b>公開に向けて準備中</b>です。導入のご相談・招待URLの配布状況・取扱説明書はリポジトリで公開しています</span>
-    <span><b>github.com/kwanta08/acm_bot</b></span>
+  <div class="cta">
+    <span class="l">公開しました。導入のご相談・招待URLのご依頼は、お気軽にどうぞ
+      <span class="hl">X の DM へ　<span class="id">@kwa_2me</span></span>
+    </span>
+    <span class="r">取扱説明書・利用規約・プライバシーポリシー<br><b>github.com/kwanta08/acm_bot</b></span>
   </div>
 </section>
 
