@@ -10,7 +10,7 @@
 > | 項目 | 内容 |
 > |---|---|
 > | 運営者 | kwanta08 |
-> | 連絡先 | yoshiokakanta4@gmail.com |
+> | 連絡先 | [GitHub Issues](https://github.com/kwanta08/acm_bot/issues) |
 >
 > **このリポジトリを fork して自分でホストする場合は、上記と本文中の
 > 運営者名・連絡先を自分のものへ置き換えてください。** 置き換えずに公開すると、
@@ -130,7 +130,7 @@
 ## 12. 規約の変更
 
 運営者は本規約を変更することがあります。重要な変更を行う場合は、
-本Botの `#bot-log` チャンネルまたは yoshiokakanta4@gmail.com を通じて通知します。
+本Botの `#bot-log` チャンネル、または GitHub リポジトリ上で通知します。
 変更後も本Botの利用を継続した場合、変更後の規約に同意したものとみなします。
 
 ## 13. 準拠法・管轄
@@ -140,7 +140,7 @@
 
 ## 14. 問い合わせ
 
-本規約に関する問い合わせは yoshiokakanta4@gmail.com までお願いします。
+本規約に関する問い合わせは [GitHub Issues](https://github.com/kwanta08/acm_bot/issues) へお願いします。
 
 ---
 
