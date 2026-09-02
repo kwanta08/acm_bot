@@ -264,7 +264,7 @@
       <li><strong>第2章　班長</strong> <span class="badge b2">L2</span><span class="sub">　― 日程を決める・タスクと進捗を回す</span></li>
       <li><strong>第3章　幹部</strong> <span class="badge b3">L3</span><span class="sub">　― 名簿を整える・ログを確認する</span></li>
       <li><strong>第4章　Bot管理者</strong> <span class="badge b4">L4</span><span class="sub">　― 最初の設定・年度替わり・データ管理</span></li>
-      <li><strong>第5章　Web ダッシュボード</strong><span class="sub">　― ブラウザで表を見る・直す（任意の機能）</span></li>
+      <li><strong>第5章　Web ダッシュボード</strong><span class="sub">　― ブラウザで表を見る・直す・CSV に出す</span></li>
       <li><strong>付録</strong><span class="sub">　― 自動で届く通知・困ったとき・全コマンド早見表</span></li>
     </ol>
   </div>
@@ -605,6 +605,73 @@
   </div>
 </div>
 
+<div class="page">
+  <h2>0-6　タスク機能だけは、外部サービス（Todoist）が必要です</h2>
+  <p>
+    この Bot の機能のうち、<strong>タスク（<code>/task</code>）だけは Todoist という外部の
+    タスク管理サービスを土台にしています。</strong>
+    タスクの本体は Bot の中ではなく Todoist 側にあり、Bot はそれを読み書きしているだけです。
+    そのため <strong>Todoist をつないでいないサークルでは、タスク機能は一切使えません。</strong>
+    他の機能は Todoist が無くてもすべて使えます。
+  </p>
+
+  <div class="figure">
+    <svg viewBox="0 0 700 296" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <!-- 左：Todoist なしで使える -->
+      <text x="176" y="18" font-size="10.8" font-weight="700" fill="#1e7a51" text-anchor="middle">Todoist が無くても使える</text>
+      <rect x="6" y="26" width="340" height="166" rx="10" fill="#f2faf6" stroke="#2f9e6b" stroke-width="1.6"/>
+      <g font-size="10.2" fill="#23303a">
+        <text x="30" y="54">・日程調整と出欠</text>
+        <text x="30" y="76">・桁巻きの記録（<tspan font-weight="700">/layer</tspan>）</text>
+        <text x="30" y="98">・機体の進捗・重量・節目</text>
+        <text x="30" y="120">・資材の在庫（<tspan font-weight="700">/stock</tspan>）</text>
+        <text x="30" y="142">・メンバーと班の管理</text>
+        <text x="30" y="164">・年度の切り替え、データの書き出し</text>
+      </g>
+      <text x="176" y="184" font-size="9.6" font-weight="700" fill="#1e7a51" text-anchor="middle">＝ この説明書のほとんど</text>
+
+      <!-- 右：Todoist が要る -->
+      <text x="524" y="18" font-size="10.8" font-weight="700" fill="#b76c0d" text-anchor="middle">Todoist をつないで初めて使える</text>
+      <rect x="354" y="26" width="340" height="166" rx="10" fill="#fff8ef" stroke="#e0a94e" stroke-width="1.6"/>
+      <g font-size="10.2" fill="#23303a">
+        <text x="378" y="54">・<tspan font-weight="700">/task</tspan> のすべて（追加・一覧・完了・優先度…）</text>
+        <text x="378" y="76">・<tspan font-weight="700">/today</tspan>（今日やること）</text>
+        <text x="378" y="98">・毎朝 8:30 と 21:00 のタスク通知</text>
+        <text x="378" y="120">・タスクの CSV 出力（<tspan font-weight="700">/report export-tasks</tspan>）</text>
+        <text x="378" y="142">・進捗ツリーと Todoist の紐付け</text>
+        <text x="378" y="164">　（<tspan font-weight="700">/progress setup</tspan>）</text>
+      </g>
+      <text x="524" y="184" font-size="9.6" font-weight="700" fill="#b76c0d" text-anchor="middle">＝ 未連携なら全部使えません</text>
+
+      <!-- 未設定のときの実際の返事 -->
+      <text x="6" y="216" font-size="9.6" fill="#5d7481">つないでいないサークルで <tspan font-weight="700" fill="#23303a">/task</tspan> を実行すると、こう返ってきます（故障ではありません）:</text>
+      <rect x="60" y="224" width="580" height="66" rx="8" fill="#f4f7fb" stroke="#2f7fd1" stroke-width="1.5"/>
+      <circle cx="84" cy="248" r="11" fill="#2f7fd1"/>
+      <text x="84" y="252" font-size="10" font-weight="700" fill="#fff" text-anchor="middle">B</text>
+      <text x="104" y="244" font-size="10.6" font-weight="700" fill="#2467ab">Todoist 未設定</text>
+      <text x="104" y="262" font-size="9.6" fill="#23303a">このサーバーでは Todoist が未設定です。タスクの追加・削除・管理は</text>
+      <text x="104" y="278" font-size="9.6" fill="#23303a">Todoist で行うため、管理者が /todoist-setup で登録するまで /task は使えません。</text>
+    </svg>
+    <div class="figcap">図0-7　Todoist の有無で変わる範囲。左は Todoist と関係なく動きます。</div>
+  </div>
+
+  <div class="box tip">
+    <span class="t">自分のサークルがつないでいるかを確かめるには</span>
+    <code>/task list</code> を実行してみてください。一覧が出れば連携済みです。
+    上の「Todoist 未設定」が返ってきたら未連携なので、
+    <strong>管理者に <code>/todoist-setup</code> を依頼してください</strong>（第4章 4-3）。
+    <code>/setup-status</code> でも未完了の設定を確認できます。
+  </div>
+
+  <div class="box note">
+    <span class="t">Todoist はサークル単位で1つ登録します</span>
+    部員一人ひとりが Todoist のアカウントを作る必要はありません。
+    管理者がサークルの Todoist を1回登録すれば、部員は Discord から
+    <code>/task</code> を使うだけです。
+  </div>
+</div>
+
 <!-- ============================= 第1章 L1 ============================= -->
 <div class="page">
   <div class="chapter-head lv1">
@@ -642,12 +709,14 @@
         <circle cx="587" cy="44" r="20" fill="#2f9e6b"/>
         <text x="587" y="51" font-size="17" text-anchor="middle">📋</text>
         <text x="587" y="86" font-size="12.5" font-weight="700" fill="#1e7a51" text-anchor="middle">タスクを見る</text>
-        <text x="587" y="108" font-size="10" fill="#5d7481" text-anchor="middle">やることの一覧を確認する</text>
-        <rect x="547" y="118" width="80" height="19" rx="4" fill="#dff0e8"/>
-        <text x="587" y="132" font-size="9.6" font-weight="700" fill="#1e7a51" text-anchor="middle">/task list</text>
+        <text x="587" y="106" font-size="10" fill="#5d7481" text-anchor="middle">やることの一覧を確認する</text>
+        <rect x="549" y="109" width="76" height="18" rx="4" fill="#dff0e8"/>
+        <text x="587" y="122" font-size="9.4" font-weight="700" fill="#1e7a51" text-anchor="middle">/task list</text>
+        <rect x="511" y="130" width="152" height="15" rx="7.5" fill="#fdf0dc"/>
+        <text x="587" y="141" font-size="8.2" font-weight="700" fill="#b76c0d" text-anchor="middle">Todoist 連携が要ります</text>
       </g>
     </svg>
-    <div class="figcap">図1-1　一般メンバーが最初に覚える3つ。残りは必要になったときで構いません。</div>
+    <div class="figcap">図1-1　一般メンバーが最初に覚える3つ。3つ目は Todoist をつないでいるサークルだけです。</div>
   </div>
 
   <h2>1-2　桁巻きを記録する</h2>
@@ -827,7 +896,7 @@
     <tr><td><code>/layer status</code></td><td>いま誰が作業中かの一覧</td></tr>
     <tr><td><code>/layer stats</code></td><td>桁別・作業者別の集計（層数・時間・平均）</td></tr>
     <tr><td><code>/layer keta-list</code></td><td>登録されている桁名の一覧</td></tr>
-    <tr><td colspan="2" style="background:#eef8f3; font-weight:700; color:#1e7a51;">タスク　<span style="font-weight:400; color:#5d7481;">※ Todoist を連携しているサークルのみ</span></td></tr>
+    <tr><td colspan="2" style="background:#eef8f3; font-weight:700; color:#1e7a51;">タスク　<span style="font-weight:400; color:#b76c0d;">※ Todoist 未連携のサークルでは、この区分は丸ごと使えません（0-6）</span></td></tr>
     <tr><td><code>/task list</code></td><td>未完了タスクの一覧</td></tr>
     <tr><td><code>/task add</code></td><td>タスクを追加する</td></tr>
     <tr><td><code>/task done</code></td><td>タスクを完了にする</td></tr>
@@ -1057,7 +1126,7 @@
 
   <table>
     <tr><th style="width:34%;">コマンド</th><th>何ができるか</th></tr>
-    <tr><td colspan="2" style="background:#eef4fa; font-weight:700; color:#2467ab;">タスク</td></tr>
+    <tr><td colspan="2" style="background:#eef4fa; font-weight:700; color:#2467ab;">タスク　<span style="font-weight:400; color:#b76c0d;">※ Todoist 連携が前提（0-6）</span></td></tr>
     <tr><td><code>/task delete</code></td><td>タスクを削除する</td></tr>
     <tr><td><code>/task sections</code></td><td>Todoist のセクションと班の紐付け状況を見る</td></tr>
     <tr><td><code>/task push</code></td><td>班ごとのタスクを各班チャンネルへ手動で流す</td></tr>
@@ -1074,7 +1143,7 @@
     <tr><td><code>/report weekly</code></td><td>今週のまとめ（<code>public:true</code> でチャンネルへ公開）</td></tr>
     <tr><td><code>/report attendance-rate</code></td><td>投票ごとの出欠率</td></tr>
     <tr><td><code>/report member-attendance</code></td><td>メンバー別の回答率・連続未回答数</td></tr>
-    <tr><td><code>/report export-tasks</code></td><td>タスク一覧を CSV で書き出す</td></tr>
+    <tr><td><code>/report export-tasks</code></td><td>タスク一覧を CSV で書き出す（<strong>Todoist 連携が前提</strong>）</td></tr>
   </table>
 
   <div class="box tip">
@@ -1287,7 +1356,7 @@
     <tr><td><code>/member setup</code></td><td>主所属・副所属・班長フラグを一括で設定する</td></tr>
     <tr><td><code>/member set-leader</code></td><td>名簿の班長フラグを変える</td></tr>
     <tr><td><code>/member set-channel</code></td><td>班の通知先チャンネルを決める</td></tr>
-    <tr><td colspan="2" style="background:#fdf4e8; font-weight:700; color:#b76c0d;">Todoist セクションの紐付け</td></tr>
+    <tr><td colspan="2" style="background:#fdf4e8; font-weight:700; color:#b76c0d;">Todoist セクションの紐付け　<span style="font-weight:400;">※ Todoist 連携が前提（0-6）</span></td></tr>
     <tr><td><code>/task link-section</code></td><td>Todoist のセクションを班につなぐ</td></tr>
     <tr><td><code>/task unlink-section</code></td><td>セクションの紐付けを外す</td></tr>
     <tr><td><code>/task unlink-team-sections</code></td><td>ある班につながっているセクションをまとめて外す</td></tr>
@@ -1373,7 +1442,7 @@
         途中でやめても大丈夫です。<tspan font-weight="700" fill="#23303a">/setup-status</tspan> が、残っている項目を教えてくれます。
       </text>
     </svg>
-    <div class="figcap">図4-1　導入の5ステップ。Todoist 連携は任意なので、あとから足せます。</div>
+    <div class="figcap">図4-1　導入の5ステップ。Todoist 連携はこの後でよく、あとから足せます。</div>
   </div>
 
   <h2>4-2　<code>/setup</code> で決めること</h2>
@@ -1400,9 +1469,11 @@
 </div>
 
 <div class="page">
-  <h2>4-3　Todoist をつなぐ（任意）</h2>
+  <h2>4-3　Todoist をつなぐ（タスク機能を使うなら必須）</h2>
   <p>
-    タスク機能を使うなら、サークルの Todoist トークンを1回だけ登録します。
+    <strong>つながないという選択もできます</strong>（他の機能は Todoist が無くても全部動きます）。
+    ただし <strong>つなぐまで <code>/task</code>・<code>/today</code>・毎朝のタスク通知・タスクの CSV は
+    一切使えません</strong>（0-6）。使うなら、サークルの Todoist トークンを1回だけ登録します。
     <strong>トークンはコマンドの引数では受け取りません。</strong>
     引数に入れた値は Discord のチャンネル履歴に残ってしまうためです。
     代わりに、履歴に残らないフォーム（モーダル）で受け取ります。
@@ -1559,7 +1630,7 @@
     <h1>Web ダッシュボード</h1>
     <div class="who">
       Discord の外から、<strong>ブラウザで表を見る・直す</strong>ための画面です。<br>
-      サークルによっては使っていないこともあります（任意の機能です）。
+      運営が公開している画面に、<strong>Discord のアカウントでそのままログイン</strong>できます。
     </div>
   </div>
 
@@ -1594,17 +1665,34 @@
 
   <h2>5-2　使いはじめる</h2>
   <p>
-    <strong>アカウントを新しく作る必要はありません。</strong>
-    サークルの管理者から教えてもらった URL を開き、<strong>「Discord でログイン」</strong>を押すだけです。
-    パスワードをダッシュボードへ入力することはありません（Discord の画面で許可するだけです）。
-    ログインすると、<strong>自分が入っているサーバーだけ</strong>が選択肢に出ます。
+    ダッシュボードは<strong>運営が1つ公開しています。</strong>
+    サークルごとに用意する必要はありません。次のアドレスを開いてください。
   </p>
 
-  <div class="box warn">
-    <span class="t">URL はサークルごとに違います</span>
-    このBotを使っているサークルが、それぞれ自分のところで動かす仕組みです。
-    <strong>URL が配られていなければ、そのサークルはダッシュボードを使っていません。</strong>
-    Discord のコマンドだけで全部の機能が使えるので、無くても困りません。
+  <div class="figure">
+    <svg viewBox="0 0 700 108" xmlns="http://www.w3.org/2000/svg"
+         font-family="Zen Maru Gothic, sans-serif">
+      <rect x="2" y="8" width="696" height="92" rx="10" fill="#f4f7fb" stroke="#2f7fd1" stroke-width="1.8"/>
+      <text x="350" y="34" font-size="10.4" fill="#5d7481" text-anchor="middle">ブラウザで開くアドレス</text>
+      <rect x="120" y="44" width="460" height="34" rx="17" fill="#ffffff" stroke="#cdd8dd"/>
+      <text x="350" y="66" font-size="13.5" font-weight="700" fill="#2467ab" text-anchor="middle">https://dashboard.aircraftmakers.jp</text>
+      <text x="350" y="94" font-size="9.4" fill="#5d7481" text-anchor="middle">スマホでもパソコンでも同じアドレスです</text>
+    </svg>
+    <div class="figcap">図5-2　ダッシュボードのアドレス。ブックマークしておくと便利です。</div>
+  </div>
+
+  <p>
+    <strong>アカウントを新しく作る必要はありません。</strong>
+    <strong>「Discord でログイン」</strong>を押すだけです。
+    パスワードをダッシュボードへ入力することはありません（Discord の画面で「許可」を押すだけです）。
+  </p>
+
+  <div class="box tip">
+    <span class="t">誰でも開けますが、見えるのは自分のサーバーだけです</span>
+    アドレスは公開されていて誰でもログインできます。ただしログイン後に選べるのは、
+    <strong>自分が入っていて、なおかつ Bot も入っているサーバー</strong>だけです。
+    他のサークルのデータが見えることはありません。
+    条件に合うサーバーが1つも無い人は、ログインしても何も表示されません。
   </div>
 
 </div>
@@ -1613,9 +1701,9 @@
   <h2>5-3　画面の見かた</h2>
 
   <div class="figure">
-    <svg viewBox="0 0 700 322" xmlns="http://www.w3.org/2000/svg"
+    <svg viewBox="0 0 700 330" xmlns="http://www.w3.org/2000/svg"
          font-family="Zen Maru Gothic, sans-serif">
-      <rect x="4" y="8" width="692" height="306" rx="10" fill="#ffffff" stroke="#c9d5da" stroke-width="1.5"/>
+      <rect x="4" y="8" width="692" height="314" rx="10" fill="#ffffff" stroke="#c9d5da" stroke-width="1.5"/>
 
       <!-- ブラウザのバー -->
       <path d="M4 18 a10 10 0 0 1 10 -10 h672 a10 10 0 0 1 10 10 v18 h-692 z" fill="#eceff1"/>
@@ -1623,86 +1711,87 @@
       <circle cx="39" cy="26" r="4.5" fill="#d5dade"/>
       <circle cx="54" cy="26" r="4.5" fill="#d5dade"/>
       <rect x="72" y="18" width="300" height="16" rx="8" fill="#ffffff"/>
-      <text x="84" y="30" font-size="8.6" fill="#9aa3ab">https://（サークルごとの URL）</text>
-
-      <!-- アプリのヘッダ -->
+      <text x="84" y="30" font-size="8.4" fill="#5d7481">https://dashboard.aircraftmakers.jp</text>
       <line x1="4" y1="36" x2="696" y2="36" stroke="#dde4e8"/>
-      <text x="20" y="58" font-size="11" font-weight="700" fill="#0b4f6c">サークル名 ダッシュボード</text>
-      <rect x="404" y="44" width="150" height="20" rx="5" fill="#f1f5f7" stroke="#cdd8dd"/>
-      <text x="414" y="58" font-size="9" fill="#23303a">サーバーを選ぶ ▾</text>
-      <rect x="562" y="44" width="60" height="20" rx="5" fill="#f1f5f7" stroke="#cdd8dd"/>
-      <text x="572" y="58" font-size="9" fill="#23303a">テーマ</text>
-      <rect x="630" y="44" width="52" height="20" rx="5" fill="#f1f5f7" stroke="#cdd8dd"/>
-      <text x="640" y="58" font-size="9" fill="#23303a">アカ…</text>
-      <line x1="4" y1="72" x2="696" y2="72" stroke="#dde4e8"/>
 
-      <!-- サイドバー -->
-      <rect x="4" y="72" width="150" height="242" fill="#f7fafb"/>
-      <line x1="154" y1="72" x2="154" y2="314" stroke="#dde4e8"/>
-      <text x="18" y="92" font-size="9" font-weight="700" fill="#9aa3ab">表の種類</text>
-      <rect x="12" y="100" width="134" height="20" rx="5" fill="#2f7fd1"/>
-      <text x="24" y="114" font-size="9.4" font-weight="700" fill="#fff">出欠回答</text>
-      <text x="24" y="136" font-size="9.4" fill="#23303a">メンバー</text>
-      <text x="24" y="156" font-size="9.4" fill="#23303a">班</text>
-      <text x="24" y="176" font-size="9.4" fill="#23303a">日程調整</text>
-      <text x="24" y="196" font-size="9.4" fill="#23303a">桁巻き積層記録</text>
-      <text x="24" y="216" font-size="9.4" fill="#23303a">機体進捗</text>
-      <text x="24" y="236" font-size="9.4" fill="#23303a">在庫（品目）</text>
-      <text x="24" y="256" font-size="9.4" fill="#9aa3ab">…ほか</text>
-      <text x="18" y="292" font-size="8.4" fill="#9aa3ab">スマホでは画面の下に</text>
-      <text x="18" y="304" font-size="8.4" fill="#9aa3ab">横並びで出ます</text>
+      <!-- 左サイドバー -->
+      <rect x="4" y="36" width="176" height="286" fill="#f7fafb"/>
+      <line x1="180" y1="36" x2="180" y2="322" stroke="#dde4e8"/>
+      <text x="18" y="56" font-size="9.6" font-weight="700" fill="#0b4f6c">鳥人間サークル運営 Bot</text>
+      <rect x="16" y="64" width="148" height="22" rx="11" fill="#e8f2fb" stroke="#2f7fd1"/>
+      <text x="28" y="79" font-size="9" fill="#2467ab">◈ サーバーを選ぶ ▾</text>
+      <text x="18" y="102" font-size="8.6" font-weight="700" fill="#9aa3ab">表の一覧</text>
+      <rect x="12" y="108" width="156" height="20" rx="5" fill="#2f7fd1"/>
+      <text x="24" y="122" font-size="9.2" font-weight="700" fill="#fff">桁巻き積層記録</text>
+      <text x="24" y="143" font-size="9.2" fill="#23303a">メンバー</text>
+      <text x="24" y="162" font-size="9.2" fill="#23303a">班</text>
+      <text x="24" y="181" font-size="9.2" fill="#23303a">日程調整</text>
+      <text x="24" y="200" font-size="9.2" fill="#23303a">出欠回答</text>
+      <text x="24" y="219" font-size="9.2" fill="#23303a">機体進捗</text>
+      <text x="24" y="238" font-size="9.2" fill="#23303a">在庫（品目）</text>
+      <text x="24" y="257" font-size="9.2" fill="#9aa3ab">…ほか</text>
+      <!-- サイドバー下部 -->
+      <line x1="16" y1="272" x2="164" y2="272" stroke="#e3eaed"/>
+      <rect x="16" y="280" width="66" height="18" rx="9" fill="#eef2f4"/>
+      <text x="49" y="293" font-size="8.4" fill="#5d7481" text-anchor="middle">テーマ</text>
+      <rect x="88" y="280" width="76" height="18" rx="9" fill="#eef2f4"/>
+      <text x="126" y="293" font-size="8.4" fill="#5d7481" text-anchor="middle">アカウント</text>
+      <text x="18" y="314" font-size="7.8" fill="#9aa3ab">スマホでは画面の下に並びます</text>
 
-      <!-- シートタブ -->
-      <text x="168" y="90" font-size="9" font-weight="700" fill="#9aa3ab">シートタブ（予定ごと）</text>
-      <rect x="168" y="96" width="118" height="20" rx="10" fill="#e8f2fb" stroke="#2f7fd1"/>
-      <text x="227" y="110" font-size="9" font-weight="700" fill="#2467ab" text-anchor="middle">6月度 定例MTG</text>
-      <rect x="292" y="96" width="106" height="20" rx="10" fill="#f1f5f7" stroke="#cdd8dd"/>
-      <text x="345" y="110" font-size="9" fill="#5d7481" text-anchor="middle">春合宿の日程</text>
-      <rect x="404" y="96" width="96" height="20" rx="10" fill="#f1f5f7" stroke="#cdd8dd"/>
-      <text x="452" y="110" font-size="9" fill="#5d7481" text-anchor="middle">機体審査会</text>
-      <text x="512" y="110" font-size="9" fill="#9aa3ab">…</text>
+      <!-- タイトル行（CSV はここ） -->
+      <text x="196" y="60" font-size="11.5" font-weight="700" fill="#0b4f6c">桁巻き積層記録</text>
+      <text x="196" y="76" font-size="8.4" fill="#9aa3ab">誰がいつ何層巻いたかの記録</text>
+      <rect x="566" y="48" width="116" height="22" rx="6" fill="#1e7a51"/>
+      <text x="624" y="63" font-size="8.8" font-weight="700" fill="#fff" text-anchor="middle">CSV をダウンロード</text>
+
+      <!-- シートタブ（桁ごと） -->
+      <text x="196" y="98" font-size="8.4" font-weight="700" fill="#9aa3ab">シートタブ（桁ごと）</text>
+      <rect x="196" y="104" width="86" height="20" rx="10" fill="#e8f2fb" stroke="#2f7fd1"/>
+      <text x="239" y="118" font-size="8.8" font-weight="700" fill="#2467ab" text-anchor="middle">主桁</text>
+      <rect x="288" y="104" width="86" height="20" rx="10" fill="#f1f5f7" stroke="#cdd8dd"/>
+      <text x="331" y="118" font-size="8.8" fill="#5d7481" text-anchor="middle">後縁桁</text>
+      <rect x="380" y="104" width="86" height="20" rx="10" fill="#f1f5f7" stroke="#cdd8dd"/>
+      <text x="423" y="118" font-size="8.8" fill="#5d7481" text-anchor="middle">尾翼桁</text>
+      <text x="476" y="118" font-size="8.8" fill="#9aa3ab">…</text>
 
       <!-- ツールバー -->
-      <rect x="168" y="126" width="180" height="20" rx="5" fill="#ffffff" stroke="#cdd8dd"/>
-      <text x="178" y="140" font-size="8.8" fill="#9aa3ab">🔍 この表を検索</text>
-      <rect x="356" y="126" width="96" height="20" rx="5" fill="#f1f5f7" stroke="#cdd8dd"/>
-      <text x="365" y="140" font-size="8.8" fill="#23303a">表示件数: 50 ▾</text>
-      <rect x="566" y="126" width="116" height="20" rx="5" fill="#1e7a51"/>
-      <text x="624" y="140" font-size="8.8" font-weight="700" fill="#fff" text-anchor="middle">CSV をダウンロード</text>
+      <rect x="196" y="134" width="180" height="20" rx="5" fill="#ffffff" stroke="#cdd8dd"/>
+      <text x="206" y="148" font-size="8.4" fill="#9aa3ab">この表を検索</text>
+      <rect x="384" y="134" width="96" height="20" rx="5" fill="#f1f5f7" stroke="#cdd8dd"/>
+      <text x="393" y="148" font-size="8.4" fill="#23303a">表示件数: 50 ▾</text>
 
       <!-- 表 -->
-      <rect x="168" y="158" width="514" height="22" fill="#0b4f6c"/>
-      <text x="180" y="173" font-size="8.8" fill="#fff">候補日時</text>
-      <text x="300" y="173" font-size="8.8" fill="#fff">参加</text>
-      <text x="392" y="173" font-size="8.8" fill="#fff">不参加</text>
-      <text x="484" y="173" font-size="8.8" fill="#fff">未定</text>
-      <text x="576" y="173" font-size="8.8" fill="#fff">未回答</text>
-      <g font-size="8.6" fill="#23303a">
-        <rect x="168" y="180" width="514" height="22" fill="#f5f9fa"/>
-        <text x="180" y="195">2026-07-03 19:00:00</text>
-        <text x="300" y="195">参加 (4)</text>
-        <text x="392" y="195">不参加 (2)</text>
-        <text x="484" y="195">未定 (1)</text>
-        <text x="576" y="195">未回答 (3)</text>
-        <rect x="168" y="202" width="514" height="22" fill="#ffffff"/>
-        <text x="180" y="217">2026-07-04 19:00:00</text>
-        <text x="300" y="217">参加 (6)</text>
-        <text x="392" y="217">不参加 (1)</text>
-        <text x="484" y="217">未定 (0)</text>
-        <text x="576" y="217">未回答 (3)</text>
-        <rect x="168" y="224" width="514" height="22" fill="#f5f9fa"/>
-        <text x="180" y="239">2026-07-05 13:00:00</text>
-        <text x="300" y="239">参加 (2)</text>
-        <text x="392" y="239">不参加 (2)</text>
-        <text x="484" y="239">未定 (3)</text>
-        <text x="576" y="239">未回答 (3)</text>
+      <rect x="196" y="166" width="486" height="20" fill="#0b4f6c"/>
+      <text x="206" y="180" font-size="8.4" fill="#fff">作業日</text>
+      <text x="300" y="180" font-size="8.4" fill="#fff">作業者</text>
+      <text x="396" y="180" font-size="8.4" fill="#fff">層番号</text>
+      <text x="470" y="180" font-size="8.4" fill="#fff">作業時間</text>
+      <text x="566" y="180" font-size="8.4" fill="#fff">メモ ✎</text>
+      <g font-size="8.2" fill="#23303a">
+        <rect x="196" y="186" width="486" height="19" fill="#f5f9fa"/>
+        <text x="206" y="199">2026-06-14 15:20:00</text>
+        <text x="300" y="199">たろう</text>
+        <text x="396" y="199">3</text>
+        <text x="470" y="199">1時間20分</text>
+        <rect x="196" y="205" width="486" height="19" fill="#ffffff"/>
+        <text x="206" y="218">2026-06-13 16:05:00</text>
+        <text x="300" y="218">はなこ</text>
+        <text x="396" y="218">2</text>
+        <text x="470" y="218">1時間40分</text>
+        <rect x="196" y="224" width="486" height="19" fill="#f5f9fa"/>
+        <text x="206" y="237">2026-06-11 14:00:00</text>
+        <text x="300" y="237">たろう</text>
+        <text x="396" y="237">1</text>
+        <text x="470" y="237">2時間05分</text>
       </g>
-      <rect x="168" y="158" width="514" height="88" fill="none" stroke="#cdd8dd"/>
-      <text x="168" y="264" font-size="8.6" fill="#5d7481">セルの中には、その人たちの表示名が縦に並びます（人数は先頭の数字）。</text>
-      <text x="168" y="280" font-size="8.6" fill="#5d7481">✎ が付いた列はクリックして直せます。直した記録は必ず操作ログに残ります。</text>
-      <text x="168" y="300" font-size="8.6" fill="#9aa3ab">※ 画面はイメージです。表の名前や並びはサークルの設定によって変わります。</text>
+      <rect x="196" y="166" width="486" height="77" fill="none" stroke="#cdd8dd"/>
+
+      <text x="196" y="262" font-size="8.4" fill="#5d7481">✎ が付いた列はクリックして直せます。直した記録は必ず操作ログに残ります。</text>
+      <text x="196" y="278" font-size="8.4" fill="#5d7481">人の名前は Discord の ID ではなく、そのサーバーでの表示名で出ます。</text>
+      <text x="196" y="300" font-size="8.2" fill="#9aa3ab">※ 画面はイメージです。表の名前や並びはサークルの設定によって変わります。</text>
+      <text x="196" y="315" font-size="8.2" fill="#9aa3ab">※ 出欠回答だけは集計されたピボット表になり、検索欄は出ません。</text>
     </svg>
-    <div class="figcap">図5-2　画面の構成。左で「表の種類」、上のタブで「どの予定か」を選びます。</div>
+    <div class="figcap">図5-3　画面の構成。左で表を選び、上のタブで「どの桁か」を切り替えます。</div>
   </div>
 
   <h2>5-4　ダッシュボードの権限は「3段階」</h2>
@@ -1758,7 +1847,7 @@
         幹部ロールを持っているだけでは「閲覧のみ」です（サーバー管理権限か名簿の班長フラグがあれば別です）。
       </text>
     </svg>
-    <div class="figcap">図5-3　Discord とダッシュボードの権限の対応。幹部の扱いだけがずれます。</div>
+    <div class="figcap">図5-4　Discord とダッシュボードの権限の対応。幹部の扱いだけがずれます。</div>
   </div>
 
 </div>
@@ -1781,7 +1870,7 @@
 
   <h2>5-5　見られる表</h2>
   <p>
-    次の表を見られます。<strong>ここに無いもの（Todoist のトークンなど）は画面に出ません。</strong>
+    次の表を見られます。<strong>タスクは出ません</strong>（正本が Todoist にあるため。0-6）。
   </p>
 
   <table>
@@ -1843,7 +1932,7 @@
   <h2>5-7　安全のしくみ</h2>
   <table>
     <tr><th style="width:32%;">気になること</th><th>どうなっているか</th></tr>
-    <tr><td>他のサークルのデータは見える？</td><td><strong>見えません。</strong> URL を書き換えても、ログイン時に確認できたサーバー以外は拒否されます</td></tr>
+    <tr><td>誰でも開けるのに、他のサークルのデータは見えない？</td><td><strong>見えません。</strong> ログインできても、選べるのは自分が入っているサーバーだけです。URL を書き換えても、ログイン時に確認できたサーバー以外は拒否されます</td></tr>
     <tr><td>Bot を乗っ取られない？</td><td>ダッシュボードは <strong>Bot のトークンを持っていません</strong>。Discord へメッセージを送ることもできません</td></tr>
     <tr><td>パスワードは渡すの？</td><td>渡しません。Discord のログイン画面で許可するだけです</td></tr>
     <tr><td>班長を外したのに編集できる？</td><td>班長フラグの変更は<strong>すぐ反映されます</strong>。ただしサーバーからの退会と「サーバー管理権限」の付け外しは、最大24時間ほど古い状態が残ります（ログインし直せば即時です）</td></tr>
@@ -1868,18 +1957,19 @@
     <svg viewBox="0 0 700 244" xmlns="http://www.w3.org/2000/svg"
          font-family="Zen Maru Gothic, sans-serif">
       <!-- 08:30 の吹き出し -->
-      <rect x="150" y="10" width="300" height="104" rx="9" fill="#eef8f3" stroke="#7cc4a4" stroke-width="1.5"/>
+      <rect x="150" y="10" width="300" height="118" rx="9" fill="#eef8f3" stroke="#7cc4a4" stroke-width="1.5"/>
       <text x="166" y="30" font-size="11" font-weight="700" fill="#1e7a51">毎朝 8:30 — まとめて届きます</text>
-      <text x="166" y="49" font-size="9.6" fill="#23303a">・今日〜7日以内が期限のタスク</text>
-      <text x="166" y="66" font-size="9.6" fill="#23303a">・班ごとのタスク（各班のチャンネルへ）</text>
-      <text x="166" y="83" font-size="9.6" fill="#23303a">・「今日やること」の印を付けたタスク</text>
+      <text x="166" y="49" font-size="9.6" fill="#23303a">・今日〜7日以内が期限のタスク <tspan font-weight="700" fill="#b76c0d">※</tspan></text>
+      <text x="166" y="66" font-size="9.6" fill="#23303a">・班ごとのタスク（各班のチャンネルへ）<tspan font-weight="700" fill="#b76c0d">※</tspan></text>
+      <text x="166" y="83" font-size="9.6" fill="#23303a">・「今日やること」の印を付けたタスク <tspan font-weight="700" fill="#b76c0d">※</tspan></text>
       <text x="166" y="100" font-size="9.6" fill="#23303a">・今日の確定予定 ／ 在庫が足りないもの</text>
-      <line x1="262" y1="114" x2="262" y2="128" stroke="#7cc4a4" stroke-width="1.5"/>
+      <text x="166" y="120" font-size="8.6" font-weight="700" fill="#b76c0d">※ は Todoist 連携が前提（0-6）</text>
+      <line x1="262" y1="128" x2="262" y2="132" stroke="#7cc4a4" stroke-width="1.5"/>
 
       <!-- 21:00 の吹き出し -->
       <rect x="496" y="36" width="200" height="56" rx="9" fill="#fff6ec" stroke="#f0cfa0" stroke-width="1.5"/>
       <text x="512" y="56" font-size="11" font-weight="700" fill="#b76c0d">21:00</text>
-      <text x="512" y="76" font-size="9.6" fill="#23303a">期限が過ぎたタスクの通知</text>
+      <text x="512" y="76" font-size="9.6" fill="#23303a">期限が過ぎたタスクの通知 <tspan font-weight="700" fill="#b76c0d">※</tspan></text>
       <line x1="586" y1="92" x2="586" y2="128" stroke="#f0cfa0" stroke-width="1.5"/>
 
       <!-- 軸 -->
@@ -1921,7 +2011,7 @@
       <text x="456" y="196" font-size="11" font-weight="700" fill="#2467ab">20:00</text>
       <text x="456" y="215" font-size="9.6" fill="#23303a">明日の確定予定をリマインド</text>
     </svg>
-    <div class="figcap">図A-1　1日のうちに Bot が動く時刻。予定やタスクが無い日は、何も送りません。</div>
+    <div class="figcap">図A-1　1日のうちに Bot が動く時刻。予定やタスクが無い日は、何も送りません。※ の通知は Todoist をつないでいないサークルでは出ません。</div>
   </div>
 
   <h3>そのほか、いつも動いているもの</h3>
@@ -1958,7 +2048,7 @@
     </tr>
     <tr>
       <td><strong><code>/task</code> が「管理者が登録してください」と返す</strong></td>
-      <td>そのサークルは Todoist をつないでいません。使うなら管理者が <code>/todoist-setup</code> を実行します（4-3）</td>
+      <td>故障ではありません。<strong>タスク機能は Todoist が土台</strong>で、未連携だと一切使えません（0-6）。使うなら管理者が <code>/todoist-setup</code> を実行します（4-3）</td>
     </tr>
     <tr>
       <td><strong>桁名がメニューに出てこない</strong></td>
