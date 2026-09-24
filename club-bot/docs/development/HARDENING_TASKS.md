@@ -117,7 +117,7 @@ G4 完了後の全コード分析で見つかった**「一度決めた原則が
 
 ---
 
-- [ ] **H1-2** `/schedule create` が投稿に失敗したとき、ゾンビ投票を残さない。
+- [x] **H1-2** `/schedule create` が投稿に失敗したとき、ゾンビ投票を残さない。
 
       `create` は `create_schedule` / `add_option` を**投稿より先**に実行し、
       `channel.send()` を try/except していない（ボタン式・リアクション式の両方）。
@@ -399,3 +399,85 @@ G4 完了後の全コード分析で見つかった**「一度決めた原則が
 - 許可リストの照合をファイル単位へ緩める変更（テスト自体の書き換え）は検出できない（メタテスト無し）
 - `cogs/welcome.py` の `guild.get_channel` は同一ギルド内だがスレッドを解決しない（H1-1 の対象外のまま）
 - `config.for_guild()` が env の値を全ギルドへ配る挙動は残っている（今回は送る側で塞いだ）
+
+### H1-2: `/schedule create` が投稿に失敗したとき、ゾンビ投票を残さない（2026-09-24 / ブランチ fix/h1-2）
+
+**完了内容**
+- `utils/notify.py`: `missing_send_permission(channel, member)` を追加（純粋関数）。確認順は「チャンネルを見る」→「メッセージを送信」
+  （スレッドでは「スレッドでメッセージを送信」）→「埋め込みリンク」で、**最初に欠けている1つ**の表示名を返す
+- `cogs/schedule.py` の `create`:
+  - **DB へ書く前に** `missing_send_permission(target_channel, interaction.guild.me)` を検査。不足なら何も作らず
+    「このチャンネル（#…）に投稿できません（不足: …）」＋必要な権限の一覧を返す（`MISSING_PERMISSIONS`）。
+    スレッドの親が未キャッシュで権限を計算できないとき（`discord.ClientException`）も作らない（`PERMISSION_UNKNOWN`）
+  - 投稿部分（ボタン式・リアクション式）を try で囲み、`Forbidden` / `HTTPException` なら `_abort_create`:
+    ① `soft_delete_schedule` で畳む（締切も立つ。ADR 0037）② 投稿済みのメッセージを候補行の `message_id` から辿って削除
+    （`NotFound` は無視、消せなかった件数は利用者に伝える）③ 理由つきのエラー（`POST_FAILED`）
+  - 通信層の例外（`OSError` 等。`HTTPException` に包まれない）は、畳んで投稿済みメッセージを消してから上げ直す
+    （後始末の失敗は握って元の例外を隠さない）
+  - リアクション式の `add_reaction` は `_add_vote_reactions` に切り出し、**どんな例外でも投票を無効にしない**。
+    1回失敗したら以降は付けず、成功 Embed に注記を出す
+  - 成功の通知（followup）は try の外に置く（通知の送信失敗で正常な予定を畳まない）
+- `tests/test_schedule_create_failure.py`（新規・33件）: 純粋関数の表、事前検査（不足権限3種・スレッド・権限を計算できない）、
+  送信失敗で畳む（Forbidden / HTTPException × buttons / reaction。健全な予定を同じ経路で作る対照つきで、自動締切・自動催促・
+  開催中一覧の3つを見る）、部分投稿の後始末、後始末の失敗、通信層の例外、順序（畳むのが先）、リアクション失敗、成功時の message_id
+- 既存テストのフェイク（`test_channel_scope` / `test_schedule_notify` / `test_schedule_vote_buttons`）に `guild.me` と
+  `permissions_for`（Bot 自身の権限でなければ AssertionError・`discord.Permissions.all_channel()` を返す）を追加。アサーションは変えていない
+- `docs/GUIDE.md`（困ったときの表に3行）・`docs/SETUP.md`（トラブルシューティングに1行）・`docs/OPERATION.md`（§5 のエラーコード3行）・
+  ルート `README.md`（スレッドを投稿先にするときの権限の注記）
+
+**設計判断**
+- **受入基準の読み替え**: 「不足している権限名を挙げて」は「**最初に欠けている1つ**を挙げ、必要な権限の一覧を添える」にした。
+  discord.py の `permissions_for` は権限を連鎖して落とす（送信できないと埋め込みリンクも False、見られないと全部 False）ので、
+  後段が本当に拒否されているのかは区別できない。断定しない（開発ノートの判断軸「分からないものを数字にしない」）
+- `guild.me` が None の枝は持たない: スラッシュコマンドでは discord.py が Interaction の組み立て時に Bot 自身を補う。
+  万一 None でも AttributeError は DB に書く前に出るのでゾンビは残らない（H1-1 の `guild_channel` と同じ判断）
+- 送信失敗の後始末は**畳むのが先**。削除で想定外の例外が出ても、message_id の無い開催中の予定を残さない
+- 投稿済みメッセージは候補行の `message_id` から辿る（`channel.send` の直後に必ず `set_option_message` が走る）。
+  `/schedule delete` と同じ辿り方で、ボタン式・リアクション式の両方を取りこぼさない
+- 新しい repository メソッドは足していない（`soft_delete_schedule` をそのまま使う）。スキーマ変更なし
+- 招待の権限（`INVITE_PERMISSIONS`）は増やしていない（ADR 0017）
+
+**既存の挙動が変わる点 / 通らなくなる入力**
+- Bot が投稿先で「チャンネルを見る」「メッセージを送信」（スレッドでは「スレッドでメッセージを送信」）「埋め込みリンク」の
+  どれかを持たない `/schedule create`: 以前は予定と候補が DB に入り、送信の Forbidden で「予期せぬエラー」、`message_id` の無い予定が
+  5分ごとの自動締切・催促に拾われ続けた → 何も作らず、不足権限名つきのエラー
+- 権限はあるのに送信が失敗: 以前は同じくゾンビ → 論理削除（締切も立つ）してエラー。投稿済みのボードは消す。
+  取り消した予定は `/schedule restore` の候補に出る（戻しても締切済みとして戻る。ADR 0037 の既存の挙動）
+- リアクション式で Bot が「リアクションを追加」を持たない: 以前は `add_reaction` の Forbidden で「予期せぬエラー」 → 投票は成立し、成功 Embed に注記
+- **旧バグで作られた既存のゾンビ予定（`message_id` が NULL で `closed_flag = 0` の行）は移行しない**（既存データを動かさない）
+
+**ゲートの判定**
+- acm-plan-reviewer: REVISE（1周目: `guild.me` の None 枝が本番で到達しない／フェイクが「誰の権限か」を見ていない／
+  `permissions_for` の連鎖を無視した表／後始末の順序と利用者への通知／投稿済みメッセージの収集が規律頼み）→ APPROVE（2周目）
+- acm-diff-auditor: FINDINGS（1周目: 通信層の例外でゾンビが残る・順序がテストで固定されていない・注記の断定・§5 のエラーコード・GUIDE の文言）
+  → FINDINGS（2周目: `except Exception` で畳むようにしたため `add_reaction` の通信層の例外で投票が取り消される）→ CLEAN（3周目）→ CLEAN（test-adversary の差し戻し後の再監査）
+- acm-test-adversary: INEFFECTIVE（成功通知の送信を try の中へ入れる変異・案内から理由を消す変異・NotFound を失敗に数える変異・
+  後始末の失敗で元の例外を隠す変異が素通り）→ EFFECTIVE（テストを4本足して再実測）
+
+実測表（最終）:
+
+| 戻した実装 | 赤くなったテスト（件数） |
+|---|---|
+| 事前検査を消す／DB 書き込みの後ろへ移す | 5 / 5（拒否系。schedules の行数を見る） |
+| `embed_links` を検査から外す／スレッドでも `send_messages` を見る／逆向き | 3 / 3 / 1 |
+| `permissions_for` に実行者を渡す | 31（フェイクが Bot 自身以外で AssertionError） |
+| 確認順を変える／全部を返す | 3〜7 / 4 |
+| `ClientException` を握らない／握って素通しする | 1 / 1 |
+| `soft_delete_schedule` を呼ばない／`close_schedule` で代用 | 9 / 9（`deleted_flag` のアサーション） |
+| 畳む前に削除する | 1（順序テスト） |
+| 後始末の削除をしない／件数を伝えない／NotFound を失敗に数える | 4 / 1 / 1 |
+| `set_option_message` を呼ばない | 6 |
+| 成功通知を try の中へ入れる | 1 |
+| `_add_vote_reactions` の変異6種（HTTP 系だけ握る・上げ直す・付け続ける・注記なし 等） | 1〜3 |
+| `Forbidden` だけを捕まえる | 2 |
+| `except Exception` 節を消す／畳まずに raise／後始末しない／後始末の失敗を握らない | 3 / 3 / 2 / 1 |
+| 案内から「理由」を消す | 4 |
+| **素通り**: `set_option_message` を `add_reaction` の後ろへずらす | 0（等価変異。`_add_vote_reactions` が例外をすべて握るので観測できる差が無い。退行して上げ直すようになれば別の変異で捕まる） |
+
+**次タスクへの申し送り**
+- H1-3: `/schedule create` のテストのフェイクは `guild.me` と `permissions_for` を持つ（`test_channel_scope` / `test_schedule_notify` /
+  `test_schedule_vote_buttons` / `test_schedule_create_failure`）。`/schedule create` を呼ぶテストを足すなら同じ形にする
+- H1-4: 未回答リマインドの文面は `notify_unanswered` の中（H1-1 で `guild_channel(guild, …)` にしたチャンネル解決の直前）
+- H1-5: `test_schedule_create_failure.py` の締切は `2099-01-01 00:00`、候補は締切の翌日以降。`test_schedule_vote_buttons.py` /
+  `test_schedule_notify.py` の既存の create テストは締切が `2026-09-20` 等（過去日）なので、H1-5 で過去日を拒否すると落ちる
+- 事前検査は `add_reactions` / `read_message_history` を見ない（受入基準どおり。欠けていても投票は成立する）
