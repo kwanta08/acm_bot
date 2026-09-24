@@ -40,14 +40,28 @@ Bot管理者」というラベルで出ます（`utils/permissions.LEVEL_LABELS`
 ### Settings（サーバー設定）
 | コマンド | 権限 | 説明 |
 |---|---|---|
-| `/setup` | L4 | 初期設定ウィザード（対話形式）。班の一括作成、サークル名、**新入生オンボーディングの ON/OFF**（既定 OFF）も行う |
+| `/setup` | L4 | 初期設定ウィザード（対話形式）。班の一括作成、サークル名、**大会日**、**新入生オンボーディングの ON/OFF**（既定 OFF）も行う |
 | `/settings_list` | L4 | 設定値の一覧 |
-| `/settings_get key:` | L4 | 設定値の取得 |
-| `/settings_set key: value:` | L4 | 設定値の保存（`COMPETITION_DATE` `DATA_RETENTION_DAYS` など） |
-| `/settings_delete key:` | L4 | 設定値の削除 |
+| `/settings_get key:` | L4 | 設定値の取得。表示するのは設定キー（`setting_key` の候補に出るもの）の値（DB に無ければ、Bot が環境変数から読んでいる値）と、内部キー・`TZ`・`DB_PATH` の DB の値だけ。それ以外のキーは表示しない |
+| `/settings_set key: value:` | L4 | 設定値の保存（`DATA_RETENTION_DAYS` `SCHEDULE_UI_STYLE` など）。`setting_key` は候補から選べる。**未知のキー・種別に合わない値は保存せずに理由を返す**（綴りの近いキーを案内） |
+| `/settings_delete key:` | L4 | 設定値の削除。入力したキーをそのまま照合する（候補にはこのサーバーに保存されているキーが出る）。Bot が内部で使うキーは削除できない |
 | `/set_channel` | L4 | 通知チャンネルの設定 |
 | `/set_role` | L4 | ロール（幹部・管理者・班長）の設定。`action:add` / `action:remove` で班長ロールを1つだけ足す / 外せる（重複は保存時に除去） |
 | `/set_common` | L4 | 共通設定 |
+
+`/settings_set` で受け付ける値（主なもの）:
+
+| 種類 | キーの例 | 受け付ける値 |
+|---|---|---|
+| チャンネル・ロール・絵文字の ID | `*_CHANNEL_ID` / `*_ROLE_ID` / `SCHEDULE_EMOJI_*_ID` | 半角数字（`<#…>` などのメンション形式も可） |
+| 日付 | `COMPETITION_DATE` | `YYYY-MM-DD`（例 `2026-07-25`） |
+| 日数・分数 | `DATA_RETENTION_DAYS` / `LAYER_SESSION_*_MINUTES` | 0〜36500 / 0〜10080 の整数 |
+| 曜日 | `WEEKLY_DIGEST_WEEKDAY` | 0（月曜）〜6（日曜） |
+| ON/OFF | `WELCOME_ENABLED` / `WEEKLY_DIGEST_ENABLED` | `1`（ON）/ `0`（OFF） |
+| 投票方式 | `SCHEDULE_UI_STYLE` | `buttons` / `reaction` |
+
+Bot が内部で使うキー（`AUTO_SETUP_COMPLETED_AT` など）はコマンドからは変更できません。
+導入前から保存されている値は書き換えません（読めない値は従来どおり既定値として扱われます）。
 
 ### Data（エクスポート・削除）
 | コマンド | 権限 | 説明 |
@@ -196,7 +210,8 @@ Google Sheets へのエクスポート連携（旧 `/set_sheet` `/sheet_sync`）
 | `/milestone list` | L1 | 登録済みのマイルストーンを期限順に表示 |
 | `/countdown` | L1 | 大会までの残り日数と、マイルストーンごとの必要ペース・実績ペース・遅延判定 |
 
-大会日はギルド別設定 `COMPETITION_DATE`（`YYYY-MM-DD`）に登録します（既定値なし）。
+大会日は `/setup` の「大会日を設定」から `YYYY-MM-DD` で登録します（ギルド別設定 `COMPETITION_DATE`。既定値なし）。
+読めない値が入っていると `/setup-status` が「読めません」と表示します。
 遅れているマイルストーンがある週は、月曜 8:30 に自動通知されます（無い週は通知しません）。
 
 機体製作の進捗を **DB（`progress_nodes` テーブル）を正本** として管理し、
@@ -385,7 +400,7 @@ Discord の表示名と `members.display_name` の両方で照合します。
 | `LAYER_SESSION_ALERT_MINUTES` | 240 | 経過がこの分数を超えたら本人へ DM で1回だけ催促 |
 | `LAYER_SESSION_AUTO_CANCEL_MINUTES` | 720 | 経過がこの分数を超えたら自動で `/layer cancel` 相当（記録は残らない）し、本人へ DM |
 
-どちらも `/settings_set` で変更でき、**`0` を設定するとその機能だけ無効**になります。
+どちらも `/settings_set` で変更でき（0〜10080 の整数）、**`0` を設定するとその機能だけ無効**になります。
 `/layer end` を押し忘れると 1200 分といった作業時間が記録され、
 完了層数が増えて `/progress` の進捗率まで水増しされるため、既定で有効にしています。
 
@@ -518,7 +533,7 @@ API 障害→`#bot-log` に記録、送信履歴を保存し多重送信を防�
 | ギルド別設定 | 既定 | 動き |
 |---|---|---|
 | `WEEKLY_DIGEST_ENABLED` | `0`（OFF） | `1` にすると、`/report weekly` と同じ内容を朝 08:30 に公開チャンネルへ投稿 |
-| `WEEKLY_DIGEST_WEEKDAY` | `0`（月曜） | 0=月 〜 6=日。範囲外の値は既定に戻ります |
+| `WEEKLY_DIGEST_WEEKDAY` | `0`（月曜） | 0=月 〜 6=日。範囲外は `/settings_set` が受け付けません（以前から保存されている範囲外の値は既定に戻ります） |
 
 `/settings_set` で変更します。投稿先は「お知らせチャンネル →（無ければ）
 進捗チャンネル → タスク通知チャンネル」の順です。

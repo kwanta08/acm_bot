@@ -151,7 +151,7 @@ G4 完了後の全コード分析で見つかった**「一度決めた原則が
 
 ---
 
-- [ ] **H1-3** 設定キーをホワイトリスト化し、大会日を `/setup` から設定できるようにする。
+- [x] **H1-3** 設定キーをホワイトリスト化し、大会日を `/setup` から設定できるようにする。
 
       `/settings_set` は**任意のキーに任意の値**をそのまま保存する。
       ホワイトリストも値の検証も `setting_key` のオートコンプリートも無い。
@@ -481,3 +481,132 @@ G4 完了後の全コード分析で見つかった**「一度決めた原則が
 - H1-5: `test_schedule_create_failure.py` の締切は `2099-01-01 00:00`、候補は締切の翌日以降。`test_schedule_vote_buttons.py` /
   `test_schedule_notify.py` の既存の create テストは締切が `2026-09-20` 等（過去日）なので、H1-5 で過去日を拒否すると落ちる
 - 事前検査は `add_reactions` / `read_message_history` を見ない（受入基準どおり。欠けていても投票は成立する）
+
+### H1-3: 設定キーをホワイトリスト化し、大会日を `/setup` から設定できるようにする（2026-09-24 / ブランチ fix/h1-3）
+
+**進め方の記録**: 手順書（HARDENING_LOOP_PROMPT.md §B）は H1-3 の前にプランモードで人の確認を挟むよう書いているが、
+ユーザーから「残りの H1 を全て最後まで回して」と明示の指示があったので、acm-plan-reviewer のゲート（3周）で代えた。
+
+**完了内容**
+- `utils/settings_spec.py`（新規・純粋モジュール）: ギルド別設定の仕様表 `SETTING_SPECS`（`config.for_guild()` が読む 24 キー +
+  `PROGRESS_DEFAULT_CHANNEL_ID`）を**1箇所**に定義。種別は `SettingKind`（Enum）、説明（オートコンプリートの候補名・エラー文）、
+  範囲・選択肢・上限、環境変数へフォールバックするか（`env`）。内部キー（`INTERNAL_KEYS`）・専用コマンドのキー（`TZ` / `DB_PATH` → `/set_common`）・
+  廃止キーも持つ。`normalize_setting`（検証して保存形を返す）・`suggest_keys`（綴りの近い候補）・`setting_key_choices`（オートコンプリート）・
+  `env_fallback`（仕様表のキーでだけ環境変数を引く）
+- `cogs/settings.py`:
+  - `/settings_set`: 仕様表に無いキー・種別に合わない値を**保存せずに**理由を返す（綴りの近いキーを案内）。キーは前後の空白を除いて大文字化し、値は保存形で書く
+  - `/settings_get`: 表示するのは仕様表のキーの値（DB に無ければ、Bot が実際に環境変数から読んでいるキーについてだけ環境変数の値）と、
+    内部キー・`TZ`・`DB_PATH` の DB の値だけ。それ以外のキーは表示しない
+  - `/settings_delete`: 入力したキーをそのまま照合する（大文字化・空白除去しない）。内部キーは削除できない
+  - `setting_key` のオートコンプリート（set / get は仕様表から説明つき、delete はこのサーバーに保存済みのキー名だけ・内部キーは出さない・管理者だけ）
+- `cogs/setup_wizard.py`: 「大会日を設定」ボタン＋`CompetitionDateModal`。`save_setting` の中で `normalize_setting` を通す
+  （/setup からの書き込みはすべて同じ関門）。Modal の初期値は検証を通る値か Bot が読めている値だけ（読めない値は placeholder に 100 字以内で）。
+  `send_modal` の失敗を捕まえて本人に伝える
+- `cogs/help.py`（`/setup-status`）: 大会日は「入っているか」ではなく「日付として読めるか」（`parse_date`）で判定。案内は `/setup`。読めない値は 20 字で切り詰めて表示
+- `cogs/progress.py`: `/countdown` の案内（`COMPETITION_DATE_HELP`）を `/setup` へ
+- テスト: `tests/test_settings_spec.py`（新規）・`tests/test_settings_commands.py`（新規）・`tests/test_setup_wizard.py`・`tests/test_help.py`・`tests/test_milestones.py`
+- `docs/OPERATION.md`（設定コマンドの表・受け付ける値の表・大会日・値の範囲）・`docs/GUIDE.md`（/setup の手順・大会日の更新）
+
+**コミットの分け方（1タスク1コミットの例外）**: 1つ目のコミット（`/settings_get` の表示範囲の修正＋仕様表＋そのテスト）を独立させた。
+H1-1 / H1-2 に依存せず main へ単独で入れられるようにするため（origin/main へ cherry-pick してフルセット 1491 passed / 18 skipped を確認済み）。
+2つ目のコミットで残りを入れた。
+
+**設計判断**
+- **設定キーはホワイトリスト（仕様表 1 箇所）で定義し、コマンド層で弾く。** `SettingsRepository.set()` では弾かない
+  （起動時セットアップが内部マーカーを書くので、repository 層で弾くと全ギルドが起動できなくなる）→ 下の ADR 草案
+- 表の内訳（チャンネル7・ロール5・数値3・真偽2・列挙1・日付1・文字列1 = 20）より実際のキーが多かった（絵文字 ID 3 と `WEEKLY_DIGEST_WEEKDAY`）。
+  受入基準の「`for_guild()` が読むキーを**すべて**含む」を優先して 24 個とも入れた。内訳の数字は目安として読んだ
+- 検証を通った値は読み出し側で必ず読める形で保存する（数字は ASCII のみ、Discord の ID は 1〜2**63−1 を `str(int)`、日付は厳密な `YYYY-MM-DD`、
+  真偽は `1`/`0`、列挙は小文字）。範囲: `DATA_RETENTION_DAYS` 0〜36500（これを超えると退出時の削除予定の計算が失敗する）、
+  `LAYER_SESSION_*` 0〜10080、`WEEKLY_DIGEST_WEEKDAY` 0〜6
+- `PRIMARY/SECONDARY_TEAM_ROLE_IDS` は `for_guild` が読むので仕様表に入れたが、説明を「【旧方式】…（/team-role を推奨）」にした
+- 既存ギルドの不正値は**移行しない**（既存データを動かさない）。読み出し側は無変更で「不正値は既定へ落として例外を投げない」を維持。
+  代わりに `/setup-status` が読めない大会日を ❌ で知らせる
+- ダッシュボードの設定 API（`dashboard/routers/settings.py`）は別の許可リストを持ったまま（統合は後回し）。食い違いを検出する構造テストだけ足した
+
+**既存の挙動が変わる点 / 通らなくなる入力**
+- `/settings_set` で通らなくなる入力:
+  - 仕様表に無いキー（綴り違いの `COMPETITON_DATE`・任意の自作キー） — 以前は成功表示で保存され、どこからも読まれなかった
+  - 内部キー（`AUTO_SETUP_COMPLETED_AT` `AUTO_SETUP_DONE` `SETUP_VERSION` `SETUP_AT` `GUILD_NAME` `GUILD_COMMANDS_CLEARED_AT`） — 以前は上書きできた
+  - `TZ` / `DB_PATH`（`/set_common` へ案内。`/set_common` は無変更）、`TODOIST_` / `SHEET_` で始まる廃止キー
+  - 種別に合わない値: `COMPETITION_DATE` の `2026/07/25`・`7月25日`・`2026-7-25`・`2026-02-30`・空、`*_CHANNEL_ID` / `*_ROLE_ID` / 絵文字の `#general`・全角数字・`0`・2**63 以上、
+    `WEEKLY_DIGEST_WEEKDAY` の 7・−1、`SCHEDULE_UI_STYLE` の `button`、`DATA_RETENTION_DAYS` の `3.5`・−1・36501、`LAYER_SESSION_*` の 10081、
+    `WELCOME_ENABLED` の `たぶん`、`CLUB_NAME` の空・51 字以上、`LEADER_ROLE_IDS` の数字でない要素、`*_TEAM_ROLE_IDS` の `:` の無い組・空の班キー・空
+- `/settings_set` の保存形が変わる: 小文字・空白付きのキーは大文字のキーとして保存（以前は別の行になって読まれなかった）。真偽は `1`/`0`、列挙は小文字、ID は数字だけ
+- `/settings_get`: 仕様表・内部キー・`TZ`/`DB_PATH`・`TODOIST_` 以外のキーは表示しない（DB に保存済みの旧 `SHEET_*` 等も。`/settings_list` では見え、`/settings_delete` で消せる）。
+  環境変数の値を見せるのは Bot が実際に環境変数から読んでいる15キーだけ
+- `/settings_delete`: 内部キーは削除できない（完全一致。以前の `/settings_set` が作った小文字のゴミ行は従来どおり消せる）
+- `/setup-status`: 読めない大会日は ✅ ではなく ❌（「読めません」）
+- アサーションを変えた既存テスト: `test_help.py`（大会日の hint が `COMPETITION_DATE` を含む → `/setup` を含み `/settings_set` を含まない）、
+  `test_milestones.py`（`COMPETITION_DATE_HELP` に `/setup`）
+
+**ゲートの判定**
+- acm-plan-reviewer: REVISE（1周目: `/settings_get` の件の重さと公開の扱い・秘密情報のテストが禁止リストでも緑・構造テストが直書きしか見ない・
+  検証を通った値が読めない穴・Modal だけの検証・仕様表の書き忘れ・ダッシュボードの別定義・移行のテスト・通らなくなる入力の漏れ）
+  → REVISE（2周目: `/settings_delete` の大文字化で正しい行を消す・移行のテストが番号付きマイグレーションを走らせない・Modal の長い初期値・小文字キーの扱いの食い違い・拒否の確認）
+  → APPROVE（3周目）
+- acm-diff-auditor: FINDINGS（1周目: 内部マーカーを削除できる・補完に権限の確認が無い・Modal が読める値を「読めない」と表示・OPERATION の表示範囲・
+  環境変数を読まないキーまで「環境変数から取得」と表示）→ CLEAN（2周目）
+- acm-test-adversary: INEFFECTIVE（1周目: 整数の非 ASCII 数字・班→ロール対応の混在と空・`send_modal` の失敗のテストが無い）→ INEFFECTIVE（2周目: 内部キーの拒否を大文字化して判定する変異が素通り）→ EFFECTIVE（3周目）
+
+実測表（3周目・79変異。件数は対象5ファイルで赤くなったテスト）:
+
+| 戻した実装 | 赤くなったテスト（件数） |
+|---|---|
+| `/settings_get` の未知キーで環境変数を表示する（元の実装）／別名経由で同じことをする | 6 / 5 |
+| `env_fallback` が仕様表を通さず入力のまま環境変数を引く | 6 |
+| 禁止リスト方式にする（`/settings_get` 側／`env_fallback` 側） | 8 / 2（仕様表に無い任意の名前で落ちる） |
+| 内部キー・TZ・DB_PATH で環境変数へ落ちる | 4 |
+| `spec.env` の判定を消す／`_ENV_BACKED_KEYS` を1つ増やす・減らす | 6 / 1〜4 |
+| `/settings_set` のキーの検証を消す／入力のまま保存／候補を出さない／内部キーを受け付ける | 5 / 1 / 2 / 4 |
+| 拒否を repository 層に置く（受入基準で禁止された形） | 10 |
+| 値の検証を消す／検証はするが生の値を保存 | 9 / 4 |
+| ID を `isdigit()` で判定／上限・下限を外す／整数を `isdigit` 系で判定 | 2 / 1 / 3 |
+| 日付の正規表現を外す／寛容な `strptime` にする | 2 / 2 |
+| 整数の範囲チェックを外す（全部・上限・下限） | 6 / 4 / 2 |
+| 真偽・列挙・text・role_list・role_map・メンション剥がしの各検証を緩める | 1〜4 |
+| 未知の kind を素通しする／仕様表の必須項目を消す | 1 / 6〜9 |
+| `/settings_delete` を大文字化・strip して照合／内部キーの拒否を消す／大文字化して判定 | 1〜3 / 3 / 1 |
+| 補完の check を外す／内部キーの除外を外す／候補名に値を含める | 1 / 1 / 1 |
+| `save_setting` の検証を外す（Modal 側だけにする）／生の値を保存 | 1 / 2 |
+| Modal の初期値に不正値／placeholder を切り詰めない／読める値のフォールバックを外す | 1 / 1 / 3 |
+| `send_modal` の失敗の捕捉を消す／EXTRA_SETUP_KEYS から COMPETITION_DATE を外す | 1 / 12 |
+| `/setup-status` を `bool(value)` 判定・`/settings_set` 案内に戻す／切り詰めを外す | 1〜2 / 1 |
+| `COMPETITION_DATE_HELP` を `/settings_set` 案内に戻す | 1 |
+| for_guild に仕様表に無いキーの読み取りを足す（直書き／組み立てた名前） | 2 / 1（実行時の記録テストが拾う） |
+| cogs にキー形の定数を足す | 1（全数分類テスト） |
+| **素通り**: 補完のギルド外ガードを外す | 0（等価変異。ギルド ID が None なら DB の行に一致しない） |
+| **素通り**: アンダースコアの無いキーを足す | 0（既知の限界。申し送りに記載） |
+
+1周目の素通り（整数の非 ASCII 数字・班→ロール対応の混在と空・`send_modal` の失敗）と2周目の素通り（内部キーの拒否を大文字化）は、テストを足して赤になった。
+
+**ADR 草案（公開: `docs/adr/0010-settings-key-whitelist-at-command-layer.md` の候補）**
+
+- **文脈**: `/settings_set` は任意のキーに任意の値を保存し、成功と表示していた。読み出し側（`config.for_guild()` 等）は
+  「不正値は既定へ落として例外を投げない」ので、綴り違いのキーや読めない値は黙って捨てられ、大会日からの逆算や
+  遅延警告が設定ミスに気づけない形で止まった。設定キーの一覧はコードの複数箇所（`config.for_guild`・`/setup`・
+  ダッシュボード）に部分的に散っていた
+- **選択肢**: (A) repository 層（`SettingsRepository.set()`）で弾く (B) コマンド層で弾き、仕様表を1箇所に置く
+  (C) 禁止リスト（危ないキーだけ拒否） (D) 何もせず、読み出し側の警告を増やす
+- **決定**: (B)。ギルド別設定のキーは `utils/settings_spec.py` の仕様表（キー・種別・検証・説明・環境変数へ落ちるか）に1箇所で定義し、
+  `/settings_set` `/settings_get` `/setup` はこの表に無いキー・種別に合わない値を受け付けない。`SettingsRepository.set()` は何でも書ける
+- **理由**: 起動時セットアップは内部マーカー（`AUTO_SETUP_COMPLETED_AT` 等）を repository 経由で書くので、repository 層で弾くと
+  全ギルドが起動できなくなる。仕様表を1箇所にし、`for_guild` が実際に問い合わせるキー・コード中のキー形の定数・ダッシュボードの定義との
+  食い違いを構造テストで落とすことで、キーを足して仕様表を忘れる形を塞ぐ（規律ではなく構造で守る）
+- **却下した案**: (A) 上の理由。(C) 新しい秘密のキーや廃止キーが増えるたびに漏れる（外部へ出すものはホワイトリストで定義する、と同じ考え）。
+  (D) 保存の時点で止めないと、利用者は成功表示を信じて気づかない
+- **影響範囲**: `/settings_set` で通らなくなる入力がある（完了ログに列挙）。既存の不正値は移行しない（読み出し側は無変更）。
+  `/set_channel` 等の別コマンドとダッシュボードはまだ仕様表の検証を通らない
+- **覆す条件**: 設定の書き込み口がコマンド以外（ダッシュボード・外部 API）に広がり、コマンド層だけでは守れなくなったとき。
+  そのときは repository 層に「仕様表にあるキーだけ受け付ける書き込み口」と「内部マーカー専用の書き込み口」を分けて持たせる
+- **根拠**: HARDENING_TASKS.md H1-3、`tests/test_settings_spec.py` の構造テスト
+
+**次タスクへの申し送り**
+- `/set_channel`（数字を検証しない）・`/set_role`・`/set_common`・ダッシュボードの設定 PATCH（`isdigit()` で判定）は仕様表の検証を通らない。
+  同じ「成功と表示して黙って読まれない」型なので、仕様表の `normalize_setting` へ寄せる別タスクにする
+- ダッシュボードの許可リストは仕様表と別定義のまま（食い違いは `test_dashboard_settings_agree_with_spec` が検出する）
+- `/countdown` は、値が入っていても読めないとき「大会日: 未設定」と表示する（`/setup-status` では気づける）
+- 構造テスト（キー形の定数の全数分類）は、アンダースコアを含まない名前（`TZ` 等）を拾わない
+- 移行のテストは「H1 の基準（スキーマ v24）より後に足すマイグレーションは何度走っても同じ結果になる」ことを前提にしている。冪等でないものを足すと落ちる
+- `/set_common DB_PATH` / `TZ` は `GUILD_ID` を指定した旧運用のサーバーでだけ効く
+- 1つ目のコミットは本番への先行投入を想定している。関連する判断事項は利用者に別途報告済み
