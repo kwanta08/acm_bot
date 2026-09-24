@@ -89,6 +89,10 @@ class _FakeMessage:
         self.edits.append(kwargs)
 
 
+#: guild.me（Bot 自身）。/schedule create は投稿前に Bot の権限を検査する（H1-2）
+_BOT = SimpleNamespace(id=4242, bot=True)
+
+
 class _FakeChannel:
     def __init__(self, channel_id: int = 555, guild=None):
         self.id = channel_id
@@ -96,6 +100,10 @@ class _FakeChannel:
         self.guild = guild
         self.sent: list[dict] = []
         self.messages: dict[int, _FakeMessage] = {}
+
+    def permissions_for(self, member):
+        assert member is _BOT, "Bot 自身以外の権限を検査している"
+        return discord.Permissions.all_channel()
 
     async def send(self, content=None, *, embed=None, view=None, **kwargs):
         msg = _FakeMessage(1000 + len(self.sent) + 1)
@@ -116,6 +124,7 @@ class _FakeGuild:
     def __init__(self, guild_id: int = G1):
         self.id = guild_id
         self.emojis = []
+        self.me = _BOT
         self.channels: dict[int, object] = {}
 
     def get_channel_or_thread(self, channel_id: int):

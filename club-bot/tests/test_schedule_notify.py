@@ -23,6 +23,8 @@ import tempfile
 from types import SimpleNamespace
 from unittest import mock
 
+import discord
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 sys.modules.setdefault("dotenv", mock.MagicMock())  # config が読む
@@ -54,11 +56,19 @@ class _FakeMessage:
         return None
 
 
+#: guild.me（Bot 自身）。/schedule create は投稿前に Bot の権限を検査する（H1-2）
+_BOT = SimpleNamespace(id=4242, bot=True)
+
+
 class _FakeChannel:
     def __init__(self, channel_id: int = 555):
         self.id = channel_id
         self.mention = f"<#{channel_id}>"
         self.sent: list[dict] = []
+
+    def permissions_for(self, member):
+        assert member is _BOT, "Bot 自身以外の権限を検査している"
+        return discord.Permissions.all_channel()
 
     async def send(self, content=None, *, embed=None, **kwargs):
         self.sent.append({"content": content, "embed": embed})
@@ -69,6 +79,7 @@ class _FakeGuild:
     def __init__(self, guild_id: int = G1, roles: dict | None = None):
         self.id = guild_id
         self.emojis = []
+        self.me = _BOT
         self._roles = roles or {}
         self.channels: dict[int, _FakeChannel] = {}
 
