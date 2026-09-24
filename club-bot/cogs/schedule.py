@@ -39,7 +39,7 @@ from utils.embeds import (
     success_embed,
 )
 from utils.logger import get_logger
-from utils.notify import dm_each_with_channel_fallback
+from utils.notify import dm_each_with_channel_fallback, guild_channel, guild_channel_by_id
 from utils.parser import (
     InvalidDatetimeError,
     fmt_jp,
@@ -314,8 +314,11 @@ class Schedule(commands.Cog):
 
         # 投稿先決定（ギルド別設定を参照）
         gconf = await config.for_guild(guild_id)
+        # 既定の投稿先は**このサーバーの中だけ**で引く（H1-1）。env の値は
+        # 全ギルドへ配られるため、他サーバーのチャンネルを指していることがある。
+        # 設定されているのに引けないときは interaction.channel へ落とさずエラーにする
         target_channel = channel or (
-            self.bot.get_channel(gconf.default_schedule_channel_id)
+            guild_channel(interaction.guild, gconf.default_schedule_channel_id)
             if gconf.default_schedule_channel_id
             else interaction.channel
         )
@@ -848,7 +851,7 @@ class Schedule(commands.Cog):
 
         async def _do_delete(confirm_interaction: discord.Interaction) -> None:
             # Discord上の候補メッセージを削除
-            channel = self.bot.get_channel(int(schedule["channel_id"]))
+            channel = guild_channel_by_id(self.bot, guild_id, schedule["channel_id"])
             deleted_msgs = 0
             failed_msgs = 0
             for opt in options:
@@ -1139,7 +1142,7 @@ class Schedule(commands.Cog):
         updated_schedule = await self.repo.get_schedule(guild_id, schedule_id)
 
         # 各投票メッセージの締切表示を更新
-        channel = self.bot.get_channel(int(schedule["channel_id"]))
+        channel = guild_channel_by_id(self.bot, guild_id, schedule["channel_id"])
         updated_msgs = 0
         if channel:
             if (updated_schedule or schedule).get("ui_style") == "buttons":
@@ -1480,7 +1483,7 @@ class Schedule(commands.Cog):
         message_id = option.get("message_id")
         if not message_id:
             return False
-        channel = self.bot.get_channel(int(schedule["channel_id"]))
+        channel = guild_channel_by_id(self.bot, guild_id, schedule["channel_id"])
         if channel is None:
             return False
 
@@ -1643,7 +1646,7 @@ class Schedule(commands.Cog):
             f"締切: {deadline}\n投票チャンネルでリアクションをお願いします。"
         )
 
-        channel = self.bot.get_channel(int(schedule["channel_id"]))
+        channel = guild_channel(guild, schedule["channel_id"])
         await dm_each_with_channel_fallback(
             targets, text, channel, fallback_note="未回答リマインド（DM不可）:"
         )
@@ -1655,7 +1658,7 @@ class Schedule(commands.Cog):
         await self.repo.close_schedule(guild_id, schedule["schedule_id"])
         guild = self.bot.get_guild(guild_id)
         embed = await svc.build_summary_embed(self.repo, guild_id, self.bot, schedule, guild)
-        channel = self.bot.get_channel(int(schedule["channel_id"]))
+        channel = guild_channel(guild, schedule["channel_id"])
         if channel:
             try:
                 await channel.send(embed=embed)

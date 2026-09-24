@@ -47,7 +47,7 @@ from services.progress_tree import load_tree
 from services.stock_service import low_items
 from utils.embeds import task_embed
 from utils.logger import get_logger
-from utils.notify import guild_channel, resolve_notice_channel_id
+from utils.notify import guild_channel, guild_channel_by_id, resolve_notice_channel_id
 from utils.parser import TZ, fmt_jp, from_iso, now, to_iso
 
 log = get_logger("reminders")
@@ -606,14 +606,15 @@ class Reminders(commands.Cog):
 
         gconf = await config.for_guild(guild_id)
         channel_id = await resolve_default_channel_id(self.bot.db, guild_id)
-        channel = self.bot.get_channel(channel_id) if channel_id else None
+        channel = guild_channel_by_id(self.bot, guild_id, channel_id)
         if channel is None:
             # 部員への通知は送らない（ADR 0023: 送り先が無いギルドは沈黙する）が、
             # 「遅延はあるのに届いていない」ことは運用者に見える形で残す。
             log.info("マイルストーン通知の送信先が無い (guild=%s)", guild_id)
             await self.bot.log_to_channel(
                 "[マイルストーン] 遅れている節目がありますが、通知先チャンネルが"
-                "設定されていないため送信できませんでした。"
+                "設定されていないか、このサーバーのチャンネルではないため"
+                "送信できませんでした。"
                 "`/setup` の進捗チャンネル、または `/set_channel` で設定してください。",
                 guild_id=guild_id,
             )
@@ -758,16 +759,11 @@ class Reminders(commands.Cog):
 
     @staticmethod
     def _guild_channel(guild, channel_id):
-        """同一ギルド内でチャンネルを解決する（他ギルドへ流さない）。"""
-        if guild is None or not channel_id:
-            return None
-        try:
-            # スレッドに投稿された予定もあるので get_channel_or_thread
-            # （get_channel はスレッドを解決しない）
-            channel = guild.get_channel_or_thread(int(channel_id))
-        except (TypeError, ValueError):
-            return None
-        return channel if channel is not None and hasattr(channel, "send") else None
+        """同一ギルド内でチャンネル（スレッド含む）を解決する（他ギルドへ流さない）。
+
+        実装は `utils.notify.guild_channel` に1つだけ置く（H1-1）。
+        """
+        return guild_channel(guild, channel_id)
 
     # ---------- 毎日 04:00: 期限切れギルドのデータ削除 ----------
     @tasks.loop(time=time(hour=4, minute=0, tzinfo=TZ))
@@ -808,8 +804,7 @@ class Reminders(commands.Cog):
         channel = None
         try:
             gconf = await config.for_guild(guild_id)
-            if gconf.bot_log_channel_id:
-                channel = self.bot.get_channel(gconf.bot_log_channel_id)
+            channel = guild_channel_by_id(self.bot, guild_id, gconf.bot_log_channel_id)
         except Exception:  # noqa: BLE001
             channel = None
 
@@ -898,7 +893,7 @@ class Reminders(commands.Cog):
             channel = None
             channel_id = _channel_id_of(info)
             if channel_id is not None:
-                channel = self.bot.get_channel(channel_id)
+                channel = guild_channel_by_id(self.bot, guild_id, channel_id)
             if channel is None:
                 channel = default_channel
             if channel is None:
@@ -1011,13 +1006,13 @@ class Reminders(commands.Cog):
     async def _task_channel(self, guild_id: int):
         gconf = await config.for_guild(guild_id)
         if gconf.default_task_channel_id:
-            return self.bot.get_channel(gconf.default_task_channel_id)
+            return guild_channel_by_id(self.bot, guild_id, gconf.default_task_channel_id)
         return None
 
     async def _today_channel(self, guild_id: int):
         gconf = await config.for_guild(guild_id)
         if gconf.today_channel_id:
-            return self.bot.get_channel(gconf.today_channel_id)
+            return guild_channel_by_id(self.bot, guild_id, gconf.today_channel_id)
         return await self._task_channel(guild_id)
 
     async def _team_map(self, guild_id: int) -> dict[str, dict]:
@@ -1112,7 +1107,7 @@ class Reminders(commands.Cog):
             else:
                 info = team_map.get(bucket_key, {})
                 channel_id = _channel_id_of(info)
-                channel = self.bot.get_channel(channel_id) if channel_id is not None else None
+                channel = guild_channel_by_id(self.bot, guild_id, channel_id)
                 if channel is None:
                     channel = default_channel
                 heading = f"{title}｜{info.get('name', bucket_key)}班"

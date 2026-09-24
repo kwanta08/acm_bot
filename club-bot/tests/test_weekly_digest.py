@@ -453,9 +453,6 @@ class _Bot:
     def get_guild(self, guild_id: int):
         return next((g for g in self.guilds if g.id == guild_id), None)
 
-    def get_channel(self, _cid):
-        return None
-
     def get_cog(self, name: str):
         return self._reports if name == "Reports" else None
 

@@ -301,7 +301,8 @@ class _Guild:
         self.name = str(guild_id)
         self._channel = channel
 
-    def get_channel(self, _cid):
+    def get_channel_or_thread(self, _cid):
+        # 実装は utils.notify.guild_channel（同一ギルド内・スレッド含む）で引く
         return self._channel
 
 
@@ -313,9 +314,6 @@ class _Bot:
 
     def get_guild(self, guild_id: int):
         return next((g for g in self.guilds if g.id == guild_id), None)
-
-    def get_channel(self, _cid):
-        return None
 
     def get_cog(self, _name):
         return None

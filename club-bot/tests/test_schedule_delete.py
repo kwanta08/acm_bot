@@ -298,6 +298,10 @@ class _Channel:
         self.id = 555
         self._messages = {m.id: m for m in messages}
 
+    async def send(self, *args, **kwargs):
+        # 送れるチャンネルであること（utils.notify.guild_channel はカテゴリ等を除く）
+        return None
+
     async def fetch_message(self, message_id: int):
         if message_id not in self._messages:
             raise discord.NotFound(SimpleNamespace(status=404, reason="gone"), "not found")
@@ -353,12 +357,22 @@ class _Emoji:
 
 
 def _cog(db: Database, channel=None) -> Schedule:
+    # /schedule delete の投票メッセージは**ギルド経由**で引く（H1-1）。
+    # bot.get_channel は raw リアクション処理（H1-1 の除外）だけが使う。
+    # ガードを外した変異がアサーションまで進めるよう、そちらにも同じ
+    # チャンネルを渡しておく
+    guild = SimpleNamespace(
+        id=G1,
+        emojis=[],
+        get_channel_or_thread=lambda _cid: channel,
+        get_emoji=lambda _eid: None,
+    )
     bot = SimpleNamespace(
         db=db,
         guilds=[],
         user=None,
         get_channel=lambda _cid: channel,
-        get_guild=lambda _g: None,
+        get_guild=lambda gid: guild if gid == G1 else None,
     )
     return Schedule(bot)
 

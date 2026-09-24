@@ -147,6 +147,10 @@ class _Guild:
     def get_member(self, user_id: int):
         return self._members.get(user_id)
 
+    def get_channel_or_thread(self, _channel_id: int):
+        # DM 不可時のフォールバック先は無い（このファイルは DM の届き方だけを見る）
+        return None
+
     def all_members(self):
         """ロールにしか居ないメンバーも含めて、DM の届き先を数える。"""
         seen = dict(self._members)
@@ -160,7 +164,6 @@ def _cog(db: Database, guild) -> Schedule:
         db=db,
         guilds=[],
         get_guild=lambda gid: guild if guild and guild.id == gid else None,
-        get_channel=lambda cid: None,
     )
     return Schedule(bot)
 

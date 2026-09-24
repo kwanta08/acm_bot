@@ -1,0 +1,401 @@
+# 堅牢化タスク管理（H1）
+
+> **内部の作業用ドキュメントです（[development/README.md](README.md)）。**
+> 書かれた時点のスナップショットで、現在のコードとは食い違う記述を含みます。
+> **現状の仕様の根拠には使えません。** 使い方は [`../GUIDE.md`](../GUIDE.md)、
+> 運用は [`../OPERATION.md`](../OPERATION.md) を参照してください。
+
+`docs/development/IMPROVEMENT_TASKS.md`（G0〜G4）に続く第4の管理表。
+G4 完了後の全コード分析で見つかった**「一度決めた原則が守られていない場所」**を5件に絞ってある。
+
+この表の5件には共通の性格がある。
+
+- **どれも新機能ではない。** 既に決めた規約（ADR / AGENTS.md / `utils/notify.py` の明文化された約束）が
+  守られていない箇所を揃えるだけ
+- **どれもスキーマを変えない。** マイグレーションは1件も発生しない（下表を参照）
+- **どれも1ファイル〜3ファイルで閉じる。** 相互依存が無いので順不同で実装できるが、
+  番号順に回すと差分が読みやすい
+
+`/autonomous-dev-loop` で1タスクずつ回すために分解してある。
+起動プロンプトは [`HARDENING_LOOP_PROMPT.md`](HARDENING_LOOP_PROMPT.md)。
+
+## 運用ルール
+
+- 実装は **必ず `/autonomous-dev-loop` の手順**（plan → 評価 → plan修正 → 実装 → レビュー → 修正 → 記録）で回す。
+  「実装したので確認してください」で止めない。全ゲートを通って初めて完了
+- 1イテレーションにつき未完了で最も若い番号のタスクを **1つだけ** 実施する
+- タスクごとに `fix/<タスクID小文字>` ブランチを切る（ADR 0014: 1タスク＝1ブランチ＝1PR）
+- 完了時にチェックを入れ、末尾の完了ログへ「完了内容 / 設計判断 / 次タスクへの申し送り」を追記する
+- 【人間タスク】はエージェントが飛ばす（この表には無い）
+- push は**ユーザーから明示指示があったときのみ**。コミットはタスク単位で行ってよい
+
+## 全タスク共通の受入基準（AGENTS.md より。各タスクで再掲しない）
+
+- 新規データ・新規設定はすべて `guild_id` スコープ。ギルド別設定は `config.for_guild(guild_id)` 経由
+- コマンドは `interaction.guild.id` でスコープし、DM 実行は `ensure_guild()` で拒否する
+- Discord API 呼び出しは `discord.HTTPException` を捕捉する
+- 班名・チャンネル・ロール・機体名・桁構成をコードに埋め込まない
+- 実装とドキュメント（`README.md` / `docs/`）が矛盾したら両方直す
+- `ruff check .` と `python -m pytest tests/ -q -rs` がフルセットで緑
+- **skip を「緑」と数えない。** `-rs` の skip 理由を報告に書く
+
+## この表に固有の受入基準
+
+- **ADR に反する変更をしない。** 衝突したら実装せず、完了ログに
+  「ADR NNNN と衝突。判断を仰ぐ」と書いて止まる
+- **既存の挙動を変えるタスクが2件ある**（H1-3 の未知キー拒否 / H1-5 の過去日拒否）。
+  どちらも「今まで通っていた入力が通らなくなる」変更なので、
+  **何が通らなくなるかを完了ログに列挙する**
+- 5件すべて「再発を検出する仕組み」まで含めて完了とする。
+  直すだけで終わらせない（ADR 0008: 規律ではなく構造で守る）
+
+## スキーマバージョンの割り当て
+
+**この表にスキーマ変更は無い。** `migrations/` にファイルを足さず、
+`utils/db.py` の `SCHEMA_VERSION`（現行 24）も動かさない。
+
+もし実装中に「列を足したい」と思ったら、それは受入基準の読み違いを疑うこと。
+5件とも既存の列・既存のテーブルだけで完結する。
+
+---
+
+## Phase H1: 決めた原則が守られていない場所を揃える
+
+---
+
+- [x] **H1-1** `bot.get_channel()` を同一ギルド内の解決へ寄せ、他テナントへの誤送信経路を塞ぐ。
+
+      `utils/notify.py` の `resolve_notice_channel_id` の docstring が明文化している約束——
+
+      > **チャンネルの解決（get_channel）はしない。** 呼び出し側が
+      > `guild.get_channel` で**同じギルド内に限定して**引くこと
+      > （bot 全体のキャッシュから引くと他テナントへ流れる）。
+
+      ——が、通知の主要経路で守られていない。`bot.py` の `_log_channel_for` は
+      G4-11 でこの検査を入れたのに、`cogs/` 側は入っていない。
+
+      `config.for_guild()` は環境変数の値を**全ギルドの GuildConfig に配る**
+      （`config.py` の `for_guild`）。レガシー運用（`GUILD_ID` 指定 + 旧 `.env` に
+      `DEFAULT_TASK_CHANNEL_ID` 等が残っている）のまま2サーバー目を迎えたインスタンスでは、
+      **B サーバーの通知が A サーバーのチャンネルに出る**。
+
+      - **置換対象**（`bot.get_channel(` → 同一ギルド内の解決へ）
+
+        | 箇所 | チャンネル ID の出どころ | 危険度 |
+        |---|---|---|
+        | `cogs/reminders.py` `_task_channel` | `gconf.default_task_channel_id`（**env フォールバック**） | 高 |
+        | `cogs/reminders.py` `_today_channel` | `gconf.today_channel_id`（**env フォールバック**） | 高 |
+        | `cogs/schedule.py` `create` の投稿先 | `gconf.default_schedule_channel_id`（**env フォールバック**） | 高 |
+        | `cogs/progress.py` `push_project_tasks` | `gconf.default_task_channel_id`（**env フォールバック**） | 高 |
+        | `cogs/reminders.py` `_purge_one` | `gconf.bot_log_channel_id`（**env フォールバック**） | 中 |
+        | `cogs/reminders.py` `_alert_milestones` | `resolve_default_channel_id`（ギルド別 settings） | 低 |
+        | `cogs/reminders.py` セクション通知・バケット通知 | `teams.channel_id`（ギルド別） | 低 |
+        | `cogs/schedule.py` `schedule["channel_id"]` を引く5箇所 | 予定行（ギルド別） | 低 |
+
+        危険度「低」も**同じ形に揃える**。個別に判断させると次の追加でまた分かれる。
+
+      - **除外（触らない）**:
+        - `bot.py` の `_log_channel_for` / `_fetch_legacy_log_channel` — 既に検査済み。G4-11 の成果物
+        - `cogs/schedule.py` の raw リアクション処理2箇所（`payload.channel_id`）—
+          `payload.guild_id` を検査済みで、未キャッシュ時の `fetch_channel` フォールバックが要る。
+          `guild.get_channel_or_thread` に寄せられるなら寄せてよいが、**フォールバックを消さない**
+      - **変更ファイル（推定）**: `cogs/reminders.py`, `cogs/progress.py`, `cogs/schedule.py`,
+        `tests/test_channel_scope.py`(新規)
+      - **受入**:
+        - 上表の「除外」以外のすべてで、チャンネル解決が `guild.get_channel`（または
+          `utils.notify.guild_channel`）経由になっている
+        - **ギルドが解決できないときは送らない。** 「たぶんこれだろう」でフォールバックしない
+          （`bot.py` `_log_channel_for` と同じ判断。誤送信よりログが出ないほうがましである）
+        - 2ギルドが同じ `channel_id` を指している状況で、A のチャンネルへ B の通知が出ないことを
+          テストで固定する
+        - **再混入の回帰テスト**: `cogs/` `services/` の**実行コード**（コメント・文字列リテラルを除く）に
+          `bot.get_channel(` が現れたら落ちる。`tests/test_intents.py` の走査方式
+          （`_iter_source_files` / `_code_only`）をそのまま流用する。除外は許可リストで明示
+      - **検証**: 新規テストと既存の `tests/test_multi_tenant.py` / `tests/test_reminders_resilience.py` が緑
+      - **注意**: ADR 0008（`guild_id` を型で封じる / 規律ではなく構造で守る）の延長線上にある。
+        新しい ADR は不要だが、**許可リストに何を入れたかは完了ログに書く**
+
+---
+
+- [ ] **H1-2** `/schedule create` が投稿に失敗したとき、ゾンビ投票を残さない。
+
+      `create` は `create_schedule` / `add_option` を**投稿より先**に実行し、
+      `channel.send()` を try/except していない（ボタン式・リアクション式の両方）。
+      同じ Cog の `/schedule confirm` の告知は `except (Forbidden, HTTPException)` しているので、
+      **一番古いコードパスだけが規約から取り残されている**。
+
+      いま起きること:
+
+      1. 予定と候補が DB に入る
+      2. 送信が `Forbidden` → 利用者には「予期せぬエラーが発生しました」だけ
+      3. `message_id` の無い予定が残り、5分後の自動締切ループが拾う
+      4. 締切サマリーの投稿もまた失敗する
+
+      - **変更ファイル（推定）**: `cogs/schedule.py`, `tests/test_schedule_create_failure.py`(新規)
+      - **受入**:
+        - **DB へ書く前に**、投稿先チャンネルへの `send_messages` / `embed_links` を
+          `channel.permissions_for(guild.me)` で検査する。不足していれば**何も作らずに**
+          「このチャンネルに投稿できません（不足: …）」と、不足している権限名を挙げて返す
+        - それでも送信に失敗した場合（競合・API 障害）は `Forbidden` / `HTTPException` を捕捉し、
+          `soft_delete_schedule` で予定を畳んでからエラーを返す
+        - 畳んだ予定が自動締切（`list_due_schedules`）・自動催促（`list_reminder_candidates`）・
+          `/schedule list`（`list_open_schedules`）のいずれにも出ないことをテストで固定する
+        - リアクション式の `add_reaction` の失敗は**投票自体を無効にしない**。
+          ログに残して続行する（絵文字が1つ付かないだけで投票は成立する）
+        - `/schedule create` が成功 Embed を返したときは、**全候補に `message_id` が入っている**
+      - **検証**: 送信が `Forbidden` を投げるスタブで、(a) DB に予定が残らない or 畳まれている
+        (b) 利用者に権限不足が伝わる (c) 5分ループが拾わない、の3点
+      - **注意**: **新しい repository メソッドを足さない。** `soft_delete_schedule` は
+        `deleted_flag` と同時に `closed_flag` も立てるので、既存の条件式だけで
+        3つのループがすべて止まる（メソッドの docstring に明記されている）
+
+---
+
+- [ ] **H1-3** 設定キーをホワイトリスト化し、大会日を `/setup` から設定できるようにする。
+
+      `/settings_set` は**任意のキーに任意の値**をそのまま保存する。
+      ホワイトリストも値の検証も `setting_key` のオートコンプリートも無い。
+
+      そして `COMPETITION_DATE` は `/setup` にもウィザードにも無く、
+      **この生コマンドだけが設定手段**（`cogs/help.py` の `collect_setup_status` がそう案内している）。
+
+      - `2026/07/25` と入力 → 保存は成功表示 → `milestone_service.parse_date` が `None` を返す
+      - `/countdown` は「大会日が未設定です」と言い続ける
+      - **週次マイルストーン警告も永久に飛ばない**
+      - `COMPETITON_DATE`（タイポ）でも同じく成功表示で無言に死ぬ
+
+      看板機能2つ（大会からの逆算・遅延警告）が、設定ミスに気づけない形でぶら下がっている。
+      `IMPROVEMENT_REPORT.md` の P1-18 がタスク表に載らないまま残ったもの。
+
+      - **変更ファイル（推定）**: `config.py`（または `utils/settings_spec.py` 新規）,
+        `cogs/settings.py`, `cogs/setup_wizard.py`, `cogs/help.py`,
+        `docs/OPERATION.md`, `docs/GUIDE.md`, `tests/test_settings_spec.py`(新規)
+      - **受入**:
+        - 設定キーの仕様（キー / 種別 / 検証 / 人間向けの説明）を **1箇所** に定義する。
+          `config.for_guild()` が読むキーを**すべて**含むこと
+          （チャンネル系7・ロール系5・数値系3・真偽系2・列挙1・日付1・文字列1）
+        - `/settings_set` は**未知のキーを拒否**し、綴りの近い候補を提示する
+        - `/settings_set` は**種別に合わない値を拒否**する。最低限:
+          - `COMPETITION_DATE`: `2026-07-25` は成功 / `2026/07/25`・`7月25日`・空文字 はエラー
+          - `*_CHANNEL_ID` / `*_ROLE_ID`: 数字以外はエラー
+          - `WEEKLY_DIGEST_WEEKDAY`: 0〜6 以外はエラー
+          - `SCHEDULE_UI_STYLE`: `buttons` / `reaction` 以外はエラー
+          - `DATA_RETENTION_DAYS` / `LAYER_SESSION_*_MINUTES`: 整数以外はエラー
+        - `setting_key` にオートコンプリートを付ける（説明文を候補名に含める）
+        - `/setup` に「大会日を設定」ボタン（Modal 1枚）を足し、**同じ検証**を通す
+        - `/setup-status` の大会日の hint を `/setup` に変える（生コマンドを案内しない）
+        - **内部マーカーはコマンドから設定できない**が、`SettingsRepository.set()` の
+          直接呼び出しは従来どおり通ること（`AUTO_SETUP_COMPLETED_AT`・`SETUP_VERSION`・
+          `GUILD_NAME`・`GUILD_COMMANDS_CLEARED_AT` を起動時セットアップが書けなくなると
+          全ギルドが壊れる）
+      - **検証**: 検証関数の単体テスト（キー × 値の表）＋
+        `/settings_set` が未知キー・不正値を拒否することのコマンドレベルのテスト
+      - **注意**:
+        - **拒否はコマンド層だけ。** repository 層で弾くと `bot.py` の
+          `_ensure_guild_setup` が死んで全ギルドが起動できなくなる
+        - 既存ギルドの `settings` に既に入っている不正値は**移行しない**
+          （ADR 0024: 既定値で既存データを動かさない）。読み出し側は今までどおり
+          「不正値は既定へ落として例外を投げない」を維持する
+        - この表で**唯一 ADR を足す可能性がある**タスク。「設定キーはホワイトリストで、
+          コマンド層で弾く」は新しい判断なので、実装したら ADR 草案を完了ログに書く
+
+---
+
+- [ ] **H1-4** 未回答リマインドの文面を、そのサーバーの投票 UI に合わせる。
+
+      `notify_unanswered` の DM 本文が
+
+      > 投票チャンネルでリアクションをお願いします。
+
+      で固定されている。既定の UI は `buttons`（`DEFAULT_SCHEDULE_UI_STYLE = "buttons"`）で、
+      **ボタン式のボードに付けたリアクションは投票として扱われない**
+      （`_handle_reaction` が `ui_style == "buttons"` を明示的に無視する）。
+
+      催促された人が言われたとおりにして、票が入らない。
+
+      - **変更ファイル（推定）**: `cogs/schedule.py`, `tests/test_schedule_remind_text.py`(新規)
+      - **受入**:
+        - 本文が `schedule["ui_style"]` で分岐する
+          - `buttons` → 「投票ボードのボタンから回答してください」の主旨
+          - `reaction` → 「リアクションで回答してください」の主旨
+        - `ui_style` が欠けている・未知の値のときは**既定（buttons）の文面**にする
+          （例外を投げない。1件の壊れた行で催促が止まらないようにする）
+        - `/schedule remind`（手動）と締切前の自動催促の**両方**が同じ文面になる
+          （同じ関数を通るので自然に満たされるが、テストで固定する）
+        - 文面を組む部分を純粋関数として切り出し、DB も Discord も触らずにテストできるようにする
+      - **検証**: ui_style が `buttons` / `reaction` / 欠損 の3通りで期待した語が入ることをテスト
+      - **注意**: **ジャンプリンクはここでは足さない。** 対象が全通知（未回答催促・
+        確定日程・積層の押し忘れ・在庫・班別タスク）に広がるので、別タスクにする。
+        同じ文字列を2回触ることになるが、「一度に触るのは1論点まで」を優先する
+
+---
+
+- [ ] **H1-5** 過去の締切・過去の候補日・締切より前の候補を弾く。
+
+      `/schedule create deadline:2025-07-02`（去年の日付。打ち間違いで最も多い形）が通る。
+      作成成功の緑 Embed が出て、5分以内に自動締切され、0票で終わる。
+      `parse_deadline` にも `create` にも「未来かどうか」の検証が無い。
+
+      - **変更ファイル（推定）**: `services/schedule_service.py`, `cogs/schedule.py`,
+        `tests/test_schedule_time_validation.py`(新規)
+      - **受入**:
+        - `/schedule create` が次を**すべて**拒否する（拒否時は **DB に何も書かない**）
+          - 締切 <= 現在
+          - 候補日時 <= 現在（**どの候補が問題か**を文面に出す）
+          - 候補日時 < 締切（投票が終わる前に予定日が来る）
+        - `/schedule edit-deadline` も「新しい締切 <= 現在」を拒否する
+        - 判定は `services/schedule_service.py` の**純粋関数**に置く。
+          現在時刻を引数で受け取り、DB も Discord も触らない
+        - エラー文面は「何が」「どう駄目か」「どう直すか」を含む
+          （`utils/embeds.error_embed` の既存の作法に揃える）
+      - **検証**: 純粋関数の表駆動テスト（正常 / 過去の締切 / 過去の候補 / 締切より前の候補 /
+        締切と同時刻の候補＝許可）＋ コマンドレベルで「拒否したら予定が作られない」
+      - **注意**:
+        - `parse_datetime` の短縮形（`07-03`）は既に「過去なら翌年」へ送る。
+          **完全な日付（`YYYY-MM-DD`）を勝手に翌年へ送らない。** 利用者の意図を推測せず、
+          エラーにして打ち直させる（`2025-07-02` を `2026-07-02` に読み替えると、
+          本当に過去のデータを入れたい場合に手段が無くなる）
+        - 締切と候補が**同時刻**の場合は許可する（「締切＝集合時刻」の運用があるため）
+        - この変更で通らなくなる入力を完了ログに列挙する
+
+---
+
+## 完了ログ
+
+<!--
+各タスクの完了時に、次の形式で追記する。
+
+### H1-N: <タイトル>（YYYY-MM-DD / ブランチ fix/h1-n）
+
+**完了内容**
+- <ファイル>: <何を、なぜ>
+
+**設計判断**
+- <仮決めした解釈 / 却下した案とその理由 / ADR 草案が要るか>
+
+**ゲートの判定**
+- acm-plan-reviewer: APPROVE（N 周目）
+- acm-diff-auditor: CLEAN
+- acm-test-adversary: EFFECTIVE（実測表）
+
+**次タスクへの申し送り**
+- <次の担当が知らないと困ること>
+-->
+
+### H1-1: `bot.get_channel()` を同一ギルド内の解決へ寄せ、他テナントへの誤送信経路を塞ぐ（2026-09-24 / ブランチ fix/h1-1）
+
+**完了内容**
+- `utils/notify.py`:
+  - `guild_channel(guild, channel_id)` を `guild.get_channel` → `guild.get_channel_or_thread` の**直接呼び出し**に変えた。
+    スレッドも解決し、`send` を持たないもの（カテゴリ等）と数字でない ID は None。
+    `get_channel` へのフォールバックも、メソッドが無いときに黙って None を返す枝も持たない（本番の `discord.Guild` は必ず持つので、そうした枝はフェイクだけを「チャンネルが引けない」理由で緑にする穴になる）
+  - `guild_channel_by_id(bot, guild_id, channel_id)` を新設。`bot.get_guild` → `guild_channel`。
+    ギルドが見えない・そのギルドに無いときは None（送らない）＋ `log.debug`（`bot.py` `_log_channel_for` と同じ）
+  - `resolve_notice_channel_id` の docstring の指示を `guild_channel` / `guild_channel_by_id` へ直した（従来は `guild.get_channel` を指示しており、スレッドを解決しない）
+- `cogs/reminders.py`: `_task_channel` / `_today_channel` / `_purge_one` / `_alert_milestones` / `push_section_tasks`（班チャンネル）/
+  `_dispatch_todoist_tasks`（班バケット）を `guild_channel_by_id` へ。`Reminders._guild_channel` は `guild_channel` への委譲にした（中身が同一になったので実装を1つにする）。
+  `_alert_milestones` の運用者ログの文言を「設定されていないか、このサーバーのチャンネルではないため」に
+- `cogs/progress.py`: `push_project_tasks` を `guild_channel_by_id` へ
+- `cogs/schedule.py`: `create` の既定投稿先を `guild_channel(interaction.guild, …)` へ（引けなければ既存のエラー。`interaction.channel` へは落とさない）。
+  `_do_delete` / `edit_deadline` / `_refresh_vote_board` を `guild_channel_by_id` へ、
+  `notify_unanswered` / `finalize_schedule` は取得済みの `guild` で `guild_channel` へ
+- `tests/test_channel_scope.py`（新規・28件）: 静的走査＋走査の語彙の自己テスト、ヘルパ単体、
+  2ギルドが同じ `channel_id` を指す実挙動テスト（`_task_channel` / `_today_channel`×2 / `/schedule create` / `push_project_tasks` / `_purge_one` / `_alert_milestones` / `finalize_schedule` / `notify_unanswered` の DM 不可フォールバック）。
+  フェイク bot の `get_channel` / `fetch_channel` は他ギルドのチャンネルを返す「罠」。各テストに「同じ設定で自ギルドからなら届く」対照を入れた
+- 既存テストのフェイク更新（`bot.get_channel` だけで引いていたものを `get_guild` → `get_channel_or_thread` で引ける形へ。原則アサーションは変えていない）:
+  `test_confirm_view` / `test_data_purge` / `test_layer_session_alert` / `test_milestones` / `test_parent_chain` / `test_progress_notify` /
+  `test_reminders_resilience` / `test_schedule_confirm` / `test_schedule_delete` / `test_schedule_notify` / `test_schedule_unanswered` /
+  `test_schedule_vote_buttons` / `test_stock` / `test_weekly_digest`
+- `docs/OPERATION.md`: `/schedule create` の `channel` 既定値に「そのサーバーのチャンネルに限る」
+- `docs/SETUP.md`: チャンネル構成の表の直後に「`.env` のチャンネル ID はそのチャンネルがあるサーバーでだけ使われる。2つ目以降のサーバーは `/setup` で設定する」
+
+**許可リスト（受入基準: 何を入れたか）**
+
+`tests/test_channel_scope.py` の `ALLOWED_BOT_WIDE_LOOKUPS`。**(ファイル, 囲っている関数名, API) → 出現数**で固定している。
+
+| ファイル | 関数 | API | 数 | 理由 |
+|---|---|---|---|---|
+| `cogs/schedule.py` | `_remove_other_reactions` | `get_channel` | 1 | raw リアクション処理。呼び出し元の `_handle_reaction` が `payload.guild_id` を検査済みで、`payload.channel_id` は Discord がそのギルドのイベントとして渡す値。未キャッシュ時の `fetch_channel` フォールバックが要る（H1-1 の「除外」） |
+| 同上 | `_remove_other_reactions` | `fetch_channel` | 1 | 同上 |
+| 同上 | `_refresh_option_message` | `get_channel` | 1 | 同上 |
+| 同上 | `_refresh_option_message` | `fetch_channel` | 1 | 同上 |
+
+`bot.py` の `_log_channel_for` / `_fetch_legacy_log_channel` は走査対象（`cogs/` `services/` `utils/`）の外なので許可リストには無い（G4-11 で検査済み）。
+
+**設計判断**
+- 走査の範囲と語彙を受入基準より広げた（仮決め）: 範囲に `utils/` を含め（ヘルパ自体への混入を拾う）、
+  受け手を `bot` / `_bot` / `client`、API を `get_channel` / `fetch_channel` / `get_partial_messageable` にし、括弧を要求しない（参照も拾う）。
+  正規表現そのものを弱める変更は `test_scanner_catches_bot_wide_lookups` / `test_scanner_ignores_guild_scoped_lookups` が検出する
+- `guild.get_channel` ではなく `get_channel_or_thread` に寄せた: 置換前の `bot.get_channel` はスレッドも解決していた。
+  `guild.get_channel` へ寄せるとスレッド内で作った予定の通知が黙って消える
+- `/schedule create` は既定投稿先が引けないとき `interaction.channel` へ落とさない（現行も「設定済みだが引けない」ときはエラー。「たぶんこれだろう」で投稿しない）
+- `_today_channel` の分岐構造（ラベル通知先が設定されていればそれだけを引く）は変えていない
+- 却下: `config.for_guild()` が env の値を全ギルドへ配る挙動そのものを直す案。根本原因ではあるが、単一ギルドのレガシー運用の後方互換に触る別論点
+- ADR 草案は不要: ADR 0008（規律ではなく構造で守る）・0023（届かないことは運用者に見える形で）・0018（退出後の削除）に沿う
+
+**既存の挙動が変わる点**（コマンドの入力として通らなくなるものは無い。変わるのは送信先の解決だけ）
+- 設定値（env フォールバック含む）が**他ギルドのチャンネル**を指している通知: 他ギルドへ誤送信されていた → 送らない（運用者ログがある経路では残る）
+- `/schedule create` の既定投稿先が他ギルドのチャンネル: 他ギルドへ投票が投稿されていた → 「投稿先チャンネルが特定できません。channel を指定してください。」（何も作らない）
+- ギルドが bot のキャッシュに無い: `bot.get_channel` で引ければ送れていた → 送らない
+- `guild_channel` の既存の呼び出し元（`cogs/inventory.py` の在庫アラート・`Reminders._notify_low_stock` の在庫の閾値割れ通知）:
+  スレッドを指す ID で送れるようになった（従来は None）。カテゴリ等を指していると従来は `.send` で AttributeError → None として「送信先が無い」経路へ
+- 予定行の `channel_id` が数字でない壊れた行: `int()` で ValueError → None（送らない）
+- **旧実装で他ギルドへ投稿されてしまった既存の予定**（`channel_id` が他ギルドのチャンネルを指す行）: 修正後はボード更新・締切サマリー投稿・
+  `/schedule delete` での投票メッセージ削除（失敗件数として表示）・DM 不可時のフォールバックが行われない。
+  漏れたメッセージは A 側での手動削除になる。DB は書き換えない（移行しない）ので巻き戻せる
+- 単一ギルドのレガシー運用では挙動は変わらない
+
+**アサーション・前提を変えた既存テスト**
+- `test_data_purge.py::test_fake_bot_shape_matches_usage`: 「`bot.get_channel(1) is None`」→「`bot.get_guild(1) is None`」（偽 bot の形の検査。実装が `get_guild` を呼ぶようになったため）
+- `test_milestones.py::test_progress_key_wins_over_setup_key`: 「もう一方のチャンネル」の置き場所を G2 → G1 のギルドへ（bot 全体解決の時代は置き場所が無関係だった。同じサーバーに両方のチャンネルが実在する状況でキーの優先度を見る）
+- `test_schedule_delete.py` の `_Channel` に `send` を足した（`guild_channel` は送れないチャンネルを除くため。本物のテキストチャンネルは必ず持つ）
+
+**`bot.get_channel` を残したフェイク**: `test_schedule_delete.py` / `test_schedule_vote_buttons.py`。
+リアクション系テストは正常な経路では早期 return（削除済み・ボタン式）で `_remove_other_reactions` に届かないが、
+ガードを外した変異がアサーションまで進めるよう作者が静かに終わるチャンネルを渡しているため残した。
+この2ファイルの delete / ボード更新のテストは、実装が `bot.get_channel` へ差し戻されても**それ自体では検出しない**（そこは静的走査が守る）。
+
+**ゲートの判定**
+- acm-plan-reviewer: REVISE（1周目: R1〜R7 = `guild_channel` の getattr 枝を消す / フェイクを grep で全件洗う / 偽 bot の形の検査の更新 / create テストで `interaction.channel` を送信可能にする / 対照の追加 / 公開ドキュメント / 旧バグで作られた予定行の列挙）→ APPROVE（2周目）
+- acm-diff-auditor: FINDINGS（1周目: `resolve_notice_channel_id` の docstring が `guild.get_channel` を指示）→ CLEAN（2周目）
+- acm-test-adversary: EFFECTIVE（1周目: 69変異）→ EFFECTIVE（2周目: 同じ69変異で1周目と完全一致）
+
+実測表:
+
+| 戻した実装 | 赤くなったテスト（件数） | 捕まえたテスト |
+|---|---|---|
+| `_task_channel` を `self.bot.get_channel` へ | 2 | 静的走査＋実挙動 |
+| `_today_channel` を同上 | 3 | 静的走査＋実挙動（env 2通り） |
+| `_purge_one` を同上 | 2 | 静的走査＋実挙動 |
+| `_alert_milestones` を同上 | 9 | 静的走査＋実挙動＋`test_milestones` |
+| `push_section_tasks` / `_dispatch_todoist_tasks` を同上 | 1 / 1 | 静的走査のみ |
+| `push_project_tasks` を同上 | 7 | 静的走査＋実挙動＋`test_parent_chain` / `test_progress_notify` |
+| `/schedule create` の既定投稿先を同上 | 2 | 静的走査＋実挙動 |
+| `/schedule create` で `or interaction.channel` へ落とす | 1 | 実挙動（`g2_here` に投稿されない） |
+| `finalize_schedule` / `notify_unanswered` を同上 | 2 / 10 | 静的走査＋実挙動（＋既存） |
+| `_do_delete` / `edit_deadline` / `_refresh_vote_board` を同上 | 2 / 1 / 1 | 静的走査（`_do_delete` は `test_confirm_view` も） |
+| `guild_channel` を `guild.get_channel` へ | 35 | `resolves_threads`・`does_not_fall_back` ほか |
+| `guild_channel` に getattr の枝 / `get_channel` フォールバック | 1 / 1 | `does_not_fall_back_to_get_channel` |
+| `guild_channel` の send フィルタを外す | 1 | `rejects_unsendable_channels` |
+| `guild_channel_by_id` でギルドが見えないとき全ギルドを探す | 1 | `returns_none_when_guild_is_not_cached` |
+| `guild_channel_by_id` でギルドに無ければ bot 全体から引く（getattr で走査を回避） | 9 | 実挙動8件＋`test_progress_notify` |
+| 走査の正規表現を弱める（`\(` を要求 / client・`_bot`・fetch・partial を外す） | 1〜5 | `scanner_catches_bot_wide_lookups` |
+| 走査の正規表現を広げる（先頭の `\b` を外す等） | 1〜4 | `scanner_ignores_guild_scoped_lookups` |
+| 許可リストを腐らせる（除外を寄せる / 除外関数に2つ目を足す） | 1〜2 | `allowlisted_call_sites_still_exist` |
+| 対照: `guild_channel` / `guild_channel_by_id` を常に None | 40 / 23 | 各実挙動テストの「自ギルドへは届く」行 |
+| **素通り**: `if guild is None` の節を消す | 0 | 等価変異（`guild_channel(None, …)` も None。差は debug ログだけ） |
+| **素通り**: 静的走査だけが守る5経路を `getattr(self.bot, "get_channel")` で書く | 0 | 走査の語彙を回避する書き方。申し送りに記載 |
+| **素通り**: 許可リストの照合をファイル単位へ緩める | 0 | テスト自体の書き換え（メタテスト無し）。申し送りに記載 |
+
+1周目 69 変異（本番57＋対照8＋走査の語彙4）。2周目（docstring 修正後）も同じ 69 変異を再実行し、落ちたテスト ID の集合まで1周目と一致。
+復元は毎回 MD5 照合（`git stash` / `checkout` / `restore` は不使用）。
+
+**次タスクへの申し送り**
+- H1-2: `/schedule create` に `permissions_for(guild.me)` の検査を足すと、`test_channel_scope.py::test_schedule_create_does_not_post_to_another_guild` の後半（G1 から投稿する側）が落ちる。`_Channel` に `permissions_for`、`_Guild` に `me` を足すこと。投稿先の解決（`guild_channel(interaction.guild, …)`）は権限検査より前にある
+- H1-4: `notify_unanswered` の文面はチャンネル解決（`guild_channel(guild, …)`）の直前にある
+- H1-5: `test_channel_scope.py` の create テストは締切 `2099-01-01 00:00`・候補 `2099-01-02 10:00`（過去日・候補 < 締切の拒否に巻き込まれない）
+- 静的走査だけが守っている5経路（`push_section_tasks` / `_dispatch_todoist_tasks` の班バケット / `_do_delete` / `edit_deadline` / `_refresh_vote_board`）は、
+  `getattr(self.bot, "get_channel")` のような走査を回避する書き方には気づけない（test-adversary 実測）。塞ぐなら `test_channel_scope.py` の罠 `_Bot` で2ギルドのテストを1本ずつ足す
+- 許可リストの照合をファイル単位へ緩める変更（テスト自体の書き換え）は検出できない（メタテスト無し）
+- `cogs/welcome.py` の `guild.get_channel` は同一ギルド内だがスレッドを解決しない（H1-1 の対象外のまま）
+- `config.for_guild()` が env の値を全ギルドへ配る挙動は残っている（今回は送る側で塞いだ）

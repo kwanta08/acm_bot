@@ -68,6 +68,7 @@ from utils.embeds import (
     task_embed,
 )
 from utils.logger import get_logger
+from utils.notify import guild_channel_by_id
 from utils.parser import TZ, now, parse_deadline
 from utils.permissions import (
     Level,
@@ -960,7 +961,7 @@ class Progress(commands.Cog):
                 progress_sync_service.resolve_link_channel_id(link, default_channel_id)
                 or gconf.default_task_channel_id
             )
-            channel = self.bot.get_channel(channel_id) if channel_id else None
+            channel = guild_channel_by_id(self.bot, guild_id, channel_id)
             if channel is None:
                 await self.bot.log_to_channel(
                     f"[進捗通知] 送信先チャンネルがありません"
