@@ -55,6 +55,8 @@ class SettingSpec:
     min_value: int | None = None
     max_value: int | None = None
     max_len: int | None = None
+    #: DB に値が無いとき、`config` が環境変数の値を使うキーか（`_ENV_BACKED_KEYS`）
+    env: bool = False
 
 
 class SettingKeyError(ValueError):
@@ -65,8 +67,33 @@ class SettingValueError(ValueError):
     """値が種別に合わない。文面は利用者向け（何が・どう駄目か・どう直すか）。"""
 
 
+#: DB に値が無いとき `config`（`Config` のクラス属性・プロパティ）が環境変数の値を
+#: 使うキー。これ以外のキーは環境変数を読まないので、`/settings_get` にも出さない
+#: （出すと「環境変数から取得」と表示しながら Bot は未設定として動く）。
+#: config.py が実際に読む名前との一致は構造テストで固定する。
+_ENV_BACKED_KEYS: frozenset[str] = frozenset(
+    {
+        "BOT_LOG_CHANNEL_ID",
+        "DEFAULT_ANNOUNCE_CHANNEL_ID",
+        "DEFAULT_SCHEDULE_CHANNEL_ID",
+        "DEFAULT_PROGRESS_CHANNEL_ID",
+        "DEFAULT_TASK_CHANNEL_ID",
+        "TODAY_LABEL_CHANNEL_ID",
+        "EXEC_ROLE_ID",
+        "ADMIN_ROLE_ID",
+        "LEADER_ROLE_IDS",
+        "PRIMARY_TEAM_ROLE_IDS",
+        "SECONDARY_TEAM_ROLE_IDS",
+        "SCHEDULE_EMOJI_OK_ID",
+        "SCHEDULE_EMOJI_MAYBE_ID",
+        "SCHEDULE_EMOJI_NG_ID",
+        "SCHEDULE_UI_STYLE",
+    }
+)
+
+
 def _spec(key: str, kind: SettingKind, label: str, **kwargs) -> tuple[str, SettingSpec]:
-    return key, SettingSpec(key, kind, label, **kwargs)
+    return key, SettingSpec(key, kind, label, env=key in _ENV_BACKED_KEYS, **kwargs)
 
 
 # Discord の ID（snowflake）は符号付き 64bit に収まる（PostgreSQL の BIGINT）
@@ -275,8 +302,14 @@ def env_fallback(raw_key: str) -> str | None:
     **環境変数は仕様表のキー（`spec.key`）でしか引かない。** 利用者の入力を
     そのまま `os.getenv` に渡すと、設定キーではない環境変数（Bot の秘密情報）まで
     読めてしまう。仕様表に無いキーは `SettingKeyError`。
+
+    `config` が環境変数を読まないキー（`spec.env` が偽）は None を返す
+    （効いていない値を「環境変数から取得」と見せない）。
     """
-    return os.getenv(lookup(raw_key).key)
+    spec = lookup(raw_key)
+    if not spec.env:
+        return None
+    return os.getenv(spec.key)
 
 
 def _value_error(spec: SettingSpec, raw: str, expected: str) -> SettingValueError:

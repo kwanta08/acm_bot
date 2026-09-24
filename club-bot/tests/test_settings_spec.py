@@ -99,6 +99,10 @@ VALUE_CASES: list[tuple[str, str, str | None]] = [
     ("PRIMARY_TEAM_ROLE_IDS", "wing", None),
     ("PRIMARY_TEAM_ROLE_IDS", "wing:x", None),
     ("SECONDARY_TEAM_ROLE_IDS", ":1", None),
+    ("PRIMARY_TEAM_ROLE_IDS", "wing:1,cfrp", None),  # 正しい組と壊れた組の混在
+    ("PRIMARY_TEAM_ROLE_IDS", "wing:1,:2", None),
+    ("PRIMARY_TEAM_ROLE_IDS", "", None),
+    ("PRIMARY_TEAM_ROLE_IDS", " , ", None),
     # 絵文字
     ("SCHEDULE_EMOJI_OK_ID", "<:ok:77>", "77"),
     ("SCHEDULE_EMOJI_MAYBE_ID", "<a:maybe:78>", "78"),
@@ -111,6 +115,9 @@ VALUE_CASES: list[tuple[str, str, str | None]] = [
     ("DATA_RETENTION_DAYS", "-1", None),
     ("DATA_RETENTION_DAYS", "3.5", None),
     ("DATA_RETENTION_DAYS", "abc", None),
+    ("DATA_RETENTION_DAYS", "²", None),  # isdigit() は真だが int() できない
+    ("DATA_RETENTION_DAYS", "３０", None),  # 全角数字
+    ("DATA_RETENTION_DAYS", "--3", None),
     ("LAYER_SESSION_ALERT_MINUTES", "10080", "10080"),
     ("LAYER_SESSION_ALERT_MINUTES", "10081", None),
     ("LAYER_SESSION_AUTO_CANCEL_MINUTES", "0", "0"),
@@ -286,7 +293,15 @@ def test_env_fallback_reads_only_the_spec_key(name):
 
 
 @pytest.mark.parametrize(
-    "name", ["DISCORD_TOKEN", "discord_token", "ENCRYPTION_KEY", "DATABASE_URL", "ACM_H13_CANARY"]
+    "name",
+    [
+        "DISCORD_TOKEN",
+        "discord_token",
+        "ENCRYPTION_KEY",
+        "DATABASE_URL",
+        "ACM_H13_CANARY",
+        "SOME_THIRD_PARTY_API_KEY",
+    ],
 )
 def test_env_fallback_refuses_non_setting_names(name):
     """仕様表に無い名前では環境変数を引かない（Bot の秘密情報を読ませない）。"""
@@ -538,3 +553,40 @@ def test_every_key_like_constant_in_the_code_is_classified():
     assert not unclassified, f"仕様表に無いキー形の定数: {unclassified}"
     # 非設定の許可リストが腐っていない（使われなくなった名前を残さない）
     assert NON_SETTING_CONSTANTS <= found
+
+
+# =====================================================================
+# 環境変数へフォールバックするキーは config が実際に読むものと一致する
+# =====================================================================
+_CONFIG_ENV_READERS = {"_get_str", "_get_int", "_get_int_list", "_get_team_role_map"}
+
+
+def _config_env_names() -> set[str]:
+    """config.py が環境変数から読む名前（`_get_*("NAME")` の第1引数）。"""
+    with open(os.path.join(BOT_ROOT, "config.py"), encoding="utf-8") as f:
+        tree = ast.parse(f.read())
+    return {
+        node.args[0].value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", None) in _CONFIG_ENV_READERS
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+    }
+
+
+def test_env_backed_keys_match_what_config_reads():
+    """`/settings_get` が環境変数の値を出すのは、config が本当に環境変数を読むキーだけ。"""
+    env_names = _config_env_names()
+    assert "DISCORD_TOKEN" in env_names, "config.py の読み取りを拾えていない（空振り）"
+    env_backed = {k for k, s in SETTING_SPECS.items() if s.env}
+    assert env_backed == env_names & set(SETTING_SPECS)
+    assert len(env_backed) == 15
+
+
+@pytest.mark.parametrize(
+    "key", ["COMPETITION_DATE", "WELCOME_CHANNEL_ID", "PROGRESS_DEFAULT_CHANNEL_ID"]
+)
+def test_env_fallback_is_none_for_keys_config_does_not_read_from_env(key):
+    with mock.patch.dict(os.environ, {key: "999"}):
+        assert env_fallback(key) is None

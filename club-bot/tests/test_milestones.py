@@ -563,7 +563,13 @@ def test_countdown_is_a_top_level_command():
 
 
 def test_competition_date_help_points_at_the_setting_key():
-    """未設定時は設定方法を案内して終わる。"""
+    """未設定時は設定方法を案内して終わる。
+
+    案内先は `/setup` の「大会日を設定」（H1-3。生コマンドは案内しない）。
+    キー名と形式は文中に残す。
+    """
+    assert "/setup" in COMPETITION_DATE_HELP
+    assert "/settings_set" not in COMPETITION_DATE_HELP
     assert "COMPETITION_DATE" in COMPETITION_DATE_HELP
     assert "YYYY-MM-DD" in COMPETITION_DATE_HELP
 

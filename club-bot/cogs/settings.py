@@ -25,9 +25,14 @@ from utils.settings_spec import (
     COMMAND_ONLY_KEYS,
     INTERNAL_KEYS,
     SETTING_SPECS,
+    SettingKeyError,
+    SettingValueError,
     env_fallback,
     key_error_message,
+    lookup,
     normalize_key,
+    normalize_setting,
+    setting_key_choices,
 )
 
 if TYPE_CHECKING:
@@ -284,11 +289,22 @@ class Settings(commands.Cog):
         if guild_id is None:
             return
 
+        # 仕様表に無いキー・種別に合わない値は**保存せずに**理由を返す（H1-3）。
+        # 以前は何でも保存して成功と表示し、読み出し側が黙って捨てていた。
+        # 拒否はコマンド層だけ（SettingsRepository.set() は起動時セットアップが
+        # 内部マーカーを書くので、repository 層では弾かない）
         try:
-            await self.settings_repo.set(guild_id, setting_key, value)
+            key = lookup(setting_key).key
+            stored = normalize_setting(key, value)
+        except (SettingKeyError, SettingValueError) as e:
+            await interaction.followup.send(embed=error_embed(str(e)), ephemeral=True)
+            return
+
+        try:
+            await self.settings_repo.set(guild_id, key, stored)
             embed = success_embed(
                 "設定保存完了",
-                f"**{setting_key}** = `{value}`\nをこのサーバーの設定として保存しました",
+                f"**{key}** = `{stored}`\nをこのサーバーの設定として保存しました",
             )
             await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -304,10 +320,25 @@ class Settings(commands.Cog):
     @app_commands.describe(setting_key="設定キー")
     @app_commands.check(is_admin)
     async def settings_delete(self, interaction: discord.Interaction, setting_key: str):
-        """設定値を削除する"""
+        """設定値を削除する。
+
+        **入力したキーをそのまま照合する**（大文字化も空白の除去もしない）。
+        settings の主キーは大文字小文字を区別するので、以前の `/settings_set` が
+        作った小文字のゴミ行（`competition_date` 等）を消すときに、正規化すると
+        有効な `COMPETITION_DATE` のほうを消してしまう。
+        """
         await interaction.response.defer(ephemeral=True)
         guild_id = await ensure_guild(interaction)
         if guild_id is None:
+            return
+
+        # Bot の内部マーカーは消させない（完全一致で見る）。例えば
+        # AUTO_SETUP_COMPLETED_AT を消すと、次の起動で自動セットアップがやり直され、
+        # 管理者が意図して消したチャンネルやロールまで作り直される
+        if setting_key in INTERNAL_KEYS:
+            await interaction.followup.send(
+                embed=error_embed(key_error_message(setting_key)), ephemeral=True
+            )
             return
 
         try:
@@ -584,6 +615,48 @@ class Settings(commands.Cog):
                 )
 
         return choices[:25]  # 最大25件
+
+    async def _setting_key_ac(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """設定キーの候補（仕様表から。候補名に説明を含める）。"""
+        return [
+            app_commands.Choice(name=name, value=value)
+            for name, value in setting_key_choices(current)
+        ]
+
+    # オートコンプリートはコマンドの check（is_admin）を通らずに呼ばれる。
+    # 補完関数自身に付けた check だけが評価されるので、ここにも付ける
+    @app_commands.check(is_admin)
+    async def _stored_key_ac(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        """/settings_delete の候補: このサーバーに**保存されているキー名だけ**。
+
+        以前の `/settings_set` が作った小文字・綴り違いのゴミ行も片付けられるよう、
+        仕様表ではなく保存済みのキーを出す。**値は候補に含めない**。
+        Bot の内部マーカーは消させないので候補にも出さない。
+        """
+        guild_id = interaction.guild_id
+        if guild_id is None:
+            return []
+        try:
+            keys = sorted(await self.settings_repo.get_all(guild_id))
+        except Exception:  # noqa: BLE001  (補完は失敗しても致命的でない)
+            return []
+        query = (current or "").lower()
+        return [
+            app_commands.Choice(name=key[:100], value=key)
+            for key in keys
+            if key not in INTERNAL_KEYS and query in key.lower() and len(key) <= 100
+        ][:25]
+
+
+# setting_key のオートコンプリート（H1-3）。set / get は仕様表から、
+# delete は保存済みのキーから（入力をそのまま照合するため）
+Settings.settings_set.autocomplete("setting_key")(Settings._setting_key_ac)
+Settings.settings_get.autocomplete("setting_key")(Settings._setting_key_ac)
+Settings.settings_delete.autocomplete("setting_key")(Settings._stored_key_ac)
 
 
 async def setup(bot: commands.Bot):
