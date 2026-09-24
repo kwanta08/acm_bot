@@ -10,7 +10,7 @@
 --   utils/db.py の _migrate_versioned() は version >= SCHEMA_VERSION で早期 return する。
 --   G3-3 が v17 を切ったあとに G3-4 が同じ版へ ALTER を足しても、**既存 DB では
 --   二度と実行されない**（新規 DB にだけ列がある状態になり、本番だけ
---   「column does not exist」で落ちる。ClaudeVault gotcha `bot-wont-start-undefined-column`
+--   「column does not exist」で落ちる。開発ノートの gotcha `bot-wont-start-undefined-column`
 --   と同型）。そのため G3-3 の時点で両方を入れる。
 --   G3-4 は新しい migration を作らないこと。
 --
