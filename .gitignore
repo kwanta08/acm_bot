@@ -6,6 +6,10 @@ credentials*.json
 *.pem
 *.key
 
+# 環境ごとに違う絶対パス（開発ノートの置き場など）。
+# 公開リポジトリなので CLAUDE.md には書かず、こちらへ置く
+CLAUDE.local.md
+
 # データ・ログ
 *.db
 *.db-wal
@@ -19,6 +23,9 @@ venv/
 .venv/
 *.egg-info/
 .pytest_cache/
+
+# 自走ループの中間生成物
+.claude/loop/
 
 # OS
 .DS_Store
