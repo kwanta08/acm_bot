@@ -97,8 +97,11 @@ class FakeBot:
         self.todoist_manager = _Manager()
         self.todoist = None
 
-    def get_channel(self, channel_id):
-        return self.channels.get(channel_id)
+    def get_guild(self, guild_id):
+        # 通知先チャンネルはすべて G1 のもの。実装は同一ギルド内でだけ引く（H1-1）
+        if guild_id != G1:
+            return None
+        return SimpleNamespace(id=G1, get_channel_or_thread=self.channels.get)
 
     async def log_to_channel(self, message, guild_id=None):
         self.logged.append(message)

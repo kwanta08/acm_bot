@@ -31,9 +31,10 @@ NOTICE_CHANNEL_KEYS = (
 async def resolve_notice_channel_id(db, guild_id: int) -> int | None:
     """告知の送信先チャンネル ID を settings から解決する。未設定なら None。
 
-    **チャンネルの解決（get_channel）はしない。** 呼び出し側が
-    `guild.get_channel` で**同じギルド内に限定して**引くこと
-    （bot 全体のキャッシュから引くと他テナントへ流れる）。
+    **チャンネルの解決はしない。** 呼び出し側が `guild_channel(guild, id)` か
+    `guild_channel_by_id(bot, guild_id, id)` で**同じギルド内に限定して**引くこと
+    （bot 全体のキャッシュから引くと他テナントへ流れる。`guild.get_channel` は
+    スレッドを解決しない）。
     """
     from repositories.settings_repository import SettingsRepository
 
@@ -46,13 +47,55 @@ async def resolve_notice_channel_id(db, guild_id: int) -> int | None:
 
 
 def guild_channel(guild, channel_id):
-    """同一ギルド内でチャンネルを解決する（他ギルドへ流さない）。"""
+    """同一ギルド内でチャンネル（スレッド含む）を解決する（他ギルドへ流さない）。
+
+    スレッドに投稿された予定・通知があるので `get_channel_or_thread` を使う
+    （`get_channel` はスレッドを解決しない）。`get_channel` へのフォールバックも、
+    メソッドが無いときに黙って None を返す枝も**持たない**。本番の `discord.Guild`
+    は必ず `get_channel_or_thread` を持つため、そうした枝は到達しない枝になり、
+    テストのフェイクだけを「チャンネルが引けない」理由で緑にする穴になる。
+
+    送れないもの（カテゴリ等）と数字として読めない ID は None。
+    """
     if guild is None or not channel_id:
         return None
     try:
-        return guild.get_channel(int(channel_id))
+        channel = guild.get_channel_or_thread(int(channel_id))
     except (TypeError, ValueError):
         return None
+    return channel if channel is not None and hasattr(channel, "send") else None
+
+
+def guild_channel_by_id(bot, guild_id, channel_id):
+    """`guild_id` のギルドの**中だけ**でチャンネルを解決する。
+
+    `bot.get_channel()`（bot 全体のキャッシュ）は使わない。`config.for_guild()` は
+    環境変数の値を**全ギルドの GuildConfig へ配る**ため、bot 全体のキャッシュから
+    引くと、あるギルドの設定値が指す他ギルドのチャンネルへ通知が流れる（H1-1）。
+
+    ギルドが見えない・そのギルドに無い場合は None を返して**送らない**。
+    誤送信よりログが出ないほうがましなので「たぶんこれだろう」でフォールバック
+    しない（`bot.py` の `_log_channel_for` と同じ判断）。
+    """
+    if bot is None or guild_id is None or not channel_id:
+        return None
+    try:
+        guild = bot.get_guild(int(guild_id))
+    except (TypeError, ValueError):
+        return None
+    if guild is None:
+        # ギルドが見えないと「そのギルドのチャンネルか」を確かめられない
+        log.debug("チャンネルの解決先ギルドが見つかりません (guild=%s)", guild_id)
+        return None
+    channel = guild_channel(guild, channel_id)
+    if channel is None:
+        # レガシー運用で .env のチャンネル ID が他サーバーを指している、等
+        log.debug(
+            "チャンネル ID がこのサーバーの送信先ではありません (guild=%s, channel=%s)",
+            guild_id,
+            channel_id,
+        )
+    return channel
 
 
 @dataclass

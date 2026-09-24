@@ -116,6 +116,10 @@ class _FakeGuild:
     def __init__(self, guild_id: int = G1):
         self.id = guild_id
         self.emojis = []
+        self.channels: dict[int, object] = {}
+
+    def get_channel_or_thread(self, channel_id: int):
+        return self.channels.get(channel_id)
 
     def get_role(self, role_id: int):
         return None
@@ -167,6 +171,10 @@ class _ComponentInteraction:
 
 
 def _cog(db: Database, guild=None, channel=None) -> Schedule:
+    # 投票ボードの描き直しはギルド経由で引く（H1-1）。bot.get_channel は
+    # raw リアクション処理（H1-1 の除外）だけが使う
+    if guild is not None and channel is not None:
+        guild.channels[channel.id] = channel
     bot = SimpleNamespace(
         db=db,
         user=None,

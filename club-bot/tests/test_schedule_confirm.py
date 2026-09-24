@@ -299,7 +299,6 @@ def _cog(db: Database, guild=None) -> Schedule:
         guilds=[],
         user=None,
         get_guild=lambda gid: guild if guild and guild.id == gid else None,
-        get_channel=lambda _cid: None,
     )
     return Schedule(bot)
 
@@ -461,7 +460,6 @@ def _reminders(db: Database, guild) -> tuple[Reminders, _LogRepo, list[str]]:
         db=db,
         guilds=[SimpleNamespace(id=G1)],
         get_guild=lambda gid: guild if guild and guild.id == gid else None,
-        get_channel=lambda _cid: None,
         log_to_channel=_log_to_channel,
     )
     cog = Reminders.__new__(Reminders)

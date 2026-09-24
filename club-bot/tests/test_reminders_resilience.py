@@ -37,12 +37,15 @@ class FakeChannel:
 class FakeBot:
     def __init__(self, guild_ids, channel=None):
         self.db = None
-        self.guilds = [SimpleNamespace(id=g, name=str(g)) for g in guild_ids]
-        self._channel = channel
+        # チャンネルはギルド経由でだけ引ける（H1-1: 同一ギルド内の解決）
+        self.guilds = [
+            SimpleNamespace(id=g, name=str(g), get_channel_or_thread=lambda _cid: channel)
+            for g in guild_ids
+        ]
         self.logged = []
 
-    def get_channel(self, channel_id):
-        return self._channel
+    def get_guild(self, guild_id):
+        return next((g for g in self.guilds if g.id == guild_id), None)
 
     def get_cog(self, name):
         return None

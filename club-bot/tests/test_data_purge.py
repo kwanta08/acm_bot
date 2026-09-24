@@ -393,7 +393,8 @@ class _FakeBot:
         self.db = db
         self.guilds = []
 
-    def get_channel(self, channel_id):
+    def get_guild(self, guild_id):
+        # 削除対象は退出済みのサーバー。ギルドが見えないので通知は出ない
         return None
 
     async def log_to_channel(self, *a, **kw):
@@ -484,6 +485,10 @@ def test_purge_loop_is_registered():
 
 
 def test_fake_bot_shape_matches_usage():
-    """テスト用の偽 bot が実装の呼び出しを満たしていること。"""
+    """テスト用の偽 bot が実装の呼び出しを満たしていること。
+
+    削除通知の送信先は `utils.notify.guild_channel_by_id` がギルド経由で引く
+    （H1-1。bot 全体の `get_channel` は使わない）。
+    """
     bot = _FakeBot(SimpleNamespace())
-    assert bot.get_channel(1) is None
+    assert bot.get_guild(1) is None

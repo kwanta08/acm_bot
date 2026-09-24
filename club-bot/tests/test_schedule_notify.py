@@ -70,6 +70,7 @@ class _FakeGuild:
         self.id = guild_id
         self.emojis = []
         self._roles = roles or {}
+        self.channels: dict[int, _FakeChannel] = {}
 
     def get_role(self, role_id: int):
         return self._roles.get(role_id)
@@ -84,6 +85,9 @@ class _FakeGuild:
 
     def get_emoji(self, emoji_id: int):
         return None
+
+    def get_channel_or_thread(self, channel_id: int):
+        return self.channels.get(channel_id)
 
 
 class _Interaction:
@@ -111,11 +115,13 @@ async def _record_dm(text):
 
 
 def _cog(db: Database, guild=None, channel=None) -> Schedule:
+    # チャンネルはギルド経由でだけ引ける（H1-1: 同一ギルド内の解決）
+    if guild is not None and channel is not None:
+        guild.channels[channel.id] = channel
     bot = SimpleNamespace(
         db=db,
         guilds=[],
         get_guild=lambda gid: guild if guild and guild.id == gid else None,
-        get_channel=lambda cid: channel,
     )
     return Schedule(bot)
 

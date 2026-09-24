@@ -645,18 +645,27 @@ class _Channel:
         self.sent.append(kwargs)
 
 
+class _AlertGuild:
+    """**そのギルドのチャンネルしか返さない**ギルド。"""
+
+    def __init__(self, guild_id: int, channel: _Channel):
+        self.id = guild_id
+        self.channels = [channel]
+
+    def get_channel_or_thread(self, channel_id):
+        return next((c for c in self.channels if c.id == channel_id), None)
+
+
 class _AlertBot:
+    """チャンネルは get_guild → get_channel_or_thread でだけ引ける（H1-1）。"""
+
     def __init__(self, db, channels: dict[int, _Channel]):
         self.db = db
-        self._channels = channels
-        self.guilds = [SimpleNamespace(id=gid) for gid in channels]
+        self.guilds = [_AlertGuild(gid, channel) for gid, channel in channels.items()]
         self.logged: list[str] = []
 
-    def get_channel(self, channel_id):
-        for channel in self._channels.values():
-            if channel.id == channel_id:
-                return channel
-        return None
+    def get_guild(self, guild_id):
+        return next((g for g in self.guilds if g.id == guild_id), None)
 
     async def log_to_channel(self, message, guild_id=None):
         self.logged.append(message)
@@ -862,7 +871,8 @@ def test_progress_key_wins_over_setup_key():
             await SettingsRepository(db).set(G1, "DEFAULT_PROGRESS_CHANNEL_ID", "9002")
 
             cog = _alert_cog(db, {G1: preferred})
-            cog.bot._channels[G2] = other
+            # 両方のキーが指すチャンネルが同じサーバーに実在する状況
+            cog.bot.get_guild(G1).channels.append(other)
             await cog.run_milestone_alerts(_dt(2026, 8, 12, 8, 30))
 
             assert len(preferred.sent) == 1

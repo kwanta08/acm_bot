@@ -395,7 +395,8 @@ async def _seed_schedule(db: Database) -> str:
 def _schedule_cog(db: Database):
     from cogs.schedule import Schedule
 
-    return Schedule(SimpleNamespace(db=db, guilds=[], get_channel=lambda _cid: None))
+    # 投票メッセージの削除先はギルド経由で引く（H1-1）。ここでは確認の有無だけを見る
+    return Schedule(SimpleNamespace(db=db, guilds=[], get_guild=lambda _gid: None))
 
 
 def test_schedule_delete_does_not_delete_before_confirmation():
