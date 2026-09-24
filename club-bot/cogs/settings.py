@@ -21,6 +21,14 @@ from repositories.settings_repository import SettingsRepository
 from utils.embeds import error_embed, info_embed, success_embed
 from utils.logger import get_logger
 from utils.permissions import ensure_guild, is_admin
+from utils.settings_spec import (
+    COMMAND_ONLY_KEYS,
+    INTERNAL_KEYS,
+    SETTING_SPECS,
+    env_fallback,
+    key_error_message,
+    normalize_key,
+)
 
 if TYPE_CHECKING:
     from utils.db import Database
@@ -230,27 +238,34 @@ class Settings(commands.Cog):
         if guild_id is None:
             return
 
+        key = normalize_key(setting_key)
         try:
-            value = await self.settings_repo.get(guild_id, setting_key)
-
-            if setting_key.startswith("TODOIST_"):
+            if key.startswith("TODOIST_"):
                 # レガシーの平文 Todoist 設定は値を表示しない
                 embed = info_embed(
-                    setting_key,
+                    key,
                     "このキーは廃止されました。`/todoist-setup` / `/todoist-status` "
                     "を使用してください（値は表示されません）",
                 )
-            elif value is None:
-                # 環境変数をチェック
-                import os
-
-                env_value = os.getenv(setting_key)
-                if env_value:
-                    embed = info_embed(setting_key, f"値: `{env_value}`\n（環境変数から取得）")
+            elif key in SETTING_SPECS:
+                value = await self.settings_repo.get(guild_id, key)
+                if value is not None:
+                    embed = info_embed(key, f"値: `{value}`")
+                # 環境変数は仕様表のキーでだけ引く（env_fallback）。利用者の入力を
+                # そのまま環境変数名に使うと、設定キーではない値まで表示してしまう
+                elif env_value := env_fallback(key):
+                    embed = info_embed(key, f"値: `{env_value}`\n（環境変数から取得）")
                 else:
-                    embed = info_embed(setting_key, "設定されていません")
+                    embed = info_embed(key, "設定されていません")
+            elif key in INTERNAL_KEYS or key in COMMAND_ONLY_KEYS:
+                # 内部キー・旧運用のキーは DB の値だけ（環境変数は読まない）
+                value = await self.settings_repo.get(guild_id, key)
+                embed = info_embed(
+                    key, f"値: `{value}`" if value is not None else "設定されていません"
+                )
             else:
-                embed = info_embed(setting_key, f"値: `{value}`")
+                # 仕様表に無いキーは表示しない（`/settings_list` で一覧は見られる）
+                embed = error_embed(key_error_message(setting_key))
 
             await interaction.followup.send(embed=embed, ephemeral=True)
 
