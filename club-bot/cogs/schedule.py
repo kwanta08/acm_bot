@@ -1782,10 +1782,13 @@ class Schedule(commands.Cog):
             )
             return None
 
-        deadline = fmt_jp(from_iso(schedule["deadline"]))
-        text = (
-            f"【日程調整リマインド】\n「{schedule['title']}」が未回答です。\n"
-            f"締切: {deadline}\n投票チャンネルでリアクションをお願いします。"
+        # 文面は予定の投票 UI 方式に合わせる（H1-4）。ギルド設定ではなく
+        # **予定の行**の ui_style を読む（作成後に方式を変えたサーバーでも、
+        # その予定のボードに合った回答の仕方を案内する）
+        text = svc.unanswered_reminder_text(
+            schedule["title"],
+            fmt_jp(from_iso(schedule["deadline"])),
+            schedule.get("ui_style"),
         )
 
         channel = guild_channel(guild, schedule["channel_id"])

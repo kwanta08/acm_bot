@@ -64,6 +64,28 @@ def new_option_id() -> str:
     return uuid.uuid4().hex[:12]
 
 
+def unanswered_reminder_text(title: str, deadline_text: str, ui_style: str | None) -> str:
+    """未回答リマインドの本文。予定の投票 UI 方式で回答の仕方を変える（H1-4）。
+
+    ボタン式のボードに付けたリアクションは投票として扱われない
+    （`_handle_reaction` が ui_style == "buttons" を無視する）ので、ボタン式の
+    予定で「リアクションで」と案内すると、言われたとおりにしても票が入らない。
+
+    **reaction のときだけ**リアクションの文面にし、それ以外（欠損・空・未知の値）は
+    既定（ボタン式）の文面にする。例外は投げない（1件の壊れた行で催促を止めない）。
+    前後の空白と大文字小文字は無視する。
+
+    注意: 既存の分岐（status / edit-deadline / `_handle_reaction`）は
+    `== "buttons"` で判定し、欠損・未知を**リアクション式**として扱う。
+    読み方が揃っていないのは承知の上（文面は受入基準どおり既定＝ボタン）。
+    本番の行は NOT NULL で、create は正規化済みの値しか書かない。
+    """
+    head = f"【日程調整リマインド】\n「{title}」が未回答です。\n締切: {deadline_text}\n"
+    if (ui_style or "").strip().lower() == "reaction":
+        return head + "投票チャンネルの候補メッセージに、リアクションで回答してください。"
+    return head + "投票チャンネルの投票ボードで、候補のボタンを押して回答してください。"
+
+
 def parse_options(options_str: str) -> list[str]:
     """`;` 区切りの候補日時文字列を分割する（仕様 11.2.2）。"""
     return [p.strip() for p in options_str.split(";") if p.strip()]
