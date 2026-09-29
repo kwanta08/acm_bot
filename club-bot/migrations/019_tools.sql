@@ -12,7 +12,7 @@
 --   早期 return するため、v19 済みの DB は二度と v19 の処理を通らない。
 --   後から v19 へ CREATE を足すと**新規 DB にだけテーブルがある**状態になり、
 --   本番だけ「relation does not exist」で落ちる
---   （ClaudeVault gotcha `bot-wont-start-undefined-column` と同型）。
+--   （開発ノートの gotcha `bot-wont-start-undefined-column` と同型）。
 --   改善タスク表の v19 の欄は当初「在庫・工具」と書かれていたが、
 --   この理由で工具は v20 に分けた。
 --

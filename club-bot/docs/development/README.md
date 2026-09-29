@@ -22,8 +22,9 @@
 |---|---|---|
 | [`PUBLIC_RELEASE_TASKS.md`](PUBLIC_RELEASE_TASKS.md) | 公開配布の準備（P0〜P3） | ほぼ完了 |
 | [`FEATURE_TASKS.md`](FEATURE_TASKS.md) | `/help`・データ削除・重量管理・大会逆算・年度替わり（F0〜F6） | ほぼ完了 |
-| [`IMPROVEMENT_TASKS.md`](IMPROVEMENT_TASKS.md) | 改善タスク（G0〜G4）。現在進行中の表 | 進行中 |
+| [`IMPROVEMENT_TASKS.md`](IMPROVEMENT_TASKS.md) | 改善タスク（G0〜G4） | ほぼ完了 |
 | [`DASHBOARD_TASKS.md`](DASHBOARD_TASKS.md) | ダッシュボード改良（D0〜D3）と Liquid Glass 刷新の記録 | 完了 |
+| [`HARDENING_TASKS.md`](HARDENING_TASKS.md) | 堅牢化（H1）。決めた原則が守られていない箇所を揃える5件。現在進行中の表 | 進行中 |
 
 ## 分析レポート
 
@@ -56,6 +57,7 @@
 | [`IMPROVEMENT_LOOP_PROMPT.md`](IMPROVEMENT_LOOP_PROMPT.md) | `IMPROVEMENT_TASKS.md` |
 | [`G2_LOOP_PROMPT.md`](G2_LOOP_PROMPT.md) | `IMPROVEMENT_TASKS.md` の G2 フェーズ（当時の状況専用） |
 | [`DASHBOARD_LOOP_PROMPT.md`](DASHBOARD_LOOP_PROMPT.md) | `DASHBOARD_TASKS.md` |
+| [`HARDENING_LOOP_PROMPT.md`](HARDENING_LOOP_PROMPT.md) | `HARDENING_TASKS.md`（`/autonomous-dev-loop` 用。無人実行は `../../scripts/autorun_hardening.ps1`） |
 
 これらの文書には「開発ノート」への参照が出てきます。**開発ノートは開発者の
 ローカル環境にある個人的なメモ置き場で、このリポジトリには含まれません。**

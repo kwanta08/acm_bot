@@ -1,5 +1,13 @@
 # Claude Code（Opus 5）でダッシュボード改良を回すための起動プロンプト
 
+> **これは内部の作業手順です（[development/README.md](README.md)）。**
+> Bot の使い方ではありません。使い方は [`../GUIDE.md`](../GUIDE.md) を参照してください。
+>
+> 文中の `<開発ノートのパス>` は、開発者のローカルにある設計判断・既知の落とし穴の
+> メモ置き場を指します。**このリポジトリには含まれません。** 手元に無い場合は
+> `--add-dir` の手順ごと読み飛ばしてください（公開すべき設計判断は
+> [`../adr/`](../adr/) にあります）。`<リポジトリのパス>` は各自のクローン先です。
+
 `docs/development/DASHBOARD_TASKS.md`（D0〜D3）を Claude Code で 1 タスクずつ実装するための入力集。
 `docs/IMPROVEMENT_LOOP_PROMPT.md` と同じ構成で、**ダッシュボード（`club-bot/dashboard/`）専用**。
 Cowork（チャット）ではなく **アプリ内 / ターミナルの Claude Code で実装する**前提。
@@ -14,7 +22,7 @@ Cowork（チャット）ではなく **アプリ内 / ターミナルの Claude 
 ### 0-1. 【人間がやる】作業ツリーが clean であることを確認する
 
 ```bash
-cd /c/Users/yoshi/acm_bot
+cd <リポジトリのパス>
 git status --porcelain | wc -l
 ```
 
@@ -32,32 +40,32 @@ D0-1 は【人間タスク】で、エージェントは飛ばす。**が、D3 �
    §デザイン方針「読み取った作風」を校正する。**機械取得できていないので現状は仮**
 3. 校正したら同節に「校正済み（YYYY-MM-DD）」と追記する
 
-### 0-3. ClaudeVault（Obsidian）を読ませる
+### 0-3. 開発ノートを読ませる
 
-ADR と gotcha は `C:\Users\yoshi\ClaudeVault\ClaudeVault\projects\acm_bot\` にある。
+ADR と gotcha は `<開発ノートのパス>\projects\acm_bot\` にある。
 Claude Code は既定で作業ディレクトリの外を読めないので、**セッション開始時に追加する**。
 
 ```bash
-claude --model opus --add-dir /c/Users/yoshi/ClaudeVault/ClaudeVault/projects/acm_bot
+claude --model opus --add-dir <開発ノートのパス>/projects/acm_bot
 ```
 
 すでにセッション中なら:
 
 ```
-/add-dir C:\Users\yoshi\ClaudeVault\ClaudeVault\projects\acm_bot
+/add-dir <開発ノートのパス>\projects\acm_bot
 ```
 
 **ADR は2箇所にある。** リポジトリ内の `club-bot/docs/adr/`（3件）は `/add-dir` 不要で読める。
-ClaudeVault 側（33件）と**番号体系が独立していて 0008 が両方に存在する**ので、
+開発ノート側（33件）と**番号体系が独立していて 0008 が両方に存在する**ので、
 言及するときは出典を書き分けさせること。
 
 | 場所 | 内容 |
 |---|---|
 | `club-bot/docs/adr/0008-dashboard-guild-scope.md` | ダッシュボードの guild_id スコープ。**この表の全タスクに効く。最初に読ませる** |
 | `club-bot/docs/adr/0007` / `0009` | services 層の guild_id 凍結とその解除 |
-| ClaudeVault `decisions/` | 設計判断の本体（33件）。下表 |
+| 開発ノート `decisions/` | 設計判断の本体（33件）。下表 |
 
-ClaudeVault 側でこの表に特に効いてくる ADR:
+開発ノート側でこの表に特に効いてくる ADR:
 
 | ADR | この表での効き方 |
 |---|---|
@@ -85,8 +93,8 @@ Claude Code が自動で読むのは `CLAUDE.md`。**現状は完了済みの `F
 - 実装ループは /acm-bot-loop スキルの手順で回す（全テストパスまで自走）
 
 ## 設計判断の正
-- ADR と既知のハマりどころは Obsidian の ClaudeVault にある
-  （/add-dir C:\Users\yoshi\ClaudeVault\ClaudeVault\projects\acm_bot）
+- ADR と既知のハマりどころはローカルの開発ノートにある
+  （/add-dir <開発ノートのパス>\projects\acm_bot）
 - ADR に反する実装をしない。覆す必要があると判断したら実装せず報告する
 
 ## 作業ディレクトリ
@@ -135,8 +143,8 @@ club-bot/docs/development/DASHBOARD_TASKS.md を読み、未完了（チェッ�
 
 1. club-bot/docs/development/DASHBOARD_TASKS.md の「運用ルール」「全タスク共通の受入基準」
    「この表に固有の受入基準」「デザイン方針」と、対象タスクの受入基準・検証・注意
-2. ClaudeVault の decisions/_index.md と gotchas/_index.md
-   （/add-dir 済み。パスは C:\Users\yoshi\ClaudeVault\ClaudeVault\projects\acm_bot）
+2. 開発ノートの decisions/_index.md と gotchas/_index.md
+   （/add-dir 済み。パスは <開発ノートのパス>\projects\acm_bot）
 3. 対象タスクの「注意」に ADR 番号や gotcha 名が書いてあれば、その本文も読む
 4. 触る予定のファイルの現物（dashboard/static/app.js / style.css /
    dashboard/routers/ / repositories/table_repository.py のうち関係する範囲）
@@ -164,7 +172,7 @@ club-bot/docs/development/DASHBOARD_TASKS.md を読み、未完了（チェッ�
   「ADR NNNN と衝突。◯◯という理由で覆すべきだと考える」と書いて止まる
 - SQL に触ったら、CLUB_TEST_PG_DSN 条件付きの PostgreSQL テストを必ず足す。
   SQLite だけ緑でも「検証できた」と書かない
-- 修正した不具合が ClaudeVault の gotcha に載っていたら、完了ログにノート名を書く
+- 修正した不具合が 開発ノートの gotcha に載っていたら、完了ログにノート名を書く
 - 途中で私に確認を取らない。SKILL.md §4 の停止条件に当たったときだけ止まる
 - コミットはしない。ブランチを切るところまで
 - 1タスクの範囲外のファイルを触らない。**表のタスク本文に例外が明記されている場合だけ従う**
@@ -294,7 +302,7 @@ Task ツールで general-purpose エージェントを1つ立て、次を調べ
      node --test が CI で実際に失敗しうる形で組まれているか
 
  (5) 設計判断との衝突:
-     C:\Users\yoshi\ClaudeVault\ClaudeVault\projects\acm_bot\decisions\_index.md を読み、
+     <開発ノートのパス>\projects\acm_bot\decisions\_index.md を読み、
      特に 0006 / 0008 / 0016 / 0024 に反していないかを確認せよ。
 
  該当箇所をファイル:行番号で列挙し、無ければ『違反なし』と答えること。実装は変更しない。」
@@ -304,12 +312,12 @@ Task ツールで general-purpose エージェントを1つ立て、次を調べ
 
 ---
 
-## F. 完了後に ClaudeVault へ記録する
+## F. 完了後に 開発ノートへ記録する
 
 **セッションの最後に必ず1回。** 記録しないと次のセッションが同じ調査からやり直す。
 
 ```
-このセッションで確定した内容を ClaudeVault へ書く材料をまとめて。
+このセッションで確定した内容を 開発ノートへ書く材料をまとめて。
 Vault のファイルは私が書くので、次の形で出力するだけでよい。
 
 1. 【ADR が必要か】
@@ -367,7 +375,7 @@ docs/IMPROVEMENT_TASKS.md（G0〜G4）のタスクには手を出さない。別
 ```
 club-bot/docs/development/DASHBOARD_TASKS.md の Phase D<N> の受入基準を、実際のコード
 （dashboard/ と repositories/table_repository.py）と
-ClaudeVault の decisions/ ・ gotchas/ と突き合わせてレビューして。
+開発ノートの decisions/ ・ gotchas/ と突き合わせてレビューして。
 
 - 既に実装済み・不要になった項目
 - ADR と衝突していて、そのままでは実装できない項目
@@ -384,17 +392,17 @@ ClaudeVault の decisions/ ・ gotchas/ と突き合わせてレビューして�
 **git worktree の中でだけ**やること。D0 を終えてから。
 
 ```bash
-cd /c/Users/yoshi/acm_bot
+cd <リポジトリのパス>
 git worktree add ../acm_bot_dash -b feat/dashboard-tasks
 cd ../acm_bot_dash
 
 for i in $(seq 1 4); do
   echo "=== iteration $i ==="
   claude -p --model opus --permission-mode acceptEdits \
-    --add-dir /c/Users/yoshi/ClaudeVault/ClaudeVault/projects/acm_bot \
+    --add-dir <開発ノートのパス>/projects/acm_bot \
     "/acm-bot-loop club-bot/docs/development/DASHBOARD_TASKS.md の未完了で最も若いタスク（【人間タスク】は除く）を
      1つだけ実装し、ruff と pytest（-rs 付き）が全パスするまで自走して。
-     ClaudeVault の decisions/_index.md と gotchas/_index.md を先に読み、ADR に反する実装をしない。
+     開発ノートの decisions/_index.md と gotchas/_index.md を先に読み、ADR に反する実装をしない。
      配信物に外部依存を足さない。完了したら表のチェックと完了ログを更新する。コミットはしない。
      停止条件に当たったら STOPPED: と理由を出力して終了する。" \
     || break
@@ -419,5 +427,5 @@ done
 - ダッシュボードの手元起動:
   `venv/Scripts/python.exe -m uvicorn dashboard.main:app --host 127.0.0.1 --port 8000`
 - `.env` の実値は Claude Code に読ませない（`deny` 設定）
-- **セッションの最後に §F を必ず回す。** ClaudeVault が腐ると、
+- **セッションの最後に §F を必ず回す。** 開発ノートが腐ると、
   「なぜそう決めたか」を次の代が誰も説明できなくなる
