@@ -439,8 +439,8 @@ def test_create_mentions_the_target_role_on_the_first_vote_message():
                     cog,
                     interaction,
                     title="秋合宿",
-                    options="2026-10-01; 2026-10-02",
-                    deadline="2026-09-20",
+                    options="2099-10-01; 2099-10-02",
+                    deadline="2099-09-20",
                     target_role=role,
                 )
             finally:
@@ -483,8 +483,8 @@ def test_create_without_a_target_role_has_no_mention():
                     cog,
                     interaction,
                     title="秋合宿",
-                    options="2026-10-01",
-                    deadline="2026-09-20",
+                    options="2099-10-01",
+                    deadline="2099-09-20",
                 )
             finally:
                 schedule_mod.config.for_guild = original

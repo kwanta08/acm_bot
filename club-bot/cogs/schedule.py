@@ -49,6 +49,7 @@ from utils.parser import (
     InvalidDatetimeError,
     fmt_jp,
     from_iso,
+    now,
     parse_datetime,
     parse_deadline,
     to_iso,
@@ -316,6 +317,22 @@ class Schedule(commands.Cog):
                 )
                 return
             parsed_options.append((label, start))
+
+        # 過去の締切・過去の候補・締切より前の候補は作らない（H1-5）。
+        # 投稿先・権限の検査より前、DB へ書く前に見る
+        current = now()
+        problems = svc.schedule_time_problems(
+            deadline_dt, deadline.strip(), parsed_options, now=current
+        )
+        if problems:
+            await interaction.followup.send(
+                embed=error_embed(
+                    svc.format_time_problems(problems, deadline_dt, now=current),
+                    code="INVALID_SCHEDULE_TIME",
+                ),
+                ephemeral=True,
+            )
+            return
 
         # 投稿先決定（ギルド別設定を参照）
         gconf = await config.for_guild(guild_id)
@@ -1272,6 +1289,19 @@ class Schedule(commands.Cog):
                     f"締切「{deadline}」の形式が不正です。"
                     f"`YYYY-MM-DD` または `YYYY-MM-DD HH:MM` 形式で指定してください。",
                     code="INVALID_DATETIME",
+                ),
+                ephemeral=True,
+            )
+            return
+
+        # 新しい締切が現在以前なら変えない（H1-5）。変えると次の tick で自動締切される
+        current = now()
+        problem = svc.deadline_problem(new_deadline_dt, deadline.strip(), now=current)
+        if problem is not None:
+            await interaction.followup.send(
+                embed=error_embed(
+                    svc.format_time_problems([problem], new_deadline_dt, now=current),
+                    code="INVALID_SCHEDULE_TIME",
                 ),
                 ephemeral=True,
             )

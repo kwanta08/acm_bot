@@ -139,7 +139,7 @@ def test_the_wording_matches_edit_deadline():
             await Schedule.remind.callback(cog, remind_interaction, schedule_id="sch_1")
             edit_interaction = _Interaction()
             await Schedule.edit_deadline.callback(
-                cog, edit_interaction, schedule_id="sch_1", deadline="2030-02-01 12:00"
+                cog, edit_interaction, schedule_id="sch_1", deadline="2099-02-01 12:00"
             )
 
             assert "この投票は既に締切済みです。" in remind_interaction.text
