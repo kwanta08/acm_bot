@@ -217,6 +217,11 @@ class _Channel:
         self.mention = f"<#{channel_id}>"
         self.sent: list[dict] = []
 
+    def permissions_for(self, member):
+        # /schedule create は投稿前に Bot 自身の権限を検査する（H1-2）
+        assert member is self.guild.me, "Bot 自身以外の権限を検査している"
+        return discord.Permissions.all_channel()
+
     async def send(self, content=None, **kwargs):
         self.sent.append({"content": content, **kwargs})
         return SimpleNamespace(id=5000 + len(self.sent))
@@ -243,6 +248,7 @@ class _Guild:
         self.id = guild_id
         self.name = str(guild_id)
         self.emojis = []
+        self.me = SimpleNamespace(id=4242, bot=True)
         self._channels = channels or {}
         self._threads = threads or {}
         self._members = {m.id: m for m in members or []}

@@ -54,7 +54,7 @@ from utils.parser import TZ, to_iso
 
 G1 = 100000000000000001
 G2 = 200000000000000002
-DAY = datetime(2026, 10, 1, 18, 0, tzinfo=TZ)
+DAY = datetime(2099, 10, 1, 18, 0, tzinfo=TZ)
 
 
 def run(coro):
@@ -89,6 +89,10 @@ class _FakeMessage:
         self.edits.append(kwargs)
 
 
+#: guild.me（Bot 自身）。/schedule create は投稿前に Bot の権限を検査する（H1-2）
+_BOT = SimpleNamespace(id=4242, bot=True)
+
+
 class _FakeChannel:
     def __init__(self, channel_id: int = 555, guild=None):
         self.id = channel_id
@@ -96,6 +100,10 @@ class _FakeChannel:
         self.guild = guild
         self.sent: list[dict] = []
         self.messages: dict[int, _FakeMessage] = {}
+
+    def permissions_for(self, member):
+        assert member is _BOT, "Bot 自身以外の権限を検査している"
+        return discord.Permissions.all_channel()
 
     async def send(self, content=None, *, embed=None, view=None, **kwargs):
         msg = _FakeMessage(1000 + len(self.sent) + 1)
@@ -116,6 +124,7 @@ class _FakeGuild:
     def __init__(self, guild_id: int = G1):
         self.id = guild_id
         self.emojis = []
+        self.me = _BOT
         self.channels: dict[int, object] = {}
 
     def get_channel_or_thread(self, channel_id: int):
@@ -215,7 +224,7 @@ async def _create_via_command(db, *, style: str | None = None, option_count: int
             interaction,
             title="秋合宿",
             options=options,
-            deadline="2026-09-20",
+            deadline="2099-09-20",
             place="部室",
         )
     finally:
@@ -256,7 +265,7 @@ async def _seed_board(db, *, closed: bool = False, message_id: str | None = "100
 def _candidate_lines(embed) -> list[str]:
     """ボード description のうち候補の集計行（**日付** で始まる行）を返す。"""
     return [
-        line for line in (embed.description or "").splitlines() if line.startswith("**2026")
+        line for line in (embed.description or "").splitlines() if line.startswith(f"**{DAY.year}")
     ]
 
 
@@ -352,7 +361,7 @@ def test_mention_is_only_on_the_first_board():
                     interaction,
                     title="秋合宿",
                     options=options,
-                    deadline="2026-09-20",
+                    deadline="2099-09-20",
                     target_role=role,
                 )
             finally:

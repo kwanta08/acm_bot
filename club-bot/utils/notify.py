@@ -66,6 +66,34 @@ def guild_channel(guild, channel_id):
     return channel if channel is not None and hasattr(channel, "send") else None
 
 
+def missing_send_permission(channel, member) -> str | None:
+    """channel へ Embed を投稿するのに**最初に**欠けている権限の表示名。足りていれば None。
+
+    確認順は「チャンネルを見る」→「メッセージを送信」（スレッドでは
+    「スレッドでメッセージを送信」）→「埋め込みリンク」。
+
+    **最初の1つしか返さない。** discord.py の `permissions_for` は権限を連鎖して
+    落とす（見られないと全部 False、送信できないと埋め込みリンクも False）。
+    後段が False でも、それが本当に拒否されているのか前段に巻き込まれただけなのかは
+    区別できないので、断定しない。
+
+    `permissions_for` は計算だけで Discord へは問い合わせない。スレッドの親が
+    キャッシュに無いときは `discord.ClientException` がそのまま上がる。
+    表示名はルートの README.md の権限表の表記に揃えている。
+    """
+    perms = channel.permissions_for(member)
+    if not perms.view_channel:
+        return "チャンネルを見る"
+    if isinstance(channel, discord.Thread):
+        if not perms.send_messages_in_threads:
+            return "スレッドでメッセージを送信"
+    elif not perms.send_messages:
+        return "メッセージを送信"
+    if not perms.embed_links:
+        return "埋め込みリンク"
+    return None
+
+
 def guild_channel_by_id(bot, guild_id, channel_id):
     """`guild_id` のギルドの**中だけ**でチャンネルを解決する。
 

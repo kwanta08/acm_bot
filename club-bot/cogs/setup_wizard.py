@@ -22,9 +22,11 @@ from config import MULTI_ROLE_KEYS, GuildConfig, config
 from repositories.audit_log_repository import AuditLogRepository
 from repositories.member_repository import MemberRepository
 from repositories.settings_repository import SettingsRepository
+from services.milestone_service import parse_date
 from utils.embeds import error_embed, info_embed, success_embed
 from utils.logger import get_logger
 from utils.permissions import ensure_guild, is_admin
+from utils.settings_spec import SettingValueError, normalize_setting
 from utils.views import TimeoutAwareView
 
 if TYPE_CHECKING:
@@ -52,7 +54,7 @@ ROLE_SETTINGS: list[tuple[str, str]] = [
 ]
 ALL_SETUP_KEYS: set[str] = {k for k, _ in CHANNEL_SETTINGS + ROLE_SETTINGS}
 # セレクト以外（Modal 入力）で設定できるキー
-EXTRA_SETUP_KEYS: set[str] = {"CLUB_NAME", "WELCOME_ENABLED"}
+EXTRA_SETUP_KEYS: set[str] = {"CLUB_NAME", "WELCOME_ENABLED", "COMPETITION_DATE"}
 _CHANNEL_KEYS: set[str] = {k for k, _ in CHANNEL_SETTINGS}
 _ROLE_KEYS: set[str] = {k for k, _ in ROLE_SETTINGS}
 
@@ -220,6 +222,94 @@ class ClubNameModal(discord.ui.Modal, title="サークル名の設定"):
             pass
 
 
+#: 大会日の入力欄の上限（`YYYY-MM-DD`）と、Discord の placeholder の上限
+_DATE_INPUT_MAX = 10
+_PLACEHOLDER_MAX = 100
+_DATE_EXAMPLE = "例: 2026-07-25"
+
+
+def competition_date_modal_defaults(current: str | None) -> tuple[str | None, str]:
+    """大会日の Modal の (初期値, placeholder)。
+
+    **初期値に入れるのは検証を通る値だけ。** 既存ギルドに残っている読めない値
+    （例: `2026年7月25日（土）予定`）を初期値にすると、入力欄の上限を超えて
+    Discord が Modal ごと拒否し、ボタンを押しても何も起きなくなる。
+    読めない値は placeholder に「現在: …」として見せるだけにする。
+    """
+    if not current:
+        return None, _DATE_EXAMPLE
+    try:
+        return normalize_setting("COMPETITION_DATE", current), _DATE_EXAMPLE
+    except SettingValueError:
+        # 入力の検証は厳密だが、Bot（/countdown・/setup-status）は parse_date で
+        # もう少し寛容に読む。読めている値は「読めない」と言わず、保存形で見せる
+        readable = parse_date(current)
+        if readable is not None:
+            return readable.isoformat(), _DATE_EXAMPLE
+        placeholder = f"現在: {current.strip()}（読めない形式です）"
+        if len(placeholder) > _PLACEHOLDER_MAX:
+            placeholder = placeholder[: _PLACEHOLDER_MAX - 1] + "…"
+        return None, placeholder
+
+
+class CompetitionDateModal(discord.ui.Modal, title="大会日の設定"):
+    """大会日（COMPETITION_DATE）を入力する Modal（H1-3）。
+
+    検証は `SetupWizard.save_setting` の中（= `/settings_set` と同じ仕様表）で行う。
+    """
+
+    date_input = discord.ui.TextInput(
+        label="大会日（YYYY-MM-DD）",
+        placeholder=_DATE_EXAMPLE,
+        required=True,
+        max_length=_DATE_INPUT_MAX,
+    )
+
+    def __init__(self, cog: SetupWizard, guild_id: int, owner_id: int, current: str | None):
+        super().__init__()
+        self.cog = cog
+        self.guild_id = guild_id
+        self.owner_id = owner_id
+        default, placeholder = competition_date_modal_defaults(current)
+        self.date_input.default = default
+        self.date_input.placeholder = placeholder
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if interaction.user.id != self.owner_id:
+            await interaction.response.send_message(
+                embed=error_embed("この操作はコマンドの実行者のみ可能です。"), ephemeral=True
+            )
+            return
+        raw = self.date_input.value or ""
+        try:
+            await self.cog.save_setting(self.guild_id, "COMPETITION_DATE", raw)
+        except SettingValueError as e:
+            await interaction.response.send_message(embed=error_embed(str(e)), ephemeral=True)
+            return
+        saved = normalize_setting("COMPETITION_DATE", raw)
+        log.info("/setup で大会日を保存 (guild=%s): %s", self.guild_id, saved)
+        await interaction.response.send_message(
+            embed=success_embed(
+                "大会日を設定しました",
+                f"**{saved}**\n`/countdown` と週次のマイルストーン警告で使われます。",
+                executor=interaction.user.display_name,
+            ),
+            ephemeral=True,
+        )
+
+    async def on_error(self, interaction: discord.Interaction, error: Exception) -> None:
+        log.warning("大会日設定 Modal でエラー (guild=%s): %s", self.guild_id, type(error).__name__)
+        embed = error_embed("保存に失敗しました。時間をおいて再試行してください。")
+        try:
+            if interaction.response.is_done():
+                await interaction.followup.send(embed=embed, ephemeral=True)
+            else:
+                await interaction.response.send_message(embed=embed, ephemeral=True)
+        # エラー通知の送信自体に失敗した場合はこれ以上できることがないため握りつぶす
+        except Exception:  # noqa: BLE001, S110
+            pass
+
+
 class TeamBulkCreateModal(discord.ui.Modal, title="班の一括作成"):
     """班名をカンマ区切りで入力し、班と対応ロールを一括作成する Modal。"""
 
@@ -343,6 +433,25 @@ class SetupWizardView(TimeoutAwareView):
         await interaction.response.send_modal(
             ClubNameModal(self.cog, self.guild_id, self.owner_id, gconf.club_name)
         )
+
+    @discord.ui.button(label="大会日を設定", style=discord.ButtonStyle.secondary, row=3)
+    async def open_competition_date_modal(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        gconf = await config.for_guild(self.guild_id, db=self.cog.db)
+        modal = CompetitionDateModal(self.cog, self.guild_id, self.owner_id, gconf.competition_date)
+        try:
+            await interaction.response.send_modal(modal)
+        except discord.HTTPException as e:
+            log.warning("大会日の入力欄を開けません (guild=%s): %s", self.guild_id, e)
+            embed = error_embed("入力欄を開けませんでした。時間をおいて再試行してください。")
+            try:
+                if interaction.response.is_done():
+                    await interaction.followup.send(embed=embed, ephemeral=True)
+                else:
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+            except discord.HTTPException:
+                pass
 
     @discord.ui.button(
         label="新入生オンボーディング ON/OFF", style=discord.ButtonStyle.secondary, row=4
@@ -541,10 +650,14 @@ class SetupWizard(commands.Cog):
         """
         ギルド別 settings に値を保存し、解決キャッシュを更新する。
         /setup で扱わないキーは拒否する。
+
+        **値は `/settings_set` と同じ仕様表で検証し、保存形に正規化してから書く**
+        （H1-3）。/setup からの書き込みはすべてここを通るので、ボタンや Modal を
+        足しても検証を書き忘れられない。不正なら `SettingValueError` を上げて何も書かない。
         """
         if key not in ALL_SETUP_KEYS | EXTRA_SETUP_KEYS:
             raise ValueError(f"/setup では設定できないキーです: {key}")
-        await self.settings_repo.set(guild_id, key, value)
+        await self.settings_repo.set(guild_id, key, normalize_setting(key, value))
         config.invalidate_guild(guild_id)
         # レガシーギルドのグローバル設定を再読込
         await config.load_from_db(self.db)

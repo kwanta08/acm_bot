@@ -23,6 +23,7 @@ from discord.ext import commands
 from config import GuildConfig, config
 from repositories.layer_keta_repository import LayerKetaRepository
 from repositories.member_repository import MemberRepository
+from services.milestone_service import parse_date
 from utils.embeds import info_embed, success_embed
 from utils.logger import get_logger
 from utils.permissions import (
@@ -277,12 +278,36 @@ async def collect_setup_status(db, gconf: GuildConfig) -> list[SetupItem]:
         ),
         # 大会日は /countdown と週次のマイルストーン警告の起点。
         # 未設定でも他機能は動くので、任意項目として最後に置く。
-        SetupItem(
-            "大会日（任意）",
-            bool(gconf.competition_date),
-            "`/settings_set setting_key:COMPETITION_DATE value:2026-07-25` の形式で設定してください",
-        ),
+        _competition_date_item(gconf.competition_date),
     ]
+
+
+#: 読めない大会日を /setup-status（L1 も見る）に引用するときの上限
+_DATE_QUOTE_LIMIT = 20
+
+
+def _competition_date_item(value: str | None) -> SetupItem:
+    """大会日の項目。**入っているかではなく、日付として読めるか**で判定する（H1-3）。
+
+    既存ギルドに残っている読めない値（`2026/07/25` 等）は移行しない（既存データを
+    動かさない）。代わりにここで ❌ にして気づかせる。判定は読み出し側と同じ
+    `parse_date`（寛容）で行う。/setup の入力欄はこれより厳密に検証する。
+    """
+    if not value:
+        return SetupItem(
+            "大会日（任意）",
+            False,
+            "`/setup` の「大会日を設定」で `YYYY-MM-DD` の形で設定してください（例: `2026-07-25`）",
+        )
+    if parse_date(value) is None:
+        quoted = value if len(value) <= _DATE_QUOTE_LIMIT else value[:_DATE_QUOTE_LIMIT] + "…"
+        return SetupItem(
+            "大会日（任意）",
+            False,
+            f"入っている値 `{quoted}` を日付として読めません。"
+            "`/setup` の「大会日を設定」で設定し直してください",
+        )
+    return SetupItem("大会日（任意）", True, "")
 
 
 def setup_status_embed(items: list[SetupItem]) -> discord.Embed:

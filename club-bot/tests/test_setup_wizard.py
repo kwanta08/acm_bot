@@ -15,13 +15,20 @@ import sys
 import tempfile
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from test_settings_spec import COMPETITION_DATE_CASES
 
 from cogs.setup_wizard import (
     MAX_MULTI_ROLE_VALUES,
+    CompetitionDateModal,
     SetupWizard,
     SetupWizardView,
     build_setup_embed,
+    competition_date_modal_defaults,
     parse_team_names,
 )
 from config import GuildConfig, config
@@ -30,6 +37,7 @@ from repositories.settings_repository import SettingsRepository
 from services import team_service
 from utils.db import Database
 from utils.permissions import Level, get_level, has_level
+from utils.settings_spec import SettingValueError
 
 G1 = 100000000000000001  # ギルド1
 G2 = 200000000000000002  # ギルド2
@@ -453,6 +461,153 @@ def test_select_item_blocks_overwrite_when_saved_roles_exceed_the_limit():
         sent_view = interaction.edited[-1]["view"]
         assert sent_view.select_role.disabled, "選ばせてから拒否しない"
         assert "/set_role" in interaction.edited_text
+    finally:
+        run(db.close())
+        _cleanup_config()
+
+
+# ------------------------------------------------------------------
+# 大会日（COMPETITION_DATE）— H1-3
+#
+# 以前は /settings_set の生コマンドだけが設定手段で、`2026/07/25` も成功表示に
+# なって無言で読まれなかった。/setup に Modal を足し、/settings_set と
+# **同じ仕様表の検証**を save_setting の中で通す。
+# ------------------------------------------------------------------
+
+
+def test_save_setting_validates_like_settings_set():
+    """/setup からの書き込みは save_setting の関門で検証される（書き忘れられない）。"""
+    db = run(_make_db())
+    try:
+        cog = _make_cog(db)
+        with pytest.raises(SettingValueError):
+            run(cog.save_setting(G1, "COMPETITION_DATE", "2026/07/25"))
+        assert run(SettingsRepository(db).get(G1, "COMPETITION_DATE")) is None
+        # 正規化した値（保存形）で書く
+        run(cog.save_setting(G1, "DEFAULT_TASK_CHANNEL_ID", " 00123 "))
+        assert run(SettingsRepository(db).get(G1, "DEFAULT_TASK_CHANNEL_ID")) == "123"
+    finally:
+        run(db.close())
+        _cleanup_config()
+
+
+class _ModalInteraction:
+    def __init__(self, user_id: int = 501):
+        self.user = SimpleNamespace(id=user_id, display_name="tester")
+        self.messages: list[dict] = []
+        self.response = SimpleNamespace(send_message=self._send, is_done=lambda: False)
+
+    async def _send(self, **kwargs):
+        self.messages.append(kwargs)
+
+    @property
+    def text(self) -> str:
+        embed = self.messages[-1]["embed"]
+        return (embed.title or "") + "\n" + (embed.description or "")
+
+
+@pytest.mark.parametrize(("raw", "expected"), COMPETITION_DATE_CASES)
+def test_competition_date_modal_uses_the_same_table(raw, expected):
+    """/settings_set と**同じ表**で、Modal からの入力も同じ結果になる。"""
+    db = run(_make_db())
+    try:
+        modal = CompetitionDateModal(_make_cog(db), G1, owner_id=501, current=None)
+        modal.date_input._value = raw
+        interaction = _ModalInteraction()
+        run(modal.on_submit(interaction))
+
+        stored = run(SettingsRepository(db).get(G1, "COMPETITION_DATE"))
+        if expected is None:
+            assert stored is None, "不正な大会日を保存している"
+            assert "YYYY-MM-DD" in interaction.text
+        else:
+            assert stored == expected
+            assert expected in interaction.text
+    finally:
+        run(db.close())
+        _cleanup_config()
+
+
+def test_competition_date_modal_refuses_other_users():
+    db = run(_make_db())
+    try:
+        modal = CompetitionDateModal(_make_cog(db), G1, owner_id=501, current=None)
+        modal.date_input._value = "2026-07-25"
+        run(modal.on_submit(_ModalInteraction(user_id=999)))
+        assert run(SettingsRepository(db).get(G1, "COMPETITION_DATE")) is None
+    finally:
+        run(db.close())
+        _cleanup_config()
+
+
+def test_competition_date_modal_defaults():
+    """初期値に入れるのは検証を通る値だけ（長い不正値で Modal が開けなくならない）。"""
+    assert competition_date_modal_defaults(None) == (None, "例: 2026-07-25")
+    assert competition_date_modal_defaults("2026-07-25")[0] == "2026-07-25"
+
+    broken = "2026年7月25日（土）予定" * 20
+    default, placeholder = competition_date_modal_defaults(broken)
+    assert default is None
+    assert len(placeholder) <= 100
+    assert placeholder.startswith("現在: 2026年7月25日")
+
+    # Modal 本体でも、初期値が入力欄の上限を超えない
+    modal = CompetitionDateModal(SimpleNamespace(), G1, owner_id=501, current=broken)
+    assert not modal.date_input.default
+    assert len(modal.date_input.placeholder) <= 100
+
+
+def test_setup_view_has_the_competition_date_button():
+    db = run(_make_db())
+    try:
+        view = _view(db)
+        labels = [getattr(item, "label", None) for item in view.children]
+        assert "大会日を設定" in labels
+        # discord.py 自身の配置で、5 行・1 行 5 部品の上限に収まっている
+        rows = view.to_components()
+        assert len(rows) <= 5
+        assert all(len(row["components"]) <= 5 for row in rows)
+    finally:
+        run(db.close())
+        _cleanup_config()
+
+
+
+@pytest.mark.parametrize("current", ["2026-7-25", "2026-07-25 10:00", "2026-07-25T00:00:00"])
+def test_competition_date_modal_shows_values_the_bot_can_read(current):
+    """/countdown・/setup-status が読めている値を、Modal だけが「読めない」と言わない。"""
+    default, placeholder = competition_date_modal_defaults(current)
+    assert default == "2026-07-25"
+    assert "読めない" not in placeholder
+
+
+
+def test_competition_date_button_survives_send_modal_failure():
+    """入力欄（Modal）を開けなかったら、例外を上げずに本人へ理由を返す。"""
+    import discord
+
+    class _ButtonInteraction:
+        def __init__(self):
+            self.user = SimpleNamespace(id=501, display_name="tester")
+            self.messages: list[dict] = []
+            self.response = SimpleNamespace(
+                send_modal=self._send_modal, send_message=self._send, is_done=lambda: False
+            )
+
+        async def _send_modal(self, modal):
+            raise discord.HTTPException(SimpleNamespace(status=400, reason="Bad"), "Invalid Form Body")
+
+        async def _send(self, **kwargs):
+            self.messages.append(kwargs)
+
+    db = run(_make_db())
+    try:
+        view = _view(db)
+        interaction = _ButtonInteraction()
+        run(SetupWizardView.open_competition_date_modal(view, interaction, None))
+        assert interaction.messages, "失敗を本人に伝えていない"
+        embed = interaction.messages[-1]["embed"]
+        assert "入力欄を開けませんでした" in (embed.description or "")
     finally:
         run(db.close())
         _cleanup_config()

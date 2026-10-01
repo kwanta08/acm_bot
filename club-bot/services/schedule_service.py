@@ -9,6 +9,9 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 import discord
@@ -62,6 +65,151 @@ def new_schedule_id() -> str:
 
 def new_option_id() -> str:
     return uuid.uuid4().hex[:12]
+
+
+def unanswered_reminder_text(title: str, deadline_text: str, ui_style: str | None) -> str:
+    """未回答リマインドの本文。予定の投票 UI 方式で回答の仕方を変える（H1-4）。
+
+    ボタン式のボードに付けたリアクションは投票として扱われない
+    （`_handle_reaction` が ui_style == "buttons" を無視する）ので、ボタン式の
+    予定で「リアクションで」と案内すると、言われたとおりにしても票が入らない。
+
+    **reaction のときだけ**リアクションの文面にし、それ以外（欠損・空・未知の値）は
+    既定（ボタン式）の文面にする。例外は投げない（1件の壊れた行で催促を止めない）。
+    前後の空白と大文字小文字は無視する。
+
+    注意: 既存の分岐（status / edit-deadline / `_handle_reaction`）は
+    `== "buttons"` で判定し、欠損・未知を**リアクション式**として扱う。
+    読み方が揃っていないのは承知の上（文面は受入基準どおり既定＝ボタン）。
+    本番の行は NOT NULL で、create は正規化済みの値しか書かない。
+    """
+    head = f"【日程調整リマインド】\n「{title}」が未回答です。\n締切: {deadline_text}\n"
+    if (ui_style or "").strip().lower() == "reaction":
+        return head + "投票チャンネルの候補メッセージに、リアクションで回答してください。"
+    return head + "投票チャンネルの投票ボードで、候補のボタンを押して回答してください。"
+
+
+# ---------------------------------------------------------------------
+# 締切・候補の日時の検査（H1-5）
+# ---------------------------------------------------------------------
+#: 問題の種別
+PAST_DEADLINE = "past_deadline"
+PAST_OPTION = "past_option"
+OPTION_BEFORE_DEADLINE = "option_before_deadline"
+
+#: 1種別あたりに列挙する件数の上限（超えた分は「…ほか N 件」）
+MAX_TIME_PROBLEMS_SHOWN = 10
+
+
+@dataclass(frozen=True)
+class TimeProblem:
+    """締切・候補の日時の問題1件。"""
+
+    kind: str  # PAST_DEADLINE / PAST_OPTION / OPTION_BEFORE_DEADLINE
+    label: str  # 利用者が入力した文字列（締切なら締切の入力）
+    at: datetime  # 解釈した日時
+
+
+def deadline_problem(
+    deadline: datetime, deadline_label: str, *, now: datetime
+) -> TimeProblem | None:
+    """締切が現在以前なら問題（/schedule create と /schedule edit-deadline で共通）。
+
+    `now` は引数でだけ受け取る（実際の時計を読まない。テストで固定するため）。
+    """
+    if deadline <= now:
+        return TimeProblem(PAST_DEADLINE, deadline_label, deadline)
+    return None
+
+
+def schedule_time_problems(
+    deadline: datetime,
+    deadline_label: str,
+    options: Sequence[tuple[str, datetime]],
+    *,
+    now: datetime,
+) -> list[TimeProblem]:
+    """/schedule create の締切と候補の日時の問題点。空なら問題なし。
+
+    - 締切 <= 現在
+    - 候補 <= 現在
+    - 候補 < 締切（投票が終わる前に予定日が来る）。**締切と同時刻は許可**
+      （「締切＝集合時刻」の運用があるため）
+
+    同じ候補は1回だけ挙げる（過去の候補は、締切が未来なら必ず締切より前にも当たるが、
+    過去として挙げる）。完全な日付を翌年へ送ることはしない（ここでは解釈済みの
+    日時を比べるだけ。パースは utils.parser のまま）。
+    """
+    problems: list[TimeProblem] = []
+    problem = deadline_problem(deadline, deadline_label, now=now)
+    if problem is not None:
+        problems.append(problem)
+    for label, at in options:
+        if at <= now:
+            problems.append(TimeProblem(PAST_OPTION, label, at))
+        elif at < deadline:
+            problems.append(TimeProblem(OPTION_BEFORE_DEADLINE, label, at))
+    return problems
+
+
+def _listed(problems: list[TimeProblem]) -> list[str]:
+    lines = [f"・「{p.label}」（{fmt_jp(p.at)}）" for p in problems[:MAX_TIME_PROBLEMS_SHOWN]]
+    if len(problems) > MAX_TIME_PROBLEMS_SHOWN:
+        # utils.embeds.add_truncation_note と同じ表記
+        lines.append(f"…ほか {len(problems) - MAX_TIME_PROBLEMS_SHOWN} 件")
+    return lines
+
+
+def format_time_problems(problems: list[TimeProblem], deadline: datetime, *, now: datetime) -> str:
+    """問題点を利用者向けの文にする（何が・どう駄目か・どう直すか）。
+
+    直し方は種別ごとに1回だけ書く。列挙は種別ごとに MAX_TIME_PROBLEMS_SHOWN 件まで。
+    固定の年の例は出さない（書式の表記だけにする）。
+    """
+    by_kind = {
+        kind: [p for p in problems if p.kind == kind]
+        for kind in (PAST_DEADLINE, PAST_OPTION, OPTION_BEFORE_DEADLINE)
+    }
+    sections: list[str] = []
+    for p in by_kind[PAST_DEADLINE][:1]:
+        sections.append(
+            f"締切 `{fmt_jp(p.at)}` は過去の日時です（現在 {fmt_jp(now)}）。\n"
+            "これから先の日時を `YYYY-MM-DD HH:MM` で指定してください。"
+        )
+    if by_kind[PAST_OPTION]:
+        lines = (
+            [f"次の候補は過去の日時です（現在 {fmt_jp(now)}）。"]
+            + _listed(by_kind[PAST_OPTION])
+            + ["これから先の日時を指定してください。"]
+        )
+        # 今日の日付だけの候補は 00:00 なので過去になる（「今日なのに過去？」を防ぐ）。
+        # 日付だけの書式（%Y-%m-%d）だけが `:` を含まない
+        if any(":" not in p.label and p.at.date() == now.date() for p in by_kind[PAST_OPTION]):
+            lines.append(
+                "※ 日付だけの候補はその日の 00:00 として扱います（今日の予定なら時刻を付けてください）。"
+            )
+        sections.append("\n".join(lines))
+    if by_kind[OPTION_BEFORE_DEADLINE]:
+        lines = (
+            [
+                (
+                    f"次の候補は締切（{fmt_jp(deadline)}）より前です。"
+                    "投票が終わる前に予定日が来てしまいます。"
+                )
+            ]
+            + _listed(by_kind[OPTION_BEFORE_DEADLINE])
+            + ["締切を候補の日時以前にする（同じ時刻は可）か、候補を締切以降にしてください。"]
+        )
+        # 締切と同じ日の候補: 日付だけだと締切 23:59・候補 00:00 になり、
+        # 締切に時刻を付けるだけでは直らない（締切を 00:00 以前にする必要がある）
+        if any(p.at.date() == deadline.date() for p in by_kind[OPTION_BEFORE_DEADLINE]):
+            lines.append(
+                "※ 日付だけの締切はその日の 23:59、日付だけの候補はその日の 00:00 として扱います。"
+                "締切と同じ日の候補は、締切を前日にするか、締切と候補の両方に `YYYY-MM-DD HH:MM` で"
+                "時刻を付けて締切を候補以前にしてください。"
+            )
+        sections.append("\n".join(lines))
+    return "\n\n".join(sections)
 
 
 def parse_options(options_str: str) -> list[str]:

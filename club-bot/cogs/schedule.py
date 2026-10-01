@@ -39,11 +39,17 @@ from utils.embeds import (
     success_embed,
 )
 from utils.logger import get_logger
-from utils.notify import dm_each_with_channel_fallback, guild_channel, guild_channel_by_id
+from utils.notify import (
+    dm_each_with_channel_fallback,
+    guild_channel,
+    guild_channel_by_id,
+    missing_send_permission,
+)
 from utils.parser import (
     InvalidDatetimeError,
     fmt_jp,
     from_iso,
+    now,
     parse_datetime,
     parse_deadline,
     to_iso,
@@ -312,6 +318,22 @@ class Schedule(commands.Cog):
                 return
             parsed_options.append((label, start))
 
+        # 過去の締切・過去の候補・締切より前の候補は作らない（H1-5）。
+        # 投稿先・権限の検査より前、DB へ書く前に見る
+        current = now()
+        problems = svc.schedule_time_problems(
+            deadline_dt, deadline.strip(), parsed_options, now=current
+        )
+        if problems:
+            await interaction.followup.send(
+                embed=error_embed(
+                    svc.format_time_problems(problems, deadline_dt, now=current),
+                    code="INVALID_SCHEDULE_TIME",
+                ),
+                ephemeral=True,
+            )
+            return
+
         # 投稿先決定（ギルド別設定を参照）
         gconf = await config.for_guild(guild_id)
         # 既定の投稿先は**このサーバーの中だけ**で引く（H1-1）。env の値は
@@ -325,6 +347,36 @@ class Schedule(commands.Cog):
         if target_channel is None:
             await interaction.followup.send(
                 embed=error_embed("投稿先チャンネルが特定できません。channel を指定してください。"),
+                ephemeral=True,
+            )
+            return
+
+        # Bot 自身が投稿できるかを **DB へ書く前に** 確かめる（H1-2）。
+        # 書いてから送信で失敗すると、message_id の無い予定が残って
+        # 5分ごとの自動締切・催促が拾い続ける
+        try:
+            missing = missing_send_permission(target_channel, interaction.guild.me)
+        except discord.ClientException:
+            # スレッドの親チャンネルがキャッシュに無い等。確認できないので作らない
+            await interaction.followup.send(
+                embed=error_embed(
+                    f"{target_channel.mention} の権限を確認できませんでした。"
+                    "日程調整は作成していません。`channel` で別のチャンネルを指定してください。",
+                    code="PERMISSION_UNKNOWN",
+                ),
+                ephemeral=True,
+            )
+            return
+        if missing:
+            await interaction.followup.send(
+                embed=error_embed(
+                    f"このチャンネル（{target_channel.mention}）に投稿できません"
+                    f"（不足: {missing}）。\n"
+                    f"Bot に「{missing}」を付けるか、`channel` で別のチャンネルを指定してください。\n"
+                    "投稿には「チャンネルを見る」「メッセージを送信」（スレッドでは"
+                    "「スレッドでメッセージを送信」）「埋め込みリンク」が要ります。",
+                    code="MISSING_PERMISSIONS",
+                ),
                 ephemeral=True,
             )
             return
@@ -366,53 +418,160 @@ class Schedule(commands.Cog):
             else None
         )
 
-        if ui_style == "buttons":
-            # 全候補を1メッセージ（投票ボード）に集約し、候補ボタンで投票する。
-            # 候補が 25 件を超える分はページ分割（ボタンの上限が25）
-            await self._post_vote_boards(
-                guild_id,
-                schedule,
-                options,
-                target_channel,
-                interaction.guild,
-                mention,
-                roster_active,
-                roster_retired,
-                emojis=svc.get_schedule_emojis(gconf, interaction.guild),
-            )
-        else:
-            # 候補ごとに1メッセージ投稿（仕様 11.2.3 の従来方式）
-            # リアクション絵文字はギルド別設定（/schedule emoji set）を参照
-            emoji_maps = build_emoji_maps(gconf, interaction.guild)
-            all_emojis = emoji_maps["all_emojis"]
-
-            for index, opt in enumerate(options):
-                embed = await svc.build_option_embed(
-                    self.repo,
+        reactions_ok = True
+        try:
+            if ui_style == "buttons":
+                # 全候補を1メッセージ（投票ボード）に集約し、候補ボタンで投票する。
+                # 候補が 25 件を超える分はページ分割（ボタンの上限が25）
+                await self._post_vote_boards(
                     guild_id,
-                    self.bot,
                     schedule,
-                    opt,
+                    options,
+                    target_channel,
                     interaction.guild,
-                    roster_active_ids=roster_active,
-                    roster_retired_ids=roster_retired,
+                    mention,
+                    roster_active,
+                    roster_retired,
+                    emojis=svc.get_schedule_emojis(gconf, interaction.guild),
                 )
-                msg = await target_channel.send(
-                    content=mention if index == 0 else None, embed=embed
-                )
-                await self.repo.set_option_message(guild_id, str(opt["option_id"]), str(msg.id))
-                for emoji in all_emojis:
-                    await msg.add_reaction(emoji)
+            else:
+                # 候補ごとに1メッセージ投稿（仕様 11.2.3 の従来方式）
+                # リアクション絵文字はギルド別設定（/schedule emoji set）を参照
+                emoji_maps = build_emoji_maps(gconf, interaction.guild)
+                all_emojis = emoji_maps["all_emojis"]
 
+                for index, opt in enumerate(options):
+                    embed = await svc.build_option_embed(
+                        self.repo,
+                        guild_id,
+                        self.bot,
+                        schedule,
+                        opt,
+                        interaction.guild,
+                        roster_active_ids=roster_active,
+                        roster_retired_ids=roster_retired,
+                    )
+                    msg = await target_channel.send(
+                        content=mention if index == 0 else None, embed=embed
+                    )
+                    await self.repo.set_option_message(
+                        guild_id, str(opt["option_id"]), str(msg.id)
+                    )
+                    if reactions_ok:
+                        reactions_ok = await self._add_vote_reactions(guild_id, msg, all_emojis)
+        except (discord.Forbidden, discord.HTTPException) as e:
+            await self._abort_create(interaction, guild_id, schedule_id, target_channel, e)
+            return
+        except Exception:
+            # 通信層の例外（OSError・aiohttp.ClientError・TimeoutError）は
+            # HTTPException に包まれずに上がってくる。案内は全体のエラーハンドラに
+            # 任せるが、ゾンビは残さないよう畳み、投稿済みのメッセージも消してから上げ直す
+            await self.repo.soft_delete_schedule(guild_id, schedule_id)
+            try:
+                await self._delete_posted_messages(guild_id, schedule_id, target_channel)
+            except Exception as cleanup_error:  # noqa: BLE001  (元の例外を隠さない)
+                log.warning(
+                    "取り消した日程調整のメッセージを片付けられません (guild=%s, schedule=%s): %s",
+                    guild_id,
+                    schedule_id,
+                    cleanup_error,
+                )
+            raise
+
+        # 成功の通知は try の外。これの送信失敗で、投稿済みの正常な予定を畳まない
+        body = (
+            f"ID: `{schedule_id}`\n候補数: {len(parsed_options)}\n"
+            f"締切: {fmt_jp(deadline_dt)}\n投稿先: {target_channel.mention}"
+        )
+        if not reactions_ok:
+            body += (
+                "\n※ 投票用のリアクションを付けられませんでした（Bot の「リアクションを追加」"
+                "「メッセージ履歴を読む」の権限が無いか、Discord 側のエラーです）。"
+                "部員が自分でリアクションを付ければ投票できます。"
+            )
         await interaction.followup.send(
-            embed=success_embed(
-                "日程調整を作成しました",
-                f"ID: `{schedule_id}`\n候補数: {len(parsed_options)}\n"
-                f"締切: {fmt_jp(deadline_dt)}\n投稿先: {target_channel.mention}",
-                executor=interaction.user.display_name,
-            ),
+            embed=success_embed("日程調整を作成しました", body, executor=interaction.user.display_name),
             ephemeral=True,
         )
+
+    async def _add_vote_reactions(self, guild_id: int, msg, emojis) -> bool:
+        """候補メッセージに投票用のリアクションを付ける。付けられたかを返す（H1-2）。
+
+        **失敗しても投票は無効にしない。** 絵文字が付かないだけで、部員が自分で
+        付ければ投票は成立する。1回失敗したら呼び出し側は以降を試さない
+        （権限不足なら同じ理由で全部失敗するので、API を叩き続けない）。
+
+        通信層の例外（HTTPException に包まれない OSError 等）もここで握る。
+        握らないと `create` の `except Exception` が投票ごと畳んでしまう。
+        """
+        for emoji in emojis:
+            try:
+                await msg.add_reaction(emoji)
+            except Exception as e:  # noqa: BLE001  (リアクションは飾り。失敗は致命的でない)
+                log.warning("投票用のリアクションを付けられません (guild=%s): %s", guild_id, e)
+                return False
+        return True
+
+    async def _delete_posted_messages(self, guild_id: int, schedule_id: str, channel) -> int:
+        """取り消した予定の、投稿済みの投票メッセージを消す。消せなかった件数を返す。
+
+        投稿できた分は候補行の message_id に記録済み（send の直後に必ず
+        set_option_message が走る）なので、`/schedule delete` と同じく DB から辿る。
+        HTTP 以外の例外（通信層）は握らずに上げる（呼び出し側が扱う）。
+        """
+        options = await self.repo.list_options(guild_id, schedule_id)
+        message_ids = list(
+            dict.fromkeys(str(o["message_id"]) for o in options if o.get("message_id"))
+        )
+        left = 0
+        for message_id in message_ids:
+            try:
+                msg = await channel.fetch_message(int(message_id))
+                await msg.delete()
+            except discord.NotFound:
+                pass  # 既に消えている
+            except (discord.Forbidden, discord.HTTPException) as e:
+                log.warning(
+                    "取り消した日程調整のメッセージを削除できません (guild=%s, schedule=%s): %s",
+                    guild_id,
+                    schedule_id,
+                    e,
+                )
+                left += 1
+        return left
+
+    async def _abort_create(
+        self, interaction: discord.Interaction, guild_id: int, schedule_id: str, channel, error
+    ) -> None:
+        """投稿に失敗した予定を畳み、投稿済みのメッセージを消して利用者に伝える（H1-2）。
+
+        **畳むのが先。** 後始末の削除で何が起きても、message_id の無い開催中の
+        予定（5分ごとの自動締切・催促が拾い続けるゾンビ）を残さない。
+        `soft_delete_schedule` は締切も立てるので、自動締切・催促・開催中一覧は
+        既存の条件式だけで止まる（ADR 0037）。
+        """
+        await self.repo.soft_delete_schedule(guild_id, schedule_id)
+        log.warning(
+            "投票メッセージを投稿できず日程調整を取り消しました (guild=%s, schedule=%s): %s",
+            guild_id,
+            schedule_id,
+            error,
+        )
+        left = await self._delete_posted_messages(guild_id, schedule_id, channel)
+
+        body = (
+            "投票メッセージを投稿できなかったため、この日程調整を取り消しました"
+            f"（削除済みとして記録は残ります）。\n理由: {error}\n"
+            "理由に 403 / Forbidden とあれば権限の問題です（Bot が参加していない非公開スレッド、"
+            "ロックされたスレッド等）。`channel` で別のチャンネルを指定してください。"
+            "それ以外は少し待ってからもう一度作成してください。"
+        )
+        if left:
+            body += (
+                f"\n投稿済みのメッセージ {left} 件を削除できませんでした。"
+                "手で削除してください（押しても反応しません）。"
+            )
+        await interaction.followup.send(embed=error_embed(body, code="POST_FAILED"), ephemeral=True)
 
     async def _find_schedule(
         self, interaction: discord.Interaction, guild_id: int, schedule_id: str
@@ -1135,6 +1294,19 @@ class Schedule(commands.Cog):
             )
             return
 
+        # 新しい締切が現在以前なら変えない（H1-5）。変えると次の tick で自動締切される
+        current = now()
+        problem = svc.deadline_problem(new_deadline_dt, deadline.strip(), now=current)
+        if problem is not None:
+            await interaction.followup.send(
+                embed=error_embed(
+                    svc.format_time_problems([problem], new_deadline_dt, now=current),
+                    code="INVALID_SCHEDULE_TIME",
+                ),
+                ephemeral=True,
+            )
+            return
+
         old_deadline_str = fmt_jp(from_iso(schedule["deadline"]))
         await self.repo.update_deadline(guild_id, schedule_id, to_iso(new_deadline_dt))
 
@@ -1640,10 +1812,13 @@ class Schedule(commands.Cog):
             )
             return None
 
-        deadline = fmt_jp(from_iso(schedule["deadline"]))
-        text = (
-            f"【日程調整リマインド】\n「{schedule['title']}」が未回答です。\n"
-            f"締切: {deadline}\n投票チャンネルでリアクションをお願いします。"
+        # 文面は予定の投票 UI 方式に合わせる（H1-4）。ギルド設定ではなく
+        # **予定の行**の ui_style を読む（作成後に方式を変えたサーバーでも、
+        # その予定のボードに合った回答の仕方を案内する）
+        text = svc.unanswered_reminder_text(
+            schedule["title"],
+            fmt_jp(from_iso(schedule["deadline"])),
+            schedule.get("ui_style"),
         )
 
         channel = guild_channel(guild, schedule["channel_id"])

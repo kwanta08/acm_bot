@@ -520,6 +520,7 @@ $ sudo cp ~/club-bot/club-bot/deploy/club-bot.logrotate /etc/logrotate.d/club-bo
 | スラッシュコマンドが Discord に出ない | 招待時に `applications.commands` を付けたか / コマンドはグローバル登録のため反映に最大1時間程度かかることがある（Ctrl+R でクライアント再起動も試す） |
 | メンバー一覧が取れない | Developer Portal で **SERVER MEMBERS INTENT** が ON か |
 | 投票のリアクションが反映されない | Bot に **Add Reactions** / **Read Message History** 権限があるか（MESSAGE CONTENT INTENT は不要。OFF のままで正常です） |
+| `/schedule create` で「投稿できません（不足: …）」と出る | 投稿先のチャンネルで Bot の **View Channels** / **Send Messages**（スレッドでは **Send Messages in Threads**）/ **Embed Links** のどれかが拒否されていないか（チャンネルごとの権限の上書きも確認） |
 | `/health` で Todoist が「未登録」 | そのサーバーで `/todoist-setup` を実行したか。`ENCRYPTION_KEY` が `.env` に正しく設定されているか |
 | `sudo systemctl status` が failed | `journalctl -u club-bot -e` で赤いエラー行を確認。多くは `.env` かパスのミス |
 | SSHで接続できない | IPアドレス/ユーザー名/パスワード、さくらの「パケットフィルタ」でSSH(22)が許可されているか |

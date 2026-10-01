@@ -18,6 +18,7 @@ import tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import discord
+import pytest
 from discord import app_commands
 from discord.ext import commands
 
@@ -486,11 +487,59 @@ def test_setup_status_checks_competition_date():
             items = await collect_setup_status(db, GuildConfig(guild_id=G1))
             item = next(i for i in items if i.name.startswith("大会日"))
             assert item.done is False
-            assert "COMPETITION_DATE" in item.hint
+            # 生コマンドではなく /setup を案内する（H1-3）
+            assert "/setup" in item.hint
+            assert "/settings_set" not in item.hint
 
             gconf = GuildConfig(guild_id=G1, competition_date="2026-07-25")
             items = await collect_setup_status(db, gconf)
             assert next(i for i in items if i.name.startswith("大会日")).done is True
+        finally:
+            await db.close()
+
+    run(_main())
+
+
+@pytest.mark.parametrize(
+    ("value", "done"),
+    [
+        ("2026-07-25", True),
+        # 読み出し側（parse_date）なら読める値は ✅。判定は「厳密さ」ではなく「読めるか」
+        ("2026-7-25", True),
+        # 既存ギルドに残っている読めない値（移行しない）は ❌ で気づかせる
+        ("2026/07/25", False),
+        ("7月25日", False),
+    ],
+)
+def test_setup_status_judges_whether_the_date_is_readable(value, done):
+    async def _main():
+        db = await _fresh_db()
+        try:
+            gconf = GuildConfig(guild_id=G1, competition_date=value)
+            item = next(
+                i for i in await collect_setup_status(db, gconf) if i.name.startswith("大会日")
+            )
+            assert item.done is done
+            if not done:
+                assert "読めません" in item.hint
+                assert "/setup" in item.hint
+        finally:
+            await db.close()
+
+    run(_main())
+
+
+def test_setup_status_truncates_an_unreadable_date():
+    """/setup-status は L1 も見る。読めない値をそのまま長々と出さない。"""
+
+    async def _main():
+        db = await _fresh_db()
+        try:
+            gconf = GuildConfig(guild_id=G1, competition_date="あ" * 300)
+            item = next(
+                i for i in await collect_setup_status(db, gconf) if i.name.startswith("大会日")
+            )
+            assert "あ" * 21 not in item.hint
         finally:
             await db.close()
 

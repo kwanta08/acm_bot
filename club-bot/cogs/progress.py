@@ -198,8 +198,8 @@ _VERDICT_MARK = {
 
 COMPETITION_DATE_HELP = (
     "大会日が設定されていません。\n"
-    "`/settings_set` で `COMPETITION_DATE` に `YYYY-MM-DD` 形式の日付を"
-    "登録してください（例: `2026-07-25`）。"
+    "`/setup` の「大会日を設定」から `YYYY-MM-DD` 形式の日付を登録してください"
+    "（例: `2026-07-25`。設定キーは `COMPETITION_DATE`）。"
 )
 
 
