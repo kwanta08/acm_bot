@@ -177,32 +177,38 @@ def format_time_problems(problems: list[TimeProblem], deadline: datetime, *, now
             "これから先の日時を `YYYY-MM-DD HH:MM` で指定してください。"
         )
     if by_kind[PAST_OPTION]:
-        sections.append(
-            "\n".join(
-                [f"次の候補は過去の日時です（現在 {fmt_jp(now)}）。"]
-                + _listed(by_kind[PAST_OPTION])
-                + ["これから先の日時を指定してください。"]
-            )
+        lines = (
+            [f"次の候補は過去の日時です（現在 {fmt_jp(now)}）。"]
+            + _listed(by_kind[PAST_OPTION])
+            + ["これから先の日時を指定してください。"]
         )
+        # 今日の日付だけの候補は 00:00 なので過去になる（「今日なのに過去？」を防ぐ）。
+        # 日付だけの書式（%Y-%m-%d）だけが `:` を含まない
+        if any(":" not in p.label and p.at.date() == now.date() for p in by_kind[PAST_OPTION]):
+            lines.append(
+                "※ 日付だけの候補はその日の 00:00 として扱います（今日の予定なら時刻を付けてください）。"
+            )
+        sections.append("\n".join(lines))
     if by_kind[OPTION_BEFORE_DEADLINE]:
-        sections.append(
-            "\n".join(
-                [
-                    (
-                        f"次の候補は締切（{fmt_jp(deadline)}）より前です。"
-                        "投票が終わる前に予定日が来てしまいます。"
-                    )
-                ]
-                + _listed(by_kind[OPTION_BEFORE_DEADLINE])
-                + [
-                    (
-                        "締切を早めてください（締切に時刻を付ける `YYYY-MM-DD HH:MM` か、前日にする）。"
-                        "締切と同じ時刻の候補は指定できます。"
-                    ),
-                    "※ 日付だけの締切はその日の 23:59、日付だけの候補はその日の 00:00 として扱います。",
-                ]
-            )
+        lines = (
+            [
+                (
+                    f"次の候補は締切（{fmt_jp(deadline)}）より前です。"
+                    "投票が終わる前に予定日が来てしまいます。"
+                )
+            ]
+            + _listed(by_kind[OPTION_BEFORE_DEADLINE])
+            + ["締切を候補の日時以前にする（同じ時刻は可）か、候補を締切以降にしてください。"]
         )
+        # 締切と同じ日の候補: 日付だけだと締切 23:59・候補 00:00 になり、
+        # 締切に時刻を付けるだけでは直らない（締切を 00:00 以前にする必要がある）
+        if any(p.at.date() == deadline.date() for p in by_kind[OPTION_BEFORE_DEADLINE]):
+            lines.append(
+                "※ 日付だけの締切はその日の 23:59、日付だけの候補はその日の 00:00 として扱います。"
+                "締切と同じ日の候補は、締切を前日にするか、締切と候補の両方に `YYYY-MM-DD HH:MM` で"
+                "時刻を付けて締切を候補以前にしてください。"
+            )
+        sections.append("\n".join(lines))
     return "\n\n".join(sections)
 
 

@@ -140,6 +140,19 @@ def test_format_limits_each_kind_and_notes_the_rest():
     assert len(shown) == MAX_TIME_PROBLEMS_SHOWN
 
 
+def test_format_limits_past_options_separately():
+    """過去の候補の欄も打ち切る（締切より前の欄とは別に数える）。"""
+    deadline = _at("2026-12-31 12:00")
+    past = [(f"2025-11-{d:02d}", _at(f"2025-11-{d:02d}")) for d in range(1, 13)]
+    early = [(f"2026-11-{d:02d}", _at(f"2026-11-{d:02d}")) for d in range(1, 13)]
+    problems = schedule_time_problems(deadline, "d", past + early, now=NOW)
+    assert [p.kind for p in problems] == [PAST_OPTION] * 12 + [OPTION_BEFORE_DEADLINE] * 12
+    text = format_time_problems(problems, deadline, now=NOW)
+    assert text.count("…ほか 2 件") == 2
+    assert len([o for o in past if f"「{o[0]}」" in text]) == MAX_TIME_PROBLEMS_SHOWN
+    assert len([o for o in early if f"「{o[0]}」" in text]) == MAX_TIME_PROBLEMS_SHOWN
+
+
 def test_format_says_what_how_and_how_to_fix():
     deadline = _at("2025-07-02 23:59")
     text = format_time_problems(
@@ -148,6 +161,85 @@ def test_format_says_what_how_and_how_to_fix():
     assert "締切" in text and "2025/07/02 23:59" in text and "過去" in text
     assert "YYYY-MM-DD HH:MM" in text
     assert "2099" not in text
+
+
+def test_option_before_a_timed_deadline_offers_both_fixes():
+    """締切に時刻が付いていても合う直し方: 締切を動かすか、候補を直すか（どちらでもよい）。"""
+    deadline = _at("2026-10-10 12:00")
+    early = _at("2026-10-05 18:00")
+    problems = schedule_time_problems(deadline, "d", [("2026-10-05 18:00", early)], now=NOW)
+    text = format_time_problems(problems, deadline, now=NOW)
+    assert "締切を候補の日時以前にする" in text
+    assert "候補を締切以降にしてください" in text
+    assert "同じ時刻は可" in text
+    # 別の日なので、同じ日の説明（23:59 / 00:00）は付けない
+    assert "日付だけの締切" not in text
+
+
+@pytest.mark.parametrize(
+    ("deadline", "option"),
+    [
+        (parse_deadline("2026-10-10"), "2026-10-10"),  # 両方とも日付だけ
+        (parse_deadline("2026-10-10"), "2026-10-10 19:00"),  # 締切だけ日付だけ
+        (_at("2026-10-10 12:00"), "2026-10-10"),  # 候補だけ日付だけ
+    ],
+)
+def test_same_day_note_offers_a_fix_that_actually_passes(deadline, option):
+    """同じ日の候補に出す直し方は、**そのとおりにすれば通る**ものだけにする。
+
+    「締切に時刻を付ける」だけでは、日付だけの候補（00:00）より前にならない。
+    """
+    problems = schedule_time_problems(deadline, "d", [(option, _at(option))], now=NOW)
+    assert [p.kind for p in problems] == [OPTION_BEFORE_DEADLINE]
+    text = format_time_problems(problems, deadline, now=NOW)
+    assert "日付だけの締切はその日の 23:59" in text
+    assert "締切を前日にする" in text
+    assert "締切と候補の両方に `YYYY-MM-DD HH:MM` で時刻を付けて締切を候補以前に" in text
+    # 直し方どおりにすると通る（前日の締切／両方に時刻を付けて締切を候補以前に）
+    day_only = _at("2026-10-10")
+    assert (
+        schedule_time_problems(parse_deadline("2026-10-09"), "d", [("x", day_only)], now=NOW) == []
+    )
+    timed = _at("2026-10-10 18:00")
+    assert schedule_time_problems(_at("2026-10-10 12:00"), "d", [("x", timed)], now=NOW) == []
+    # 締切に時刻を付けるだけでは、日付だけの候補は締切より前のまま
+    assert schedule_time_problems(_at("2026-10-10 12:00"), "d", [("x", day_only)], now=NOW)
+
+
+@pytest.mark.parametrize(
+    ("option", "explained"),
+    [
+        ("2026-09-24", True),  # 今日の日付だけ → 00:00 なので過去
+        ("2026-09-24 00:00", False),  # 今日の 00:00 を時刻付きで入れた（日付だけではない）
+        ("2026-09-24 10:00", False),  # 今日の過ぎた時刻（時刻は付いている）
+        ("2025-07-03", False),  # 別の日の日付だけ
+    ],
+)
+def test_past_option_today_date_only_is_explained(option, explained):
+    """今日の日付だけの候補が過去になる理由（00:00 扱い）を、その場合にだけ添える。"""
+    deadline = _at("2026-10-01 12:00")
+    problems = schedule_time_problems(deadline, "d", [(option, _at(option))], now=NOW)
+    assert [p.kind for p in problems] == [PAST_OPTION]
+    text = format_time_problems(problems, deadline, now=NOW)
+    assert ("今日の予定なら時刻を付けてください" in text) is explained
+    # 理由（00:00 扱い）も添える
+    assert ("日付だけの候補はその日の 00:00" in text) is explained
+
+
+def test_notes_appear_when_mixed_with_other_problems():
+    """注記の条件は「1件でも当てはまれば」。他の問題の候補が混ざっても出す。"""
+    deadline = _at("2026-10-10 12:00")
+    options = [
+        ("2025-07-03 10:00", _at("2025-07-03 10:00")),  # 過去（今日ではない）
+        ("2026-09-24", _at("2026-09-24")),  # 過去（今日の日付だけ）
+        ("2026-10-05 18:00", _at("2026-10-05 18:00")),  # 締切より前（別の日）
+        ("2026-10-10", _at("2026-10-10")),  # 締切より前（同じ日）
+    ]
+    problems = schedule_time_problems(deadline, "d", options, now=NOW)
+    assert [p.kind for p in problems] == [PAST_OPTION] * 2 + [OPTION_BEFORE_DEADLINE] * 2
+    text = format_time_problems(problems, deadline, now=NOW)
+    assert "今日の予定なら時刻を付けてください" in text
+    assert "締切を前日にする" in text
 
 
 @pytest.mark.parametrize(
@@ -163,6 +255,21 @@ def test_judgement_uses_only_the_given_now(now, deadline, is_past):
     """純粋性: 実際の時計を読まず、引数の now だけで判定する（両方向で固定）。"""
     problem = deadline_problem(_at(deadline), deadline, now=now)
     assert (problem is not None) is is_past
+
+
+@pytest.mark.parametrize(
+    ("now", "deadline", "option", "kinds"),
+    [
+        # now を実際の時計より**先**に置けば、2099 年の候補も過去（締切は now より後）
+        (datetime(2100, 1, 1, tzinfo=TZ), "2100-06-01 12:00", "2099-06-02 10:00", [PAST_OPTION]),
+        # now を実際の時計より**前**に置けば、2025 年の締切・候補も未来
+        (datetime(2020, 1, 1, tzinfo=TZ), "2025-06-01 12:00", "2025-06-02 10:00", []),
+    ],
+)
+def test_schedule_judgement_uses_only_the_given_now(now, deadline, option, kinds):
+    """純粋性（候補の判定も）: schedule_time_problems も引数の now だけで判定する。"""
+    problems = schedule_time_problems(_at(deadline), deadline, [(option, _at(option))], now=now)
+    assert [p.kind for p in problems] == kinds
 
 
 # =====================================================================
@@ -221,6 +328,7 @@ def test_create_rejects_past_option():
             assert CODE in _title(interaction)
             assert "「2025-07-03」" in interaction.last_text
             assert "過去" in interaction.last_text
+            assert "これから先の日時を指定してください。" in interaction.last_text  # どう直すか
             # 過去の候補を「締切より前」としては挙げない
             assert "締切（" not in interaction.last_text
             assert "「2099-10-02」" not in interaction.last_text
@@ -268,6 +376,29 @@ def test_time_check_runs_before_the_permission_check():
             assert CODE in _title(interaction)
             assert channel.asked == [], "日時の検査より先に権限を検査している"
             assert await _count(env.db, "schedules") == 0
+
+    run(_main())
+
+
+@pytest.mark.parametrize(
+    ("deadline", "time_error"),
+    [
+        ("2025-07-02", True),  # 過去の締切 → 日時のエラーが先
+        ("2099-10-01 12:00", False),  # 対照: 日時が正しければ投稿先のエラーになる
+    ],
+)
+def test_time_check_runs_before_resolving_the_channel(deadline, time_error):
+    """投稿先が特定できない（channel 無し・既定の投稿先も無し）ときも、日時の検査が先。"""
+
+    async def _main():
+        async with _env() as env:
+            interaction = _Interaction(env.guild, None)
+            await Schedule.create.callback(
+                env.cog, interaction, title="定例会", options="2099-10-02", deadline=deadline
+            )
+            assert await _count(env.db, "schedules") == 0
+            assert (CODE in _title(interaction)) is time_error
+            assert ("投稿先チャンネルが特定できません" in interaction.last_text) is not time_error
 
     run(_main())
 
